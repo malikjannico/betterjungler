@@ -5,7 +5,11 @@ import {
   getChampionMeta,
 } from '../data/jungleKnowledgePack';
 import { analyzeTeamComposition } from './champSelectEngine';
-import type { WinConditionPlan } from '../types/coaching';
+import type {
+  EnemyJunglePlaybook,
+  LaneGankabilityRow,
+  WinConditionPlan,
+} from '../types/coaching';
 import type { LaneRole, MapSide } from '../types/riot';
 
 export interface WinConditionInput {
@@ -86,6 +90,76 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
     late: `Shadow your main carry, clear vision around Baron/Elder 60s before spawn, and never risk a 50/50 Smite while your strong side wave is pushed against you.`,
   };
 
+  const enemyJgProfile = input.enemyRoles.jungle
+    ? findJungleChampionById(input.enemyRoles.jungle)
+    : undefined;
+  const enemyJgName =
+    enemyJgProfile?.name ??
+    (input.enemyRoles.jungle ? getChampionMeta(input.enemyRoles.jungle).name : 'Enemy Jungler');
+  const enemyBotFocus =
+    scoreLanePlayability(input.enemyRoles.bottom, input.allyRoles.bottom) +
+      scoreLanePlayability(input.enemyRoles.utility, input.allyRoles.utility) * 0.9 >=
+    scoreLanePlayability(input.enemyRoles.top, input.allyRoles.top);
+  const earlyAggressive =
+    enemyJgProfile?.preferredFirstClear === 'three_camp_gank' ||
+    enemyJgProfile?.powerSpike === 'early';
+
+  const enemyJunglePlaybook: EnemyJunglePlaybook = {
+    enemyChampionName: enemyJgName,
+    expectedStart: earlyAggressive
+      ? `${enemyJgName} favors a 3-camp Level 3 rush -> expect 2:45 ${enemyBotFocus ? 'Bot' : 'Top'} gank or buff invade.`
+      : `${enemyJgName} typically full-clears ${enemyBotFocus ? 'Top → Bot' : 'Bot → Top'} for 3:30 Scuttle.`,
+    wardTarget115: earlyAggressive
+      ? 'Enemy Raptor bush or your opposite-side river pixel brush at 1:15'
+      : 'Enemy Raptor bush at 1:15 to reveal clear direction',
+    invadeRisk:
+      enemyJgProfile?.preferredFirstClear === 'three_camp_gank'
+        ? 'high'
+        : enemyJgProfile?.powerSpike === 'early'
+          ? 'medium'
+          : 'low',
+    counterPlan: earlyAggressive
+      ? 'Ping vulnerable side laners at 2:35, keep your second buff warded, or cross-invade if they show opposite.'
+      : 'Match their camp tempo, save 1 Smite charge for 3:30 Crab, and contest with adjacent lane priority.',
+  };
+
+  const midScore = scoreLanePlayability(input.allyRoles.middle, input.enemyRoles.middle);
+  const laneName = (id: number | undefined, fallback: string) =>
+    id ? getChampionMeta(id).name : fallback;
+
+  const laneGankability: LaneGankabilityRow[] = [
+    {
+      lane: 'top',
+      allyLabel: laneName(input.allyRoles.top, 'Ally Top'),
+      enemyLabel: laneName(input.enemyRoles.top, 'Enemy Top'),
+      priorityScore: Math.min(10, Math.round(topScore)),
+      verdict: strongSide === 'top' ? 'Strong Side' : topScore >= 5 ? 'Playable' : 'Weak Side',
+      tip:
+        strongSide === 'top'
+          ? 'Snowball early melee trades & convert into 6:00 Voidgrubs.'
+          : 'Avoid low-odds dives; help break freezes only on Top quadrant cycles.',
+    },
+    {
+      lane: 'middle',
+      allyLabel: laneName(input.allyRoles.middle, 'Ally Mid'),
+      enemyLabel: laneName(input.enemyRoles.middle, 'Enemy Mid'),
+      priorityScore: Math.min(10, Math.round(midScore)),
+      verdict: midScore >= 6 ? 'Strong Side' : midScore >= 3 ? 'Playable' : 'Weak Side',
+      tip: 'Mid priority unlocks first move to Scuttle, Dragon, and Voidgrubs.',
+    },
+    {
+      lane: 'bottom',
+      allyLabel: `${laneName(input.allyRoles.bottom, 'Bot')} + ${laneName(input.allyRoles.utility, 'Sup')}`,
+      enemyLabel: `${laneName(input.enemyRoles.bottom, 'Enemy Bot')} + ${laneName(input.enemyRoles.utility, 'Enemy Sup')}`,
+      priorityScore: Math.min(10, Math.max(1, Math.round(botScore / 1.9))),
+      verdict: strongSide === 'bot' ? 'Strong Side' : botScore >= 9 ? 'Playable' : 'Weak Side',
+      tip:
+        strongSide === 'bot'
+          ? 'Chain Support CC and crash waves directly into Dragon setups.'
+          : 'Path through cautiously if Dragon is contested; trade Top Grubs when behind.',
+    },
+  ];
+
   return {
     allyAnalysis,
     enemyAnalysis,
@@ -95,6 +169,8 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
     weakSide,
     strongSideReason,
     phasePlaybook,
+    enemyJunglePlaybook,
+    laneGankability,
     routes,
     recommendedRouteId: recommendedRoute.id,
     wardSpots,

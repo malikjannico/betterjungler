@@ -380,7 +380,7 @@ function ReplayRiftMap({
           >
             Path Trail
           </button>
-          {enemyPathPoints.length > 0 && (
+          {enemyPathPoints.length > 1 && (
             <button
               type="button"
               aria-pressed={showEnemyGhost}
@@ -580,6 +580,11 @@ function ReplayRiftMap({
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-sky-400" /> Objective
             </span>
+            {enemyPathPoints.length > 1 && (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-0.5 w-3 border-t border-dashed border-rose-400" /> Enemy Ghost
+              </span>
+            )}
           </div>
         </div>
       </div>

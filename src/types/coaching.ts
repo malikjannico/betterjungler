@@ -160,6 +160,30 @@ export interface WardSpot {
   reason: string;
 }
 
+export interface EnemyJunglePlaybook {
+  enemyChampionName: string;
+  expectedStart: string;
+  wardTarget115: string;
+  invadeRisk: 'low' | 'medium' | 'high';
+  counterPlan: string;
+}
+
+export interface LaneGankabilityRow {
+  lane: 'top' | 'middle' | 'bottom';
+  allyLabel: string;
+  enemyLabel: string;
+  priorityScore: number;
+  verdict: 'Strong Side' | 'Playable' | 'Weak Side';
+  tip: string;
+}
+
+export interface SmiteTierStatus {
+  tierName: 'Base' | 'Unleashed' | 'Primal';
+  damage: 600 | 900 | 1200;
+  estimatedStacksRemaining: number;
+  note: string;
+}
+
 export interface WinConditionPlan {
   allyAnalysis: TeamCompAnalysis;
   enemyAnalysis: TeamCompAnalysis;
@@ -173,6 +197,8 @@ export interface WinConditionPlan {
     mid: string;
     late: string;
   };
+  enemyJunglePlaybook: EnemyJunglePlaybook;
+  laneGankability: LaneGankabilityRow[];
   routes: JungleRoute[];
   recommendedRouteId: string;
   wardSpots: WardSpot[];
@@ -375,6 +401,7 @@ export interface PostGameReviewReport {
   mistakes: ReviewFinding[];
   improvements: ReviewFinding[];
   pathPoints: NormalizedMapPoint[];
+  enemyPathPoints: NormalizedMapPoint[];
   markers: TimelineMapMarker[];
 }
 

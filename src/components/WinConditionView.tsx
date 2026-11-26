@@ -21,7 +21,19 @@ export function WinConditionView({
   patchVersion,
   aiConfig,
 }: WinConditionViewProps) {
-  const [selectedRouteId, setSelectedRouteId] = useState<string>(plan.recommendedRouteId);
+  const [routeSelection, setRouteSelection] = useState<{
+    recommendedId: string;
+    selectedId: string;
+  }>({
+    recommendedId: plan.recommendedRouteId,
+    selectedId: plan.recommendedRouteId,
+  });
+  const selectedRouteId =
+    routeSelection.recommendedId === plan.recommendedRouteId
+      ? routeSelection.selectedId
+      : plan.recommendedRouteId;
+  const setSelectedRouteId = (routeId: string) =>
+    setRouteSelection({ recommendedId: plan.recommendedRouteId, selectedId: routeId });
   const [aiBrief, setAiBrief] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -106,6 +118,85 @@ export function WinConditionView({
               {plan.phasePlaybook.late}
             </p>
           </div>
+        </div>
+      </GlassSurface>
+
+      {/* Enemy Jungle Opening Playbook & Lane Gankability Matrix */}
+      <GlassSurface className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
+              Enemy Jungle Opening &amp; Lane Gankability
+            </div>
+            <h3 className="mt-0.5 text-sm font-semibold text-white">
+              vs {plan.enemyJunglePlaybook.enemyChampionName}
+            </h3>
+          </div>
+          <span
+            className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              plan.enemyJunglePlaybook.invadeRisk === 'high'
+                ? 'border-rose-400/40 bg-rose-500/15 text-rose-200'
+                : plan.enemyJunglePlaybook.invadeRisk === 'medium'
+                  ? 'border-amber-400/40 bg-amber-500/15 text-amber-200'
+                  : 'border-emerald-400/35 bg-emerald-500/15 text-emerald-200'
+            }`}
+          >
+            Invade Risk: {plan.enemyJunglePlaybook.invadeRisk}
+          </span>
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div className="lg-inset p-3">
+            <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
+              Expected First Clear
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-slate-100">
+              {plan.enemyJunglePlaybook.expectedStart}
+            </p>
+          </div>
+          <div className="lg-inset p-3">
+            <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
+              1:15 Early Ward Target
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-slate-100">
+              {plan.enemyJunglePlaybook.wardTarget115}
+            </p>
+          </div>
+          <div className="lg-inset p-3">
+            <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
+              Counter Plan
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-slate-100">
+              {plan.enemyJunglePlaybook.counterPlan}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2.5 border-t border-white/[0.08] pt-3.5 md:grid-cols-3">
+          {plan.laneGankability.map((row) => (
+            <div key={row.lane} className="lg-inset p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                  {row.lane} Lane
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+                    row.verdict === 'Strong Side'
+                      ? 'bg-emerald-500/20 text-emerald-200'
+                      : row.verdict === 'Playable'
+                        ? 'bg-sky-500/20 text-sky-200'
+                        : 'bg-slate-500/20 text-slate-300'
+                  }`}
+                >
+                  {row.verdict} · {row.priorityScore}/10
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11px] font-medium text-white">
+                {row.allyLabel} <span className="text-slate-500">vs</span> {row.enemyLabel}
+              </div>
+              <p className="mt-1 text-[11px] leading-snug text-slate-400">{row.tip}</p>
+            </div>
+          ))}
         </div>
       </GlassSurface>
 

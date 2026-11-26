@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { selectLiveActiveRoute } from '../domain/jungleRoutingEngine';
-import { formatClock } from '../domain/liveCoachEngine';
+import { computeSmiteProgression, formatClock } from '../domain/liveCoachEngine';
 import { getItemIconUrl } from '../services/ddragonService';
 import type {
   AdaptiveBuildPlan,
@@ -67,6 +67,34 @@ export function LiveCoachView({
                 {gold}g
               </span>
             </div>
+            {(() => {
+              const smiteStatus = computeSmiteProgression(liveData);
+              const badgeClass =
+                smiteStatus.damage === 1200
+                  ? 'border-emerald-400/35 bg-emerald-500/15 text-emerald-200'
+                  : smiteStatus.damage === 900
+                    ? 'border-sky-400/35 bg-sky-500/15 text-sky-200'
+                    : 'border-white/15 bg-white/[0.05] text-slate-300';
+              return (
+                <div className="lg-inset mt-2.5 px-2.5 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${badgeClass}`}
+                    >
+                      {smiteStatus.damage} Smite · {smiteStatus.tierName}
+                    </span>
+                    {smiteStatus.estimatedStacksRemaining > 0 && (
+                      <span className="text-[10px] tabular-nums text-slate-400">
+                        ~{smiteStatus.estimatedStacksRemaining} treats left
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[10px] leading-snug text-slate-400">
+                    {smiteStatus.note}
+                  </p>
+                </div>
+              );
+            })()}
           </div>
           <div className="mt-3 border-t border-white/[0.08] pt-2.5 text-[11px] text-slate-400">
             Level {liveData.activePlayer.level} ·{' '}

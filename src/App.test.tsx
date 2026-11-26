@@ -38,6 +38,8 @@ describe('BetterJungler App Integration', () => {
     // Switch to Win Plan & Map -> test interactive RiftMap step & ward buttons
     fireEvent.click(screen.getByRole('button', { name: /Win Plan & Map/i }));
     expect(screen.getByText(/Enemy Win Condition to Deny/i)).toBeInTheDocument();
+    expect(screen.getByText(/Enemy Jungle Opening & Lane Gankability/i)).toBeInTheDocument();
+    expect(screen.getByText(/Invade Risk:/i)).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /Summoner's Rift Jungle Route/i })).toBeInTheDocument();
 
     const step1 = screen.getByRole('button', { name: /Step 1:/i });
@@ -55,10 +57,47 @@ describe('BetterJungler App Integration', () => {
     fireEvent.change(selector, { target: { value: 'in_game_mid' } });
     expect(screen.getByText(/Elemental Dragon/i)).toBeInTheDocument();
     expect(screen.getByText(/Adaptive Item Build/i)).toBeInTheDocument();
+    expect(screen.getByText(/900 Smite|1200 Smite|600 Smite/i)).toBeInTheDocument();
 
-    // Post-Game Review + synchronized chart <-> map timeline scrubber
+    // Post-Game Review + synchronized chart <-> map timeline scrubber + ghost path + JSON export
     fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
     expect(screen.getByText(/What You Did Good/i)).toBeInTheDocument();
+    const ghostBtn = screen.getByRole('button', { name: /Enemy Jungler Ghost/i });
+    fireEvent.click(ghostBtn);
+    expect(ghostBtn).toHaveAttribute('aria-pressed', 'true');
+
+    const origCreateObjectUrl = URL.createObjectURL;
+    const origRevokeObjectUrl = URL.revokeObjectURL;
+    const createObjectUrlSpy = vi.fn<(obj: Blob | MediaSource) => string>(
+      () => 'blob:betterjungler-review'
+    );
+    const revokeObjectUrlSpy = vi.fn();
+    URL.createObjectURL = createObjectUrlSpy;
+    URL.revokeObjectURL = revokeObjectUrlSpy;
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /Export Review JSON/i }));
+      expect(screen.getByText(/Exported betterjungler-review-/i)).toBeInTheDocument();
+      expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
+      const exportedBlob = createObjectUrlSpy.mock.calls[0]?.[0] as Blob | undefined;
+      expect(exportedBlob).toBeDefined();
+      const exportedText = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ''));
+        reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob'));
+        reader.readAsText(exportedBlob!);
+      });
+      expect(exportedText).toContain('"schemaVersion": 1');
+      expect(exportedText).not.toContain('puuid');
+      expect(exportedText).not.toContain('summonerName');
+      expect(exportedText).not.toContain('riotId');
+    } finally {
+      clickSpy.mockRestore();
+      URL.createObjectURL = origCreateObjectUrl;
+      URL.revokeObjectURL = origRevokeObjectUrl;
+    }
     const scrubber = screen.getByLabelText('Timeline minute cutoff');
     fireEvent.change(scrubber, { target: { value: '10' } });
     expect(screen.getByText(/Jungle Path & Timeline Replay \(0m – 10m\)/i)).toBeInTheDocument();

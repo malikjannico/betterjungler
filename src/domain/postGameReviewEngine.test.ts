@@ -23,6 +23,7 @@ describe('postGameReviewEngine', () => {
     expect(['S', 'A']).toContain(report.grade);
     expect(report.highlights.length).toBeGreaterThanOrEqual(3);
     expect(report.pathPoints.length).toBe(winMatch.frames.length);
+    expect(report.enemyPathPoints.length).toBe(winMatch.frames.length);
     expect(report.markers.length).toBeGreaterThanOrEqual(5);
 
     const summary = toMatchSummaryRecord(winMatch, report);
@@ -58,5 +59,33 @@ describe('postGameReviewEngine', () => {
     const report = analyzePostGameMatch(matchWithNullWardPos, 'PLATINUM IV');
     expect(report.kpis.controlWardsBought).toBe(matchWithNullWardPos.controlWardsBought);
     expect(report.markers.every((m) => Number.isFinite(m.x) && Number.isFinite(m.y))).toBe(true);
+  });
+
+  it('safely handles null frame positions and non-finite coordinates', () => {
+    expect(normalizeRiotCoordinate(Number.NaN, Number.POSITIVE_INFINITY)).toEqual({
+      x: 500,
+      y: 500,
+    });
+
+    const base = DEMO_POST_GAME_MATCHES[0]!;
+    const corruptFramesMatch = {
+      ...base,
+      frames: base.frames.map((frame, idx) =>
+        idx === 1
+          ? {
+              ...frame,
+              position: null as unknown as { x: number; y: number },
+              enemyJunglerPosition: { x: Number.NaN, y: 2000 },
+            }
+          : frame
+      ),
+    };
+
+    const report = analyzePostGameMatch(corruptFramesMatch, 'PLATINUM IV');
+    expect(report.pathPoints.length).toBe(base.frames.length - 1);
+    expect(report.enemyPathPoints.length).toBe(base.frames.length - 1);
+    expect(
+      report.pathPoints.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    ).toBe(true);
   });
 });

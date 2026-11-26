@@ -4,6 +4,8 @@ import { findJungleChampionById } from '../data/jungleKnowledgePack';
 import {
   KPI_META,
   evaluateDivisionProgress,
+  isGoalTargetMet,
+  syncGoalsWithRollingProgress,
 } from '../domain/climbLadderEngine';
 import type {
   ClimbGoal,
@@ -68,6 +70,11 @@ export function ClimbLadderView({
     [summaries, targetDivision]
   );
 
+  const syncedGoals = useMemo(
+    () => syncGoalsWithRollingProgress(goals, evaluation.comparisons),
+    [goals, evaluation.comparisons]
+  );
+
   async function handlePinSuggested(goal: ClimbGoal) {
     await onUpsertGoal(goal);
   }
@@ -81,9 +88,10 @@ export function ClimbLadderView({
 
   async function handleAddCustomGoal(e: React.FormEvent) {
     e.preventDefault();
+    if (customTarget.trim() === '') return;
     const meta = KPI_META[customMetric];
     const targetNum = Number(customTarget);
-    if (Number.isNaN(targetNum)) return;
+    if (!Number.isFinite(targetNum)) return;
 
     const comp = evaluation.comparisons.find((c) => c.metric === customMetric);
     const goal: ClimbGoal = {
@@ -309,51 +317,73 @@ export function ClimbLadderView({
         <div className="space-y-4">
           <GlassSurface className="p-5">
             <h3 className="mb-2.5 text-xs font-semibold text-white">
-              Your Pinned Climb Goals ({goals.length})
+              Your Pinned Climb Goals ({syncedGoals.length})
             </h3>
-            {goals.length === 0 ? (
+            {syncedGoals.length === 0 ? (
               <p className="text-[11px] text-slate-400">
                 Pin one of the recommended bottleneck goals or create your own on the left.
               </p>
             ) : (
               <div className="divide-y divide-white/[0.06]">
-                {goals.map((goal) => (
-                  <div
-                    key={goal.id}
-                    className="flex items-center justify-between gap-2 py-2.5 text-xs"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => void handleToggleGoalStatus(goal)}
-                      className="flex items-center gap-2.5 text-left"
+                {syncedGoals.map((goal) => {
+                  const isAutoMet = isGoalTargetMet(goal, evaluation.comparisons);
+                  return (
+                    <div
+                      key={goal.id}
+                      className="flex items-center justify-between gap-2 py-2.5 text-xs"
                     >
-                      <span
-                        className={`h-3 w-3 rounded-full border ${
-                          goal.status === 'completed'
-                            ? 'border-emerald-300 bg-emerald-400'
-                            : 'border-slate-500'
-                        }`}
-                      />
-                      <span
-                        className={
-                          goal.status === 'completed'
-                            ? 'text-slate-500 line-through'
-                            : 'font-medium text-white'
+                      <button
+                        type="button"
+                        aria-pressed={goal.status === 'completed'}
+                        disabled={isAutoMet}
+                        title={
+                          isAutoMet
+                            ? 'Target automatically satisfied by rolling 15-game KPIs'
+                            : undefined
                         }
+                        onClick={() => void handleToggleGoalStatus(goal)}
+                        className="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
                       >
-                        {goal.title}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Delete goal ${goal.title}`}
-                      onClick={() => void onDeleteGoal(goal.id)}
-                      className="flex min-h-8 min-w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-rose-400"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
+                        <span
+                          className={`h-3 w-3 shrink-0 rounded-full border ${
+                            goal.status === 'completed'
+                              ? 'border-emerald-300 bg-emerald-400'
+                              : 'border-slate-500'
+                          }`}
+                        />
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={`truncate ${
+                                goal.status === 'completed'
+                                  ? 'text-slate-400 line-through'
+                                  : 'font-medium text-white'
+                              }`}
+                            >
+                              {goal.title}
+                            </span>
+                            {isAutoMet && (
+                              <span className="shrink-0 rounded-full border border-emerald-400/35 bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
+                                Auto-met
+                              </span>
+                            )}
+                          </span>
+                          <span className="block tabular-nums text-[10px] text-slate-400">
+                            Current: {goal.currentValue} · Target: {goal.targetValue}
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete goal ${goal.title}`}
+                        onClick={() => void onDeleteGoal(goal.id)}
+                        className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-rose-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </GlassSurface>

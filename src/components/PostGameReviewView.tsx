@@ -35,6 +35,7 @@ export function PostGameReviewView({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
 
   const selectedMatch =
     matches.find((m) => m.matchId === selectedMatchId) ?? matches[0] ?? null;
@@ -43,6 +44,58 @@ export function PostGameReviewView({
     if (!selectedMatch) return null;
     return analyzePostGameMatch(selectedMatch, targetDivision);
   }, [selectedMatch, targetDivision]);
+
+  function handleExportReview() {
+    if (!report) return;
+    const payload = {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      matchId: report.matchId,
+      championName: report.championName,
+      enemyJunglerName: report.enemyJunglerName,
+      win: report.win,
+      durationSeconds: report.durationSeconds,
+      targetDivision,
+      grade: report.grade,
+      kpis: report.kpis,
+      highlights: report.highlights,
+      mistakes: report.mistakes,
+      improvements: report.improvements,
+    };
+
+    const filename = `betterjungler-review-${report.matchId}.json`;
+    try {
+      const json = JSON.stringify(payload, null, 2);
+      const anchor = document.createElement('a');
+      anchor.download = filename;
+
+      if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        try {
+          anchor.href = url;
+          document.body.appendChild(anchor);
+          anchor.click();
+        } finally {
+          anchor.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      } else {
+        try {
+          anchor.href = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+          document.body.appendChild(anchor);
+          anchor.click();
+        } finally {
+          anchor.remove();
+        }
+      }
+      setExportFeedback(`Exported ${filename}`);
+    } catch (err) {
+      setExportFeedback(
+        err instanceof Error ? err.message : 'Unable to export review JSON'
+      );
+    }
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -136,6 +189,7 @@ export function PostGameReviewView({
                   setActiveMinute(Math.max(1, Math.ceil(m.durationSeconds / 60)));
                   setAiDebrief(null);
                   setAiError(null);
+                  setExportFeedback(null);
                 }}
                 className={`rounded-full px-3 py-1 text-left text-xs transition ${
                   active
@@ -159,19 +213,35 @@ export function PostGameReviewView({
           })}
         </div>
 
-        <button
-          type="button"
-          disabled={syncing || (!canSyncLive && typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__))}
-          onClick={() => void handleSync()}
-          className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-        >
-          {syncing
-            ? 'Syncing...'
-            : canSyncLive
-              ? 'Sync Recent Games'
-              : 'Refresh Sample Games'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={!report}
+            onClick={handleExportReview}
+            className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-slate-200 disabled:opacity-50"
+          >
+            Export Review JSON
+          </button>
+          <button
+            type="button"
+            disabled={syncing || (!canSyncLive && typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__))}
+            onClick={() => void handleSync()}
+            className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {syncing
+              ? 'Syncing...'
+              : canSyncLive
+                ? 'Sync Recent Games'
+                : 'Refresh Sample Games'}
+          </button>
+        </div>
       </div>
+
+      {exportFeedback && (
+        <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+          {exportFeedback}
+        </p>
+      )}
 
       {syncError && (
         <p className="rounded-lg border border-rose-400/35 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">
@@ -245,6 +315,7 @@ export function PostGameReviewView({
         durationSeconds={selectedMatch.durationSeconds}
         patchVersion={patchVersion}
         pathPoints={report.pathPoints}
+        enemyPathPoints={report.enemyPathPoints}
         markers={report.markers}
         activeMinute={activeMinute ?? Math.max(1, Math.ceil(selectedMatch.durationSeconds / 60))}
         onChangeMinute={setActiveMinute}

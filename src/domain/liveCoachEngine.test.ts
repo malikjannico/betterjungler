@@ -4,6 +4,7 @@ import {
   computeAdaptiveBuild,
   computeMacroGuidance,
   computeObjectiveWindows,
+  computeSmiteProgression,
   formatClock,
   resolveSelfPlayer,
 } from './liveCoachEngine';
@@ -140,5 +141,21 @@ describe('liveCoachEngine', () => {
     const elder = soulSweep.find((o) => o.id === 'dragon');
     expect(elder?.name).toBe('Elder Dragon');
     expect(elder?.secondsRemaining).toBe(210); // 1250 + 360 - 1400
+  });
+
+  it('tracks Base (600), Unleashed (900), and Primal (1200) Smite progression', () => {
+    const early = computeSmiteProgression(DEMO_IN_GAME_EARLY);
+    expect(early.tierName).toBe('Base');
+    expect(early.damage).toBe(600);
+    expect(early.estimatedStacksRemaining).toBeGreaterThan(0);
+
+    const mid = computeSmiteProgression(DEMO_IN_GAME_MID);
+    expect(['Unleashed', 'Primal']).toContain(mid.tierName);
+    expect(mid.damage).toBeGreaterThanOrEqual(900);
+
+    const full = computeSmiteProgression(DEMO_IN_GAME_FULL_BUILD);
+    expect(full.tierName).toBe('Primal');
+    expect(full.damage).toBe(1200);
+    expect(full.estimatedStacksRemaining).toBe(0);
   });
 });

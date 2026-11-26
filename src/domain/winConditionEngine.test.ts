@@ -22,6 +22,10 @@ describe('winConditionEngine', () => {
       expect(step.y).toBeLessThanOrEqual(1000);
     }
     expect(plan.wardSpots.length).toBeGreaterThanOrEqual(4);
+    expect(plan.enemyJunglePlaybook.enemyChampionName).toBe('Nocturne');
+    expect(['low', 'medium', 'high']).toContain(plan.enemyJunglePlaybook.invadeRisk);
+    expect(plan.enemyJunglePlaybook.wardTarget115.length).toBeGreaterThan(10);
+    expect(plan.laneGankability.map((l) => l.lane)).toEqual(['top', 'middle', 'bottom']);
   });
 
   it('generates Red-side routes when playing on red side', () => {

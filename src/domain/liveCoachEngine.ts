@@ -12,6 +12,7 @@ import type {
   JungleChampionProfile,
   MacroCue,
   ObjectiveWindow,
+  SmiteTierStatus,
   ThreatAssessment,
   WinConditionPlan,
 } from '../types/coaching';
@@ -674,4 +675,45 @@ export function computeMacroGuidance(
   }
 
   return cues;
+}
+
+/**
+ * Estimates jungle companion / Smite damage progression (600 -> 900 -> 1200)
+ * from live match clock and jungle CS tempo.
+ */
+export function computeSmiteProgression(liveData: LiveGameData): SmiteTierStatus {
+  const selfPlayer = resolveSelfPlayer(liveData);
+  const rawCs = selfPlayer?.scores.creepScore ?? 0;
+  const rawGameTime = liveData.gameData.gameTime;
+  const cs = Number.isFinite(rawCs) ? Math.max(0, rawCs) : 0;
+  const mins = Number.isFinite(rawGameTime) ? Math.max(0, rawGameTime / 60) : 0;
+  const estimatedTreats = Math.min(
+    40,
+    Math.floor(cs / 3.6) + Math.floor(mins / 1.5)
+  );
+
+  if (estimatedTreats >= 40 || (mins >= 18 && cs >= 105)) {
+    return {
+      tierName: 'Primal',
+      damage: 1200,
+      estimatedStacksRemaining: 0,
+      note: 'Primal Smite active (1200 true damage) — pair burst spells cleanly at 1200 HP.',
+    };
+  }
+  if (estimatedTreats >= 20 || (mins >= 10 && cs >= 55)) {
+    const remaining = Math.max(1, 40 - estimatedTreats);
+    return {
+      tierName: 'Unleashed',
+      damage: 900,
+      estimatedStacksRemaining: remaining,
+      note: `~${remaining} companion treats left until 1200 Primal Smite.`,
+    };
+  }
+  const remaining = Math.max(1, 20 - estimatedTreats);
+  return {
+    tierName: 'Base',
+    damage: 600,
+    estimatedStacksRemaining: remaining,
+    note: `Keep cycling camps (~${remaining} treats left for 900 Unleashed Smite).`,
+  };
 }

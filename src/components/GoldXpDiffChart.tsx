@@ -43,6 +43,7 @@ export function GoldXpDiffChart({
   const padY = 18;
 
   const values = series.points.map((p) => p[metric]);
+  const peakMetricLead = Math.max(0, ...values);
   const maxAbs = Math.max(500, ...values.map((v) => Math.abs(v)));
   const zeroY = height / 2;
 
@@ -71,7 +72,10 @@ export function GoldXpDiffChart({
         <div className="flex items-center gap-3 text-[11px]">
           <span className="text-slate-400">
             Peak Lead:{' '}
-            <strong className="tabular-nums text-emerald-300">+{series.maxLead}g</strong>
+            <strong className="tabular-nums text-emerald-300">
+              +{peakMetricLead}
+              {metric === 'goldDiff' ? 'g' : ' XP'}
+            </strong>
           </span>
 
           <div className="lg-segmented flex gap-0.5">
@@ -110,26 +114,31 @@ export function GoldXpDiffChart({
         aria-valuemin={series.points[0]!.minute}
         aria-valuemax={series.points[series.points.length - 1]!.minute}
         aria-valuenow={activeCoord.pt.minute}
+        aria-valuetext={`${activeCoord.pt.minute} minutes, ${
+          metric === 'goldDiff'
+            ? `${activeCoord.pt.goldDiff} gold diff`
+            : `${activeCoord.pt.xpDiff} XP diff`
+        }`}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowRight' && controlledIdx + 1 < coords.length) {
+          const selectIndex = (idx: number) => {
             e.preventDefault();
-            const nextPt = coords[controlledIdx + 1]!.pt;
-            setInternalIdx(controlledIdx + 1);
-            onSelectMinute?.(nextPt.minute);
-          } else if (e.key === 'ArrowLeft' && controlledIdx > 0) {
-            e.preventDefault();
-            const prevPt = coords[controlledIdx - 1]!.pt;
-            setInternalIdx(controlledIdx - 1);
-            onSelectMinute?.(prevPt.minute);
+            setInternalIdx(idx);
+            onSelectMinute?.(coords[idx]!.pt.minute);
+          };
+          if (
+            (e.key === 'ArrowRight' || e.key === 'ArrowUp') &&
+            controlledIdx + 1 < coords.length
+          ) {
+            selectIndex(controlledIdx + 1);
+          } else if (
+            (e.key === 'ArrowLeft' || e.key === 'ArrowDown') &&
+            controlledIdx > 0
+          ) {
+            selectIndex(controlledIdx - 1);
           } else if (e.key === 'Home') {
-            e.preventDefault();
-            setInternalIdx(0);
-            onSelectMinute?.(coords[0]!.pt.minute);
+            selectIndex(0);
           } else if (e.key === 'End') {
-            e.preventDefault();
-            const last = coords.length - 1;
-            setInternalIdx(last);
-            onSelectMinute?.(coords[last]!.pt.minute);
+            selectIndex(coords.length - 1);
           }
         }}
         className="lg-inset p-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"

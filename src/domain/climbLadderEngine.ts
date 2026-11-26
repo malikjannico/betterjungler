@@ -68,6 +68,36 @@ export const KPI_META: Record<
   },
 };
 
+export function isGoalTargetMet(
+  goal: ClimbGoal,
+  comparisons: DivisionBenchmarkComparison[]
+): boolean {
+  const hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure');
+  if (!hasMatches) return false;
+  const matchComp = comparisons.find((c) => c.metric === goal.metric);
+  if (!matchComp) return false;
+  return goal.lowerIsBetter
+    ? matchComp.currentValue <= goal.targetValue
+    : matchComp.currentValue >= goal.targetValue;
+}
+
+export function syncGoalsWithRollingProgress(
+  goals: ClimbGoal[],
+  comparisons: DivisionBenchmarkComparison[]
+): ClimbGoal[] {
+  const hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure');
+  return goals.map((goal) => {
+    const matchComp = comparisons.find((c) => c.metric === goal.metric);
+    if (!matchComp || !hasMatches) return goal;
+    const met = isGoalTargetMet(goal, comparisons);
+    return {
+      ...goal,
+      currentValue: matchComp.currentValue,
+      status: met ? 'completed' : goal.status,
+    };
+  });
+}
+
 export function parseTargetTier(targetDivision: string): DivisionTier {
   const upper = targetDivision.toUpperCase();
   const tiers: DivisionTier[] = [

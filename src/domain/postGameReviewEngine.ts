@@ -24,9 +24,22 @@ export function normalizeRiotCoordinate(
   riotX: number,
   riotY: number
 ): { x: number; y: number } {
-  const x = clamp(Math.round((riotX / RIOT_MAP_MAX) * 1000), 0, 1000);
-  const y = clamp(Math.round(1000 - (riotY / RIOT_MAP_MAX) * 1000), 0, 1000);
+  const safeX = Number.isFinite(riotX) ? riotX : RIOT_MAP_MAX / 2;
+  const safeY = Number.isFinite(riotY) ? riotY : RIOT_MAP_MAX / 2;
+  const x = clamp(Math.round((safeX / RIOT_MAP_MAX) * 1000), 0, 1000);
+  const y = clamp(Math.round(1000 - (safeY / RIOT_MAP_MAX) * 1000), 0, 1000);
   return { x, y };
+}
+
+function toNormalizedFramePoint(
+  minute: number,
+  pos: { x: number; y: number } | null | undefined
+): NormalizedMapPoint[] {
+  if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+    return [];
+  }
+  const norm = normalizeRiotCoordinate(pos.x, pos.y);
+  return [{ minute, x: norm.x, y: norm.y }];
 }
 
 function getFrameAtMinute(match: MatchV5Detail, targetMinute: number) {
@@ -109,14 +122,13 @@ export function analyzePostGameMatch(
   };
 
   // Build path trail & timeline markers
-  const pathPoints: NormalizedMapPoint[] = match.frames.map((frame) => {
-    const norm = normalizeRiotCoordinate(frame.position.x, frame.position.y);
-    return {
-      minute: frame.minute,
-      x: norm.x,
-      y: norm.y,
-    };
-  });
+  const pathPoints: NormalizedMapPoint[] = match.frames.flatMap((frame) =>
+    toNormalizedFramePoint(frame.minute, frame.position)
+  );
+
+  const enemyPathPoints: NormalizedMapPoint[] = match.frames.flatMap((frame) =>
+    toNormalizedFramePoint(frame.minute, frame.enemyJunglerPosition)
+  );
 
   const preObjSet = new Set(preObjDeathEvents.map((e) => e.timestampSec));
   const markers: TimelineMapMarker[] = [];
@@ -392,6 +404,7 @@ export function analyzePostGameMatch(
     mistakes,
     improvements,
     pathPoints,
+    enemyPathPoints,
     markers,
   };
 }
