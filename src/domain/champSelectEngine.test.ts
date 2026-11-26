@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  JUNGLE_CHAMPIONS,
+  getChampionMeta,
+  hydrateDdragonCatalog,
+} from '../data/jungleKnowledgePack';
+import {
   analyzeTeamComposition,
   recommendJunglePicks,
   sanitizeChampSelectSession,
@@ -54,5 +59,21 @@ describe('champSelectEngine', () => {
       r.reasons.some((reason) => reason.includes('High-Elo Sample'))
     );
     expect(sampled).toBeDefined();
+  });
+
+  it('includes expanded 32-jungler roster and resolves dynamic Data Dragon metadata', () => {
+    expect(JUNGLE_CHAMPIONS.length).toBeGreaterThanOrEqual(32);
+
+    hydrateDdragonCatalog({
+      patch: '16.1.1',
+      championsById: {
+        9999: { id: 9999, key: 'TestMage', name: 'Test Mage', tags: ['Mage'] },
+      },
+      itemsById: {},
+    });
+
+    const meta = getChampionMeta(9999);
+    expect(meta.name).toBe('Test Mage');
+    expect(meta.damageProfile).toBe('ap');
   });
 });

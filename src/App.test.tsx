@@ -9,6 +9,12 @@ vi.mock('./services/ddragonService', async () => {
   return {
     ...actual,
     fetchLatestPatchVersion: () => Promise.resolve('16.1.1'),
+    syncFullDdragonCatalog: () =>
+      Promise.resolve({
+        patch: '16.1.1',
+        championsById: {},
+        itemsById: {},
+      }),
   };
 });
 
@@ -55,6 +61,9 @@ describe('App HUD Integration', () => {
     // Open Post-Game Review tab
     fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
     expect(
+      screen.getByRole('img', { name: /Gold and XP Diff vs Enemy Jungler Chart/i })
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole('img', { name: /Post-Game Match-V5 Timeline Map/i })
     ).toBeInTheDocument();
     expect(screen.getByText('What You Did Good')).toBeInTheDocument();
@@ -76,5 +85,13 @@ describe('App HUD Integration', () => {
       fireEvent.click(pinButtons[0]);
     }
     expect(await screen.findByText(/Your Pinned Climb Goals \(1\)/i)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /LP Progression Chart/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Multi-Game Death Heatmap/i })).toBeInTheDocument();
+
+    // Open Settings and verify Overlay Ergonomics controls
+    fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
+    expect(screen.getByLabelText('Compact HUD Corner')).toBeInTheDocument();
+    expect(screen.getByLabelText('Global Hotkey')).toBeInTheDocument();
+    expect(screen.getByLabelText('HUD Opacity')).toBeInTheDocument();
   });
 });

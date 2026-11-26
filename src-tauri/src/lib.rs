@@ -20,7 +20,9 @@ use crate::lcu::{RunePageSpec, SanitizedChampSelectSession};
 use crate::live_client::LiveClientPollResult;
 use crate::overlay::OverlayController;
 use crate::riot_api::SummonerProfileSummary;
-use crate::storage::{ClimbGoalRecord, UserSettings};
+use crate::storage::{
+    tier_rank_to_absolute_lp, ClimbGoalRecord, LpHistoryRecord, UserSettings,
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,6 +126,25 @@ async fn fetch_summoner_profile(
     let profile =
         riot_api::fetch_summoner_profile(&state.riot_web_client, &api_key, &riot_id, &region)
             .await?;
+    if profile.tier != "UNRANKED" {
+        if let Ok(conn) = state.db.lock() {
+            let _ = storage::append_lp_snapshot(
+                &conn,
+                &LpHistoryRecord {
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    tier: profile.tier.clone(),
+                    rank: profile.rank.clone(),
+                    league_points: profile.league_points,
+                    absolute_lp: tier_rank_to_absolute_lp(
+                        &profile.tier,
+                        &profile.rank,
+                        profile.league_points,
+                    ),
+                    win: true,
+                },
+            );
+        }
+    }
     if let Ok(mut rt) = state.runtime.lock() {
         rt.summoner_profile = Some(profile.clone());
     }
@@ -325,6 +346,26 @@ async fn generate_ai_debrief(
     ai_coach::generate_ai_debrief(&state.riot_web_client, &config, api_key, &context).await
 }
 
+#[tauri::command]
+fn update_overlay_preferences(
+    app: AppHandle,
+    state: State<'_, Arc<SharedState>>,
+    hud_corner: String,
+    overlay_hotkey: String,
+) -> AppResult<()> {
+    state.overlay.set_corner(&hud_corner);
+    state.overlay.rebind_hotkey(&app, &overlay_hotkey)
+}
+
+#[tauri::command]
+fn get_lp_history(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<LpHistoryRecord>> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::list_lp_history(&conn, 20)
+}
+
 fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(1800));
@@ -405,8 +446,14 @@ pub fn run() {
             let loopback_client = lcu::build_loopback_client()?;
             let riot_web_client = riot_api::build_riot_web_client()?;
             let overlay_ctrl = OverlayController::default();
+            let initial_settings = storage::load_settings(&conn).unwrap_or_default();
+            overlay_ctrl.set_corner(&initial_settings.hud_corner);
 
-            overlay::setup_overlay_controls(app.handle(), overlay_ctrl.clone())?;
+            overlay::setup_overlay_controls(
+                app.handle(),
+                overlay_ctrl.clone(),
+                &initial_settings.overlay_hotkey,
+            )?;
 
             let shared = Arc::new(SharedState {
                 db: Mutex::new(conn),
@@ -437,7 +484,9 @@ pub fn run() {
             refresh_high_elo_meta,
             get_cached_meta_snapshot,
             save_ai_api_key,
-            generate_ai_debrief
+            generate_ai_debrief,
+            update_overlay_preferences,
+            get_lp_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running BetterJungler");

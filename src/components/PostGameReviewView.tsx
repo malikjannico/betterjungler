@@ -12,6 +12,7 @@ import { analyzePostGameMatch } from '../domain/postGameReviewEngine';
 import { generateAiDebrief } from '../services/tauriBridge';
 import type { AiCoachConfig } from '../types/coaching';
 import type { MatchV5Detail } from '../types/riot';
+import { GoldXpDiffChart } from './GoldXpDiffChart';
 import { PostGameTimelineMap } from './PostGameTimelineMap';
 
 interface PostGameReviewViewProps {
@@ -205,6 +206,9 @@ export function PostGameReviewView({
           ))}
         </div>
       </div>
+
+      {/* Gold & XP Diff Curve */}
+      <GoldXpDiffChart key={`chart-${selectedMatch.matchId}`} match={selectedMatch} />
 
       {/* Interactive SVG Timeline Replay Map */}
       <PostGameTimelineMap

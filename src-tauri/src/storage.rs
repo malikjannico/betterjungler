@@ -32,6 +32,10 @@ impl Default for AiCoachConfig {
     }
 }
 
+fn default_hud_corner() -> String {
+    "top-right".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSettings {
@@ -39,6 +43,8 @@ pub struct UserSettings {
     pub region: String,
     pub lol_install_path: String,
     pub overlay_hotkey: String,
+    #[serde(default = "default_hud_corner")]
+    pub hud_corner: String,
     pub hud_opacity: u8,
     pub target_division: String,
     pub has_api_key: bool,
@@ -53,12 +59,24 @@ impl Default for UserSettings {
             region: "EUW1".to_string(),
             lol_install_path: r"C:\Riot Games\League of Legends".to_string(),
             overlay_hotkey: "Alt+J".to_string(),
+            hud_corner: default_hud_corner(),
             hud_opacity: 92,
             target_division: "PLATINUM IV".to_string(),
             has_api_key: false,
             ai_coach: AiCoachConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LpHistoryRecord {
+    pub timestamp: String,
+    pub tier: String,
+    pub rank: String,
+    pub league_points: i32,
+    pub absolute_lp: i32,
+    pub win: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +159,16 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             region TEXT NOT NULL,
             payload TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS lp_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            tier TEXT NOT NULL,
+            rank TEXT NOT NULL,
+            league_points INTEGER NOT NULL,
+            absolute_lp INTEGER NOT NULL,
+            win INTEGER NOT NULL
         );
         "#,
     )
@@ -316,6 +344,74 @@ pub fn load_meta_snapshot(conn: &Connection) -> AppResult<Option<Value>> {
     }
 }
 
+pub fn tier_rank_to_absolute_lp(tier: &str, rank: &str, lp: i32) -> i32 {
+    let tier_base = match tier.to_uppercase().as_str() {
+        "IRON" => 0,
+        "BRONZE" => 400,
+        "SILVER" => 800,
+        "GOLD" => 1200,
+        "PLATINUM" => 1600,
+        "EMERALD" => 2000,
+        "DIAMOND" => 2400,
+        "MASTER" | "GRANDMASTER" | "CHALLENGER" => 2800,
+        _ => 1200,
+    };
+    let div_offset = match rank.to_uppercase().as_str() {
+        "IV" => 0,
+        "III" => 100,
+        "II" => 200,
+        "I" => 300,
+        _ => 0,
+    };
+    tier_base + div_offset + lp
+}
+
+pub fn append_lp_snapshot(conn: &Connection, rec: &LpHistoryRecord) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO lp_history (timestamp, tier, rank, league_points, absolute_lp, win)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            rec.timestamp,
+            rec.tier,
+            rec.rank,
+            rec.league_points,
+            rec.absolute_lp,
+            if rec.win { 1 } else { 0 }
+        ],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    Ok(())
+}
+
+pub fn list_lp_history(conn: &Connection, limit: usize) -> AppResult<Vec<LpHistoryRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT timestamp, tier, rank, league_points, absolute_lp, win
+             FROM lp_history ORDER BY id DESC LIMIT ?1",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(params![limit as i64], |row| {
+            Ok(LpHistoryRecord {
+                timestamp: row.get(0)?,
+                tier: row.get(1)?,
+                rank: row.get(2)?,
+                league_points: row.get(3)?,
+                absolute_lp: row.get(4)?,
+                win: row.get::<_, i64>(5)? != 0,
+            })
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+    }
+    out.reverse();
+    Ok(out)
+}
+
 pub fn save_riot_api_key(api_key: &str) -> AppResult<()> {
     let trimmed = api_key.trim();
     if trimmed.is_empty() {
@@ -426,5 +522,18 @@ mod tests {
         save_meta_snapshot(&conn, "16.1", "EUW1", &snap).expect("save snapshot");
         let loaded_snap = load_meta_snapshot(&conn).expect("load snapshot").unwrap();
         assert_eq!(loaded_snap["sampleMatches"], 12);
+
+        let lp = LpHistoryRecord {
+            timestamp: "2026-11-26T20:00:00Z".to_string(),
+            tier: "GOLD".to_string(),
+            rank: "II".to_string(),
+            league_points: 64,
+            absolute_lp: tier_rank_to_absolute_lp("GOLD", "II", 64),
+            win: true,
+        };
+        assert_eq!(lp.absolute_lp, 1464);
+        append_lp_snapshot(&conn, &lp).expect("append lp");
+        let hist = list_lp_history(&conn, 10).expect("list lp");
+        assert_eq!(hist.len(), 1);
     }
 }

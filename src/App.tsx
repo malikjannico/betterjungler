@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import {
   Activity,
   BarChart3,
@@ -24,6 +25,7 @@ import {
 } from './domain/liveCoachEngine';
 import {
   DEMO_HIGH_ELO_SNAPSHOT,
+  DEMO_LP_HISTORY,
   DEMO_POST_GAME_MATCHES,
   DEMO_ROLLING_SUMMARIES,
 } from './domain/postGameFixtures';
@@ -34,7 +36,10 @@ import {
   getDemoRuntimeState,
 } from './domain/simulationFixtures';
 import { generateWinConditionPlan } from './domain/winConditionEngine';
-import { fetchLatestPatchVersion } from './services/ddragonService';
+import {
+  fetchLatestPatchVersion,
+  syncFullDdragonCatalog,
+} from './services/ddragonService';
 import {
   deleteClimbGoal,
   getAppState,
@@ -42,6 +47,7 @@ import {
   getCachedMetaSnapshot,
   isTauriEnvironment,
   loadClimbGoals,
+  loadLpHistory,
   loadSettings,
   refreshHighEloMeta,
   setOverlayMode,
@@ -54,6 +60,8 @@ import type {
   ClimbGoal,
   DemoScenarioId,
   HighEloMetaSnapshot,
+  HudCorner,
+  LpHistoryPoint,
   OverlayMode,
   UserSettings,
 } from './types/coaching';
@@ -85,14 +93,42 @@ function extractRoleMap(
   return map;
 }
 
+function matchesHotkey(e: KeyboardEvent, hotkey: string): boolean {
+  const key = e.key.toLowerCase();
+  if (hotkey === 'Alt+J') return e.altKey && key === 'j';
+  if (hotkey === 'Alt+B') return e.altKey && key === 'b';
+  if (hotkey === 'Ctrl+Shift+J') return e.ctrlKey && e.shiftKey && key === 'j';
+  if (hotkey === 'F8') return e.key === 'F8';
+  return e.altKey && key === 'j';
+}
+
+function cornerAlignmentClasses(corner: HudCorner): string {
+  switch (corner) {
+    case 'top-left':
+      return 'items-start justify-start';
+    case 'bottom-right':
+      return 'items-end justify-end';
+    case 'bottom-left':
+      return 'items-end justify-start';
+    case 'top-right':
+    default:
+      return 'items-start justify-end';
+  }
+}
+
 export function App() {
   const [demoScenario, setDemoScenario] = useState<DemoScenarioId>('champ_select');
   const [liveState, setLiveState] = useState<AppRuntimeState | null>(null);
   const [overlayMode, setMode] = useState<OverlayMode>('expanded');
   const [activeTab, setActiveTab] = useState<ActiveTab>('champ_select');
   const [patchVersion, setPatchVersion] = useState<string>('16.1.1');
+  const [catalogCounts, setCatalogCounts] = useState<{ champions: number; items: number }>({
+    champions: 0,
+    items: 0,
+  });
   const [summonerProfile, setSummonerProfile] = useState<SummonerProfileSummary | null>(null);
   const [matches, setMatches] = useState<MatchV5Detail[]>(DEMO_POST_GAME_MATCHES);
+  const [lpHistory, setLpHistory] = useState<LpHistoryPoint[]>(DEMO_LP_HISTORY);
   const [climbGoals, setClimbGoals] = useState<ClimbGoal[]>([]);
   const [highEloMeta, setHighEloMeta] = useState<HighEloMetaSnapshot | null>(
     DEMO_HIGH_ELO_SNAPSHOT
@@ -102,6 +138,7 @@ export function App() {
     region: 'EUW1',
     lolInstallPath: 'C:\\Riot Games\\League of Legends',
     overlayHotkey: 'Alt+J',
+    hudCorner: 'top-right',
     hudOpacity: 92,
     targetDivision: 'PLATINUM IV',
     hasApiKey: false,
@@ -119,7 +156,15 @@ export function App() {
       if (active) setSettings(s);
     });
     void fetchLatestPatchVersion().then((patch) => {
-      if (active) setPatchVersion(patch);
+      if (!active) return;
+      setPatchVersion(patch);
+      void syncFullDdragonCatalog(patch).then((catalog) => {
+        if (!active) return;
+        setCatalogCounts({
+          champions: Object.keys(catalog.championsById).length,
+          items: Object.keys(catalog.itemsById).length,
+        });
+      });
     });
     void getAppState().then((state) => {
       if (active && state) setLiveState(state);
@@ -132,6 +177,9 @@ export function App() {
     });
     void getCachedMatches().then((cached) => {
       if (active && cached.length > 0) setMatches(cached);
+    });
+    void loadLpHistory().then((hist) => {
+      if (active && hist.length > 0) setLpHistory(hist);
     });
 
     const unsubPromise = subscribeGameState(
@@ -153,7 +201,7 @@ export function App() {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.altKey && e.key.toLowerCase() === 'j') {
+      if (matchesHotkey(e, settings.overlayHotkey)) {
         e.preventDefault();
         setMode((prev) => {
           const next: OverlayMode = prev === 'expanded' ? 'compact' : 'expanded';
@@ -164,7 +212,7 @@ export function App() {
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [settings.overlayHotkey]);
 
   const runtimeState: AppRuntimeState = useMemo(() => {
     if (demoScenario !== 'idle') {
@@ -267,9 +315,16 @@ export function App() {
     setHighEloMeta(snap);
   }
 
+  const hudStyle = {
+    '--hud-alpha': String(Math.max(0.5, Math.min(1, settings.hudOpacity / 100))),
+  } as CSSProperties;
+
   if (overlayMode === 'compact') {
     return (
-      <div className="flex min-h-full items-start justify-end p-3">
+      <div
+        style={hudStyle}
+        className={`flex min-h-full p-3 ${cornerAlignmentClasses(settings.hudCorner)}`}
+      >
         <CompactHudBar
           phase={runtimeState.phase}
           gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
@@ -286,7 +341,7 @@ export function App() {
   const canSyncLive = isTauriEnvironment() && settings.hasApiKey;
 
   return (
-    <div className="flex min-h-full items-center justify-center p-3">
+    <div style={hudStyle} className="flex min-h-full items-center justify-center p-3">
       <div className="hud-panel flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl text-slate-100">
         {/* Top Bar */}
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-2.5">
@@ -309,7 +364,7 @@ export function App() {
               <p className="text-[10px] text-slate-400">
                 LCU: {runtimeState.lcuConnected ? 'Connected' : 'Standby'} • Live API:{' '}
                 {runtimeState.liveClientConnected ? 'Active' : 'Standby'} • Press{' '}
-                {settings.overlayHotkey} for Compact Click-Through HUD
+                {settings.overlayHotkey} for Compact HUD ({settings.hudCorner})
               </p>
             </div>
           </div>
@@ -412,6 +467,8 @@ export function App() {
               summonerProfile={effectiveProfile}
               targetDivision={settings.targetDivision}
               summaries={rollingSummaries}
+              matches={matches}
+              lpHistory={lpHistory}
               goals={climbGoals}
               highEloMeta={highEloMeta}
               canSyncLive={canSyncLive}
@@ -424,9 +481,13 @@ export function App() {
             <SettingsView
               settings={settings}
               patchVersion={patchVersion}
+              catalogCounts={catalogCounts}
               onSettingsChanged={setSettings}
               onProfileLoaded={setSummonerProfile}
-              onPatchSynced={setPatchVersion}
+              onPatchSynced={(patch, counts) => {
+                setPatchVersion(patch);
+                if (counts) setCatalogCounts(counts);
+              }}
             />
           )}
         </main>

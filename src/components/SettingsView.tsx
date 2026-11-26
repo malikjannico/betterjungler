@@ -1,21 +1,29 @@
 import { useState } from 'react';
-import { Bot, Check, KeyRound, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Bot, Check, KeyRound, RefreshCw, ShieldCheck, Sliders } from 'lucide-react';
+import { syncFullDdragonCatalog } from '../services/ddragonService';
 import {
   fetchSummonerProfile,
   saveAiApiKey,
   saveRiotApiKey,
   saveSettings,
   syncDdragonPatch,
+  updateOverlayPreferences,
 } from '../services/tauriBridge';
-import type { AiProvider, UserSettings } from '../types/coaching';
+import type {
+  AiProvider,
+  HudCorner,
+  OverlayHotkeyPreset,
+  UserSettings,
+} from '../types/coaching';
 import type { SummonerProfileSummary } from '../types/riot';
 
 interface SettingsViewProps {
   settings: UserSettings;
   patchVersion: string;
+  catalogCounts: { champions: number; items: number };
   onSettingsChanged: (next: UserSettings) => void;
   onProfileLoaded: (profile: SummonerProfileSummary) => void;
-  onPatchSynced: (patch: string) => void;
+  onPatchSynced: (patch: string, counts?: { champions: number; items: number }) => void;
 }
 
 const REGIONS = ['EUW1', 'EUN1', 'NA1', 'KR', 'BR1', 'JP1', 'OC1', 'TR1', 'LA1', 'LA2'];
@@ -27,10 +35,18 @@ const DIVISIONS = [
   'DIAMOND IV',
   'MASTER',
 ];
+const HUD_CORNERS: Array<{ value: HudCorner; label: string }> = [
+  { value: 'top-right', label: 'Top-Right' },
+  { value: 'top-left', label: 'Top-Left' },
+  { value: 'bottom-right', label: 'Bottom-Right' },
+  { value: 'bottom-left', label: 'Bottom-Left' },
+];
+const HOTKEY_PRESETS: OverlayHotkeyPreset[] = ['Alt+J', 'Alt+B', 'Ctrl+Shift+J', 'F8'];
 
 export function SettingsView({
   settings,
   patchVersion,
+  catalogCounts,
   onSettingsChanged,
   onProfileLoaded,
   onPatchSynced,
@@ -44,8 +60,9 @@ export function SettingsView({
   async function handleSaveSettings() {
     setErrorMessage(null);
     await saveSettings(draft);
+    await updateOverlayPreferences(draft.hudCorner, draft.overlayHotkey);
     onSettingsChanged(draft);
-    setStatusMessage('Settings saved.');
+    setStatusMessage('Preferences & Overlay Ergonomics saved.');
   }
 
   async function handleSaveApiKey() {
@@ -78,8 +95,15 @@ export function SettingsView({
 
   async function handleSyncPatch() {
     const patch = await syncDdragonPatch();
-    onPatchSynced(patch);
-    setStatusMessage(`Data Dragon synced to patch ${patch}.`);
+    const catalog = await syncFullDdragonCatalog(patch);
+    const counts = {
+      champions: Object.keys(catalog.championsById).length,
+      items: Object.keys(catalog.itemsById).length,
+    };
+    onPatchSynced(catalog.patch, counts);
+    setStatusMessage(
+      `Data Dragon synced to patch ${catalog.patch} (${counts.champions} champions, ${counts.items} items).`
+    );
   }
 
   async function handleSaveAiKey() {
@@ -223,8 +247,11 @@ export function SettingsView({
 
           <div className="flex items-center justify-between rounded-lg bg-slate-900/70 px-3 py-2 text-xs">
             <div>
-              <div className="font-semibold text-slate-200">Data Dragon Patch</div>
-              <div className="text-[11px] text-slate-400">Active version: {patchVersion}</div>
+              <div className="font-semibold text-slate-200">Data Dragon Patch &amp; Catalog</div>
+              <div className="text-[11px] text-slate-400">
+                Patch {patchVersion} • {catalogCounts.champions} champions / {catalogCounts.items}{' '}
+                items hydrated
+              </div>
             </div>
             <button
               type="button"
@@ -234,6 +261,72 @@ export function SettingsView({
               <RefreshCw className="h-3.5 w-3.5" />
               Sync Patch
             </button>
+          </div>
+
+          {/* Overlay Ergonomics */}
+          <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2.5">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-cyan-300">
+              <Sliders className="h-3.5 w-3.5" />
+              Overlay Ergonomics
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="block text-[11px]">
+                <span className="text-slate-400">Compact HUD Corner</span>
+                <select
+                  aria-label="Compact HUD Corner"
+                  value={draft.hudCorner}
+                  onChange={(e) => {
+                    const next = { ...draft, hudCorner: e.target.value as HudCorner };
+                    setDraft(next);
+                    onSettingsChanged(next);
+                  }}
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                >
+                  {HUD_CORNERS.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-[11px]">
+                <span className="text-slate-400">Global Hotkey</span>
+                <select
+                  aria-label="Global Hotkey"
+                  value={draft.overlayHotkey}
+                  onChange={(e) => {
+                    const next = { ...draft, overlayHotkey: e.target.value };
+                    setDraft(next);
+                    onSettingsChanged(next);
+                  }}
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                >
+                  {HOTKEY_PRESETS.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-[11px]">
+                <span className="text-slate-400">HUD Opacity ({draft.hudOpacity}%)</span>
+                <input
+                  type="range"
+                  aria-label="HUD Opacity"
+                  min={50}
+                  max={100}
+                  value={draft.hudOpacity}
+                  onChange={(e) => {
+                    const next = { ...draft, hudOpacity: Number(e.target.value) };
+                    setDraft(next);
+                    onSettingsChanged(next);
+                  }}
+                  className="mt-2 w-full accent-cyan-400"
+                />
+              </label>
+            </div>
           </div>
 
           <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2.5 text-[11px] text-slate-300">

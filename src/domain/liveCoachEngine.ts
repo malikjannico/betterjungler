@@ -2,6 +2,7 @@ import {
   CHAMPION_META_TABLE,
   ITEM_CATALOG,
   findJungleChampionByName,
+  resolveItemMetadata,
 } from '../data/jungleKnowledgePack';
 import type {
   AdaptiveBuildPlan,
@@ -245,10 +246,10 @@ function makeRecommendation(
   reason: string,
   currentGold: number
 ): ItemRecommendation | null {
-  const item = ITEM_CATALOG[itemId];
+  const item = resolveItemMetadata(itemId);
   if (!item) return null;
   const affordableComponents = (item.buildsFromIds ?? [])
-    .map((id) => ITEM_CATALOG[id])
+    .map((id) => resolveItemMetadata(id))
     .filter(
       (comp): comp is ItemMetadata => comp !== undefined && comp.cost <= currentGold
     );

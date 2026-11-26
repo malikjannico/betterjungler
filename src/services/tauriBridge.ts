@@ -1,10 +1,13 @@
 import {
   DEMO_HIGH_ELO_SNAPSHOT,
+  DEMO_LP_HISTORY,
   DEMO_POST_GAME_MATCHES,
 } from '../domain/postGameFixtures';
 import type {
   ClimbGoal,
   HighEloMetaSnapshot,
+  HudCorner,
+  LpHistoryPoint,
   OverlayMode,
   RunePageSpec,
   UserSettings,
@@ -30,6 +33,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   region: 'EUW1',
   lolInstallPath: 'C:\\Riot Games\\League of Legends',
   overlayHotkey: 'Alt+J',
+  hudCorner: 'top-right',
   hudOpacity: 92,
   targetDivision: 'PLATINUM IV',
   hasApiKey: false,
@@ -57,6 +61,25 @@ export async function getAppState(): Promise<AppRuntimeState | null> {
 export async function setOverlayMode(mode: OverlayMode): Promise<void> {
   if (!isTauriEnvironment()) return;
   await invokeTauri<void>('set_overlay_mode', { mode });
+}
+
+export async function updateOverlayPreferences(
+  hudCorner: HudCorner,
+  overlayHotkey: string
+): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invokeTauri<void>('update_overlay_preferences', {
+    hudCorner,
+    overlayHotkey,
+  });
+}
+
+export async function loadLpHistory(): Promise<LpHistoryPoint[]> {
+  if (!isTauriEnvironment()) {
+    return DEMO_LP_HISTORY;
+  }
+  const rows = await invokeTauri<LpHistoryPoint[]>('get_lp_history');
+  return rows.length > 0 ? rows : DEMO_LP_HISTORY;
 }
 
 export async function applyRunesAndSpells(

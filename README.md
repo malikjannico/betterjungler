@@ -23,7 +23,17 @@
 - **Built-in Demo Simulation Mode**:
   - Test every phase (`Idle`, `Champ Select`, `Loading`, `Early Game`, `Mid Game`, `Full Build`) immediately without needing a live League of Legends match.
 
+### Milestone 3 (Implemented)
+- **Dynamic Data Dragon Hydration & 32-Jungler Roster**: Live `champion.json` & `item.json` hydration cached locally alongside 32 meta junglers across every archetype.
+- **Trend Visuals**: Minute-by-minute **Gold & XP Diff vs Enemy Jungler** chart in Post-Game Review, plus **Multi-Game Death Heatmap** & **LP Climb Progression Chart** in Climb & Goals.
+- **Overlay Ergonomics**: Live **HUD Opacity** (`50%–100%`), **Compact HUD Corner** positioning (`Top-Right`, `Top-Left`, `Bottom-Right`, `Bottom-Left`), and configurable **Global Hotkey** presets (`Alt+J`, `Alt+B`, `Ctrl+Shift+J`, `F8`).
+- **Windows Installer Release Workflow**: Tagging `v*.*.*` automatically builds and drafts a Windows NSIS `.exe` installer via [.github/workflows/release.yml](.github/workflows/release.yml).
+
 ### Milestone 2 (Implemented)
+- **Dynamic Data Dragon Hydration & 32-Jungler Roster**: Live `champion.json` & `item.json` hydration cached locally alongside 32 meta junglers across every archetype.
+- **Trend Visuals**: Minute-by-minute **Gold & XP Diff vs Enemy Jungler** chart in Post-Game Review, plus **Multi-Game Death Heatmap** & **LP Climb Progression Chart** in Climb & Goals.
+- **Overlay Ergonomics**: Live **HUD Opacity** (`50%–100%`), **Compact HUD Corner** positioning (`Top-Right`, `Top-Left`, `Bottom-Right`, `Bottom-Left`), and configurable **Global Hotkey** presets (`Alt+J`, `Alt+B`, `Ctrl+Shift+J`, `F8`).
+- **Windows Installer Release Workflow**: Tagging `v*.*.*` automatically builds and drafts a Windows NSIS `.exe` installer via [.github/workflows/release.yml](.github/workflows/release.yml).
 - **Post-Game Match-V5 Timeline Review**: Coordinate-level pathing, kill/death/pre-objective death, ward, and objective replay map on Summoner's Rift with What You Did Good / Mistakes / Where to Improve breakdowns.
 - **Division-Benchmarked Climb Ladder & Goals**: Compares rolling jungle KPIs (`CS/min`, `GD@15`, `Objective Share`, `Pre-Objective Deaths`, `Vision/min`, `KP%`) against your next target division, suggests top 1–3 bottleneck goals, and persists custom goals in SQLite.
 - **Rate-Limit-Safe High-Elo Match-V5 Sampler**: Caches Challenger/GM jungle sample stats into SQLite and blends live high-elo winrates into Champ Select recommendations.

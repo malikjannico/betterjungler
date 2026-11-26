@@ -1,5 +1,5 @@
 import { analyzePostGameMatch, toMatchSummaryRecord } from './postGameReviewEngine';
-import type { HighEloMetaSnapshot } from '../types/coaching';
+import type { HighEloMetaSnapshot, LpHistoryPoint } from '../types/coaching';
 import type { MatchSummaryRecord, MatchV5Detail } from '../types/riot';
 
 export const DEMO_POST_GAME_MATCHES: MatchV5Detail[] = [
@@ -164,3 +164,16 @@ export const DEMO_HIGH_ELO_SNAPSHOT: HighEloMetaSnapshot = {
     { championId: 876, games: 4, wins: 2, winRate: 50.0, topItemIds: [6653, 3157, 3089] },
   ],
 };
+
+export const DEMO_LP_HISTORY: LpHistoryPoint[] = [
+  { timestamp: '2026-11-22T18:00:00Z', tier: 'GOLD', rank: 'III', leaguePoints: 42, absoluteLp: 1442, win: true },
+  { timestamp: '2026-11-22T19:15:00Z', tier: 'GOLD', rank: 'III', leaguePoints: 65, absoluteLp: 1465, win: true },
+  { timestamp: '2026-11-23T20:00:00Z', tier: 'GOLD', rank: 'III', leaguePoints: 47, absoluteLp: 1447, win: false },
+  { timestamp: '2026-11-23T21:30:00Z', tier: 'GOLD', rank: 'III', leaguePoints: 72, absoluteLp: 1472, win: true },
+  { timestamp: '2026-11-24T20:20:00Z', tier: 'GOLD', rank: 'III', leaguePoints: 96, absoluteLp: 1496, win: true },
+  { timestamp: '2026-11-24T22:00:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 20, absoluteLp: 1520, win: true },
+  { timestamp: '2026-11-25T19:45:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 2, absoluteLp: 1502, win: false },
+  { timestamp: '2026-11-25T21:10:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 28, absoluteLp: 1528, win: true },
+  { timestamp: '2026-11-26T18:10:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 41, absoluteLp: 1541, win: false },
+  { timestamp: '2026-11-26T19:40:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 64, absoluteLp: 1564, win: true },
+];

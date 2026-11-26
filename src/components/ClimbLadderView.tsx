@@ -17,13 +17,21 @@ import type {
   ClimbGoal,
   HighEloMetaSnapshot,
   JungleKpiKey,
+  LpHistoryPoint,
 } from '../types/coaching';
-import type { MatchSummaryRecord, SummonerProfileSummary } from '../types/riot';
+import type {
+  MatchSummaryRecord,
+  MatchV5Detail,
+  SummonerProfileSummary,
+} from '../types/riot';
+import { ClimbTrendCharts } from './ClimbTrendCharts';
 
 interface ClimbLadderViewProps {
   summonerProfile: SummonerProfileSummary | null;
   targetDivision: string;
   summaries: MatchSummaryRecord[];
+  matches: MatchV5Detail[];
+  lpHistory: LpHistoryPoint[];
   goals: ClimbGoal[];
   highEloMeta: HighEloMetaSnapshot | null;
   canSyncLive: boolean;
@@ -45,6 +53,8 @@ export function ClimbLadderView({
   summonerProfile,
   targetDivision,
   summaries,
+  matches,
+  lpHistory,
   goals,
   highEloMeta,
   canSyncLive,
@@ -203,6 +213,9 @@ export function ClimbLadderView({
           })}
         </div>
       </div>
+
+      {/* LP Progression & Multi-Game Death Heatmap */}
+      <ClimbTrendCharts matches={matches} lpHistory={lpHistory} />
 
       {/* Suggested Bottleneck Goals + Active Goals + Custom Goal Form */}
       <div className="grid gap-3 lg:grid-cols-2">

@@ -238,6 +238,10 @@ export type DemoScenarioId =
 
 export type AiProvider = 'off' | 'gemini' | 'openai' | 'ollama';
 
+export type HudCorner = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
+
+export type OverlayHotkeyPreset = 'Alt+J' | 'Alt+B' | 'Ctrl+Shift+J' | 'F8';
+
 export interface AiCoachConfig {
   provider: AiProvider;
   model: string;
@@ -249,11 +253,40 @@ export interface UserSettings {
   riotId: string;
   region: string;
   lolInstallPath: string;
-  overlayHotkey: string;
+  overlayHotkey: OverlayHotkeyPreset | string;
+  hudCorner: HudCorner;
   hudOpacity: number;
   targetDivision: string;
   hasApiKey: boolean;
   aiCoach: AiCoachConfig;
+}
+
+export interface LpHistoryPoint {
+  timestamp: string;
+  tier: string;
+  rank: string;
+  leaguePoints: number;
+  absoluteLp: number;
+  win: boolean;
+}
+
+export interface DdragonChampionLite {
+  id: number;
+  key: string;
+  name: string;
+  tags: string[];
+}
+
+export interface DdragonItemLite {
+  id: number;
+  name: string;
+  cost: number;
+}
+
+export interface DdragonHydratedCatalog {
+  patch: string;
+  championsById: Record<number, DdragonChampionLite>;
+  itemsById: Record<number, DdragonItemLite>;
 }
 
 export type ActiveTab =
