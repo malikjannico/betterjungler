@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { motion } from 'motion/react';
+import {
+  Activity,
+  History,
+  Info,
+  Map as MapIcon,
+  Minus,
+  Settings,
+  SlidersHorizontal,
+  Swords,
+  TrendingUp,
+  X,
+} from 'lucide-react';
 import { ChampSelectView } from './components/ChampSelectView';
 import { ClimbLadderView } from './components/ClimbLadderView';
 import { CompactHudBar } from './components/CompactHudBar';
@@ -101,6 +114,7 @@ function cornerAlignmentClasses(corner: HudCorner): string {
     case 'top-left':
       return 'items-start justify-start';
     case 'bottom-right':
+    case 'beside-minimap':
       return 'items-end justify-end';
     case 'bottom-left':
       return 'items-end justify-start';
@@ -109,6 +123,15 @@ function cornerAlignmentClasses(corner: HudCorner): string {
       return 'items-start justify-end';
   }
 }
+
+const NAV_ITEMS: Array<{ id: ActiveTab; label: string; icon: typeof Swords }> = [
+  { id: 'champ_select', label: 'Champ Select', icon: Swords },
+  { id: 'win_plan', label: 'Win Plan & Map', icon: MapIcon },
+  { id: 'live_coach', label: 'Live Coach', icon: Activity },
+  { id: 'post_game', label: 'Post-Game Review', icon: History },
+  { id: 'climb_goals', label: 'Climb & Goals', icon: TrendingUp },
+  { id: 'settings', label: 'Settings', icon: Settings },
+];
 
 export function App() {
   const isTauri = isTauriEnvironment();
@@ -139,7 +162,7 @@ export function App() {
     region: 'EUW1',
     lolInstallPath: 'C:\\Riot Games\\League of Legends',
     overlayHotkey: 'Alt+J',
-    hudCorner: 'top-right',
+    hudCorner: 'beside-minimap',
     hudOpacity: 92,
     targetDivision: 'PLATINUM IV',
     hasApiKey: false,
@@ -150,6 +173,11 @@ export function App() {
       hasApiKey: false,
     },
   });
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [legalOpen, setLegalOpen] = useState(false);
+  const simSelectRef = useRef<HTMLSelectElement | null>(null);
+  const simPopoverRef = useRef<HTMLDivElement | null>(null);
+  const simButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const lastPhaseRef = useRef<GamePhase | null>(null);
 
@@ -236,20 +264,43 @@ export function App() {
   }, [isTauri, liveState?.lcuConnected, summonerProfile, settings.region]);
 
   useEffect(() => {
-    if (isTauri) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (matchesHotkey(e, settings.overlayHotkey)) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setMode((prev) => {
-          const next: OverlayMode = prev === 'expanded' ? 'compact' : 'expanded';
-          void setOverlayMode(next);
-          return next;
-        });
+        setSimulatorOpen((prev) => !prev);
+        return;
+      }
+      if (e.key === 'Escape' && simulatorOpen) {
+        setSimulatorOpen(false);
+        simButtonRef.current?.focus();
+        return;
+      }
+      if (!isTauri && matchesHotkey(e, settings.overlayHotkey)) {
+        e.preventDefault();
+        const next: OverlayMode = overlayMode === 'expanded' ? 'compact' : 'expanded';
+        setMode(next);
+        void setOverlayMode(next);
       }
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isTauri, settings.overlayHotkey]);
+  }, [isTauri, overlayMode, settings.overlayHotkey, simulatorOpen]);
+
+  useEffect(() => {
+    if (!simulatorOpen) return;
+    simSelectRef.current?.focus();
+    function handlePointerDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (simButtonRef.current?.contains(target)) {
+        return;
+      }
+      if (simPopoverRef.current && !simPopoverRef.current.contains(target)) {
+        setSimulatorOpen(false);
+      }
+    }
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [simulatorOpen]);
 
   const runtimeState: AppRuntimeState = useMemo(() => {
     if (demoScenario !== 'idle') {
@@ -391,20 +442,39 @@ export function App() {
   );
 
   if (overlayMode === 'compact') {
+    if (isTauri) {
+      return (
+        <div style={hudStyle} className="h-full w-full">
+          <CompactHudBar
+            phase={runtimeState.phase}
+            gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
+            objectives={objectives}
+            buildPlan={buildPlan}
+            topCue={macroCues[0] ?? null}
+            hotkey={settings.overlayHotkey}
+            clickThrough
+            onExpand={() => void toggleOverlayMode('expanded')}
+          />
+        </div>
+      );
+    }
+
     return (
       <div
         style={hudStyle}
-        className={`flex min-h-full p-4 ${isTauri ? '' : 'lg-canvas-browser'} ${cornerAlignmentClasses(settings.hudCorner)}`}
+        className={`flex min-h-full p-4 lg-canvas-browser ${cornerAlignmentClasses(settings.hudCorner)}`}
       >
-        <CompactHudBar
-          phase={runtimeState.phase}
-          gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
-          objectives={objectives}
-          buildPlan={buildPlan}
-          topCue={macroCues[0] ?? null}
-          hotkey={settings.overlayHotkey}
-          onExpand={() => void toggleOverlayMode('expanded')}
-        />
+        <div className="h-[212px] w-[412px]">
+          <CompactHudBar
+            phase={runtimeState.phase}
+            gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
+            objectives={objectives}
+            buildPlan={buildPlan}
+            topCue={macroCues[0] ?? null}
+            hotkey={settings.overlayHotkey}
+            onExpand={() => void toggleOverlayMode('expanded')}
+          />
+        </div>
       </div>
     );
   }
@@ -413,109 +483,196 @@ export function App() {
 
   return (
     <div
-      style={hudStyle}
-      className={`flex min-h-full items-center justify-center p-4 ${isTauri ? '' : 'lg-canvas-browser'}`}
+      className={`flex min-h-full items-center justify-center ${
+        isTauri ? 'p-0' : 'p-4 lg-canvas-browser'
+      }`}
     >
       <div
         data-phase={runtimeState.phase}
         data-urgent={hasUrgentObjective ? 'true' : 'false'}
-        className="lg-shell flex max-h-[94vh] w-full max-w-[1080px] flex-col overflow-hidden text-slate-100"
+        className={`mat-chrome flex w-full overflow-hidden text-slate-100 ${
+          isTauri ? 'h-screen rounded-none' : 'h-[min(92vh,800px)] max-w-[1100px]'
+        }`}
       >
-        {/* Clean Typographic Top Bar (No Generic Logo) */}
-        <header className="flex flex-wrap items-center justify-between gap-4 px-6 pt-5 pb-3.5">
-          <div>
-            <div className="flex items-baseline gap-2.5">
-              <h1 className="text-[13px] font-semibold tracking-[0.16em] text-white">
-                BETTERJUNGLER
-              </h1>
-              <span className="text-[11px] font-medium text-slate-400">
-                Patch {patchVersion}
-              </span>
-              <span className="text-[11px] uppercase tracking-wider text-slate-500">
-                · {runtimeState.phase.replace('_', ' ')}
-              </span>
+        {/* Floating Left Sidebar Rail */}
+        <aside className="flex w-[208px] shrink-0 flex-col justify-between border-r border-white/[0.08] bg-black/20 p-4">
+          <div className="space-y-5">
+            <div data-tauri-drag-region className="cursor-grab px-2 select-none active:cursor-grabbing">
+              <div className="pointer-events-none flex items-center justify-between gap-2">
+                <h1 className="text-[12px] font-semibold tracking-[0.16em] text-white">
+                  BETTERJUNGLER
+                </h1>
+                {isTauri && (
+                  <div className="pointer-events-auto flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label="Minimize window"
+                      onClick={() => {
+                        void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+                          getCurrentWindow().minimize()
+                        );
+                      }}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-white"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Close window"
+                      onClick={() => {
+                        void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+                          getCurrentWindow().close()
+                        );
+                      }}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-rose-500/20 hover:text-rose-200"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="pointer-events-none mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                <span>Patch {patchVersion}</span>
+                <span>·</span>
+                <span className="capitalize">
+                  {runtimeState.phase.replace('_', ' ')}
+                </span>
+              </div>
             </div>
-            <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-500">
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-slate-600'
-                  }`}
-                />
-                LCU {runtimeState.lcuConnected ? 'Connected' : 'Standby'}
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-slate-600'
-                  }`}
-                />
-                Live API {runtimeState.liveClientConnected ? 'Active' : 'Standby'}
-              </span>
-              <span className="hidden sm:inline">
-                · {settings.overlayHotkey} ({settings.hudCorner})
-              </span>
-            </div>
+
+            <nav aria-label="Primary navigation" className="space-y-1">
+              {NAV_ITEMS.map((tab) => {
+                const active = activeTab === tab.id;
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`relative flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-xs font-medium transition-colors ${
+                      active
+                        ? 'text-white'
+                        : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-100'
+                    }`}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="nav-pill"
+                        transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                        className="lg-segment-active absolute inset-0 rounded-[10px]"
+                      />
+                    )}
+                    <Icon className="relative z-10 h-3.5 w-3.5 shrink-0" />
+                    <span className="relative z-10 truncate">{tab.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
           </div>
 
-          <div className="flex items-center gap-2">
-            <select
-              aria-label="Simulation scenario"
-              value={demoScenario}
-              onChange={(e) => handleScenarioChange(e.target.value as DemoScenarioId)}
-              className="lg-btn-glass cursor-pointer px-3 py-1.5 text-xs font-medium text-slate-200 outline-none"
-            >
-              {DEMO_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id} className="bg-zinc-900 text-slate-100">
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+          <div className="space-y-2.5 border-t border-white/[0.08] pt-3.5 text-[11px]">
+            <div className="space-y-1.5 px-2 text-slate-400">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-slate-600'
+                    }`}
+                  />
+                  League Client
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  {runtimeState.lcuConnected ? 'Ready' : 'Standby'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-slate-600'
+                    }`}
+                  />
+                  Live Match
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  {runtimeState.liveClientConnected ? 'Active' : 'Standby'}
+                </span>
+              </div>
+            </div>
 
-            <button
-              type="button"
-              onClick={() => void toggleOverlayMode('compact')}
-              className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-slate-200"
-            >
-              Compact HUD
-            </button>
+            <div className="grid grid-cols-1 gap-1.5">
+              <button
+                type="button"
+                onClick={() => void toggleOverlayMode('compact')}
+                className="lg-btn-glass flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-medium text-slate-200"
+              >
+                <span>Compact HUD</span>
+                <kbd className="font-mono text-[10px] text-slate-400">
+                  {settings.overlayHotkey}
+                </kbd>
+              </button>
+
+              <button
+                ref={simButtonRef}
+                type="button"
+                aria-expanded={simulatorOpen}
+                onClick={() => setSimulatorOpen((v) => !v)}
+                className={`lg-btn-glass flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-medium ${
+                  demoScenario !== 'idle' ? 'text-amber-200' : 'text-slate-300'
+                }`}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <SlidersHorizontal className="h-3 w-3" />
+                  Simulator
+                </span>
+                <kbd className="font-mono text-[10px] text-slate-400">Ctrl+K</kbd>
+              </button>
+            </div>
           </div>
-        </header>
+        </aside>
 
-        {/* Floating Neutral Liquid Glass Segmented Navigation */}
-        <div className="px-6 pb-4">
-          <nav className="lg-segmented flex flex-wrap items-center gap-1">
-            {(
-              [
-                { id: 'champ_select', label: 'Champ Select' },
-                { id: 'win_plan', label: 'Win Plan & Map' },
-                { id: 'live_coach', label: 'Live Coach' },
-                { id: 'post_game', label: 'Post-Game Review' },
-                { id: 'climb_goals', label: 'Climb & Goals' },
-                { id: 'settings', label: 'Settings' },
-              ] as const
-            ).map((tab) => {
-              const active = activeTab === tab.id;
-              return (
+        {/* Main Workspace Canvas */}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {/* Simulator Popover (Hidden until triggered or Ctrl+K) */}
+          {simulatorOpen && (
+            <div
+              ref={simPopoverRef}
+              role="dialog"
+              aria-label="Scenario Simulator"
+              className="mat-glass mat-lens absolute top-4 right-6 z-30 w-72 p-3.5 text-xs"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <span className="t-micro text-slate-300">Scenario Simulator</span>
                 <button
-                  key={tab.id}
                   type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
-                    active
-                      ? 'lg-segment-active font-semibold'
-                      : 'border border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-100'
-                  }`}
+                  onClick={() => setSimulatorOpen(false)}
+                  className="text-[11px] text-slate-400 hover:text-white"
                 >
-                  <span className="whitespace-nowrap">{tab.label}</span>
+                  Close
                 </button>
-              );
-            })}
-          </nav>
-        </div>
+              </div>
+              <select
+                ref={simSelectRef}
+                aria-label="Simulation scenario"
+                value={demoScenario}
+                onChange={(e) => {
+                  handleScenarioChange(e.target.value as DemoScenarioId);
+                  setSimulatorOpen(false);
+                }}
+                className="w-full rounded-lg border border-white/15 bg-black/70 px-2.5 py-2 text-xs text-slate-100 outline-none"
+              >
+                {DEMO_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id} className="bg-zinc-900 text-slate-100">
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-        {/* Content */}
-        <main className="hud-scroll flex-1 overflow-y-auto px-6 pb-5">
+          {/* Scrollable Tab Workspace */}
+          <main className="hud-scroll flex-1 overflow-y-auto px-6 py-5">
           <div key={activeTab} className="lg-view-enter">
             {activeTab === 'champ_select' && (
               <ChampSelectView
@@ -588,12 +745,26 @@ export function App() {
         </main>
 
         {/* Mandatory Riot Games Legal Disclaimer */}
-        <footer className="border-t border-white/[0.07] bg-black/25 px-6 py-2.5 text-[10px] leading-relaxed text-slate-500">
-          BetterJungler isn&apos;t endorsed by Riot Games and doesn&apos;t reflect the views or
-          opinions of Riot Games or anyone officially involved in producing or managing Riot Games
-          properties. Riot Games, and all associated properties are trademarks or registered
-          trademarks of Riot Games, Inc.
+        <footer className="border-t border-white/[0.07] bg-black/25 px-6 py-2 text-[10px] leading-relaxed text-slate-500">
+          <div className="flex items-center justify-between gap-2">
+            <span className={legalOpen ? '' : 'truncate'}>
+              BetterJungler isn&apos;t endorsed by Riot Games and doesn&apos;t reflect the views or
+              opinions of Riot Games or anyone officially involved in producing or managing Riot
+              Games properties. Riot Games, and all associated properties are trademarks or
+              registered trademarks of Riot Games, Inc.
+            </span>
+            <button
+              type="button"
+              aria-expanded={legalOpen}
+              onClick={() => setLegalOpen((v) => !v)}
+              aria-label="Toggle legal disclaimer"
+              className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-400 hover:bg-white/[0.06] hover:text-white"
+            >
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </footer>
+        </div>
       </div>
     </div>
   );

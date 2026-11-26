@@ -1,15 +1,19 @@
 import type { MouseEvent, ReactNode } from 'react';
 
+export type MaterialVariant = 'plain' | 'glass' | 'chrome';
+
 interface GlassSurfaceProps {
   children: ReactNode;
   className?: string;
   interactive?: boolean;
+  variant?: MaterialVariant;
 }
 
 export function GlassSurface({
   children,
   className = '',
   interactive = false,
+  variant = 'plain',
 }: GlassSurfaceProps) {
   function handleMouseMove(e: MouseEvent<HTMLDivElement>) {
     if (!interactive) return;
@@ -20,10 +24,17 @@ export function GlassSurface({
     e.currentTarget.style.setProperty('--my', `${y.toFixed(1)}%`);
   }
 
+  const materialClass =
+    variant === 'glass'
+      ? 'mat-glass mat-lens'
+      : variant === 'chrome'
+        ? 'mat-chrome'
+        : 'mat-plain';
+
   return (
     <div
       onMouseMove={interactive ? handleMouseMove : undefined}
-      className={`lg-surface ${interactive ? 'lg-surface-interactive' : ''} ${className}`}
+      className={`${materialClass} ${interactive ? 'lg-surface-interactive' : ''} ${className}`}
     >
       {children}
     </div>

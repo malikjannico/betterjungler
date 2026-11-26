@@ -29,6 +29,7 @@ export function PostGameReviewView({
   const [selectedMatchId, setSelectedMatchId] = useState<string>(
     matches[0]?.matchId ?? ''
   );
+  const [activeMinute, setActiveMinute] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -97,7 +98,7 @@ export function PostGameReviewView({
             onClick={() => void handleSync()}
             className="lg-btn-glass px-4 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {syncing ? 'Syncing...' : canSyncLive ? 'Sync Match-V5 Games' : 'Requires Riot API Key in Settings'}
+            {syncing ? 'Syncing...' : canSyncLive ? 'Sync Recent Games' : 'Save Riot API Key in Settings'}
           </button>
         </div>
         {syncError && (
@@ -129,8 +130,10 @@ export function PostGameReviewView({
               <button
                 key={m.matchId}
                 type="button"
+                aria-pressed={active}
                 onClick={() => {
                   setSelectedMatchId(m.matchId);
+                  setActiveMinute(Math.max(1, Math.ceil(m.durationSeconds / 60)));
                   setAiDebrief(null);
                   setAiError(null);
                 }}
@@ -158,15 +161,15 @@ export function PostGameReviewView({
 
         <button
           type="button"
-          disabled={syncing}
+          disabled={syncing || (!canSyncLive && typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__))}
           onClick={() => void handleSync()}
           className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
         >
           {syncing
             ? 'Syncing...'
             : canSyncLive
-              ? 'Sync Match-V5 Games'
-              : 'Refresh Demo Games'}
+              ? 'Sync Recent Games'
+              : 'Refresh Sample Games'}
         </button>
       </div>
 
@@ -193,7 +196,7 @@ export function PostGameReviewView({
               </span>
             </div>
             <p className="mt-0.5 text-[11px] text-slate-400">
-              Benchmarked against {targetDivision} · Match ID: {report.matchId}
+              Benchmarked against {targetDivision}
             </p>
           </div>
 
@@ -229,16 +232,22 @@ export function PostGameReviewView({
         </div>
       </GlassSurface>
 
-      {/* Gold & XP Diff Curve */}
-      <GoldXpDiffChart key={`chart-${selectedMatch.matchId}`} match={selectedMatch} />
+      {/* Synchronized Gold/XP Timeline Curve & Interactive Rift Replay */}
+      <GoldXpDiffChart
+        key={`chart-${selectedMatch.matchId}`}
+        match={selectedMatch}
+        activeMinute={activeMinute ?? Math.max(1, Math.ceil(selectedMatch.durationSeconds / 60))}
+        onSelectMinute={setActiveMinute}
+      />
 
-      {/* Interactive Official Map Timeline Replay */}
       <PostGameTimelineMap
         key={selectedMatch.matchId}
         durationSeconds={selectedMatch.durationSeconds}
         patchVersion={patchVersion}
         pathPoints={report.pathPoints}
         markers={report.markers}
+        activeMinute={activeMinute ?? Math.max(1, Math.ceil(selectedMatch.durationSeconds / 60))}
+        onChangeMinute={setActiveMinute}
       />
 
       {/* What You Did Good / Mistakes / Where to Improve */}
@@ -300,7 +309,7 @@ export function PostGameReviewView({
           <span className="text-xs font-medium text-slate-300">
             Optional AI Coach Debrief (
             {aiConfig.provider === 'off'
-              ? 'Deterministic Preview / Configure BYOK in Settings'
+              ? 'Built-in Coaching Preview / Configure AI in Settings'
               : `${aiConfig.provider.toUpperCase()} · ${aiConfig.model}`}
             )
           </span>

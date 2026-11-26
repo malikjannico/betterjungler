@@ -41,8 +41,8 @@ export function LiveCoachView({
       <GlassSurface className="p-8 text-center">
         <h2 className="text-sm font-semibold text-white">Live In-Game Coach</h2>
         <p className="mt-1.5 text-xs text-slate-400">
-          Connects automatically to League&apos;s Live Client Data API (127.0.0.1:2999) when a
-          match begins, or select an In-Game Demo scenario in the header.
+          Connects automatically as soon as your match starts, or switch scenarios in the
+          Simulator (<kbd className="font-mono text-slate-300">Ctrl+K</kbd>).
         </p>
       </GlassSurface>
     );
@@ -57,7 +57,7 @@ export function LiveCoachView({
         <GlassSurface className="flex flex-col justify-between p-4">
           <div>
             <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
-              Live Telemetry
+              Match Clock &amp; Gold
             </div>
             <div className="mt-2 flex items-baseline justify-between">
               <span className="tabular-nums text-3xl font-bold tracking-tight text-white">
@@ -117,12 +117,13 @@ export function LiveCoachView({
         </GlassSurface>
       </div>
 
-      {/* Live Auto-Updating Jungle Route & Ward Map on Official map11.png */}
+      {/* Live Auto-Updating Jungle Route & Ward Map */}
       <SummonersRiftMap
         mapSide={mapSide}
         patchVersion={patchVersion}
         route={activeRoute}
         wardSpots={winPlan.wardSpots}
+        compact
       />
 
       {/* Adaptive Itemization & Macro Cues */}
@@ -132,7 +133,7 @@ export function LiveCoachView({
             <h3 className="text-xs font-semibold text-white">Adaptive Item Build</h3>
             {buildPlan.isFullBuild && (
               <span className="rounded-full border border-white/20 bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold text-white">
-                FULL BUILD OPTIMIZER ACTIVE
+                Full Build Active
               </span>
             )}
           </div>
@@ -271,7 +272,7 @@ export function LiveCoachView({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-white">{cue.title}</span>
-                    <span className="text-[9px] font-medium uppercase tracking-wider text-slate-400">
+                    <span className="text-[9px] font-medium capitalize tracking-wider text-slate-400">
                       {cue.category}
                     </span>
                   </div>

@@ -81,8 +81,7 @@ export function WinConditionView({
               {plan.enemyWinConditionToDeny}
             </p>
             <div className="mt-2.5 text-[11px] text-slate-400">
-              Enemy Comp: {plan.enemyAnalysis.archetype} · AD {plan.enemyAnalysis.adScore} / AP{' '}
-              {plan.enemyAnalysis.apScore}
+              Enemy Comp: {plan.enemyAnalysis.archetype}
             </div>
           </div>
         </div>
@@ -122,6 +121,7 @@ export function WinConditionView({
               <button
                 key={r.id}
                 type="button"
+                aria-pressed={isCurrent}
                 onClick={() => setSelectedRouteId(r.id)}
                 className={`rounded-full px-3 py-1 text-[11px] font-medium transition ${
                   isCurrent
@@ -149,7 +149,7 @@ export function WinConditionView({
           <span className="text-xs font-medium text-slate-300">
             AI Coach Pre-Game Brief (
             {aiConfig.provider === 'off'
-              ? 'Deterministic Preview'
+              ? 'Built-in Coaching Preview'
               : `${aiConfig.provider.toUpperCase()} · ${aiConfig.model}`}
             )
           </span>

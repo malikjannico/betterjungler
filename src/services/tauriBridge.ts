@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   region: 'EUW1',
   lolInstallPath: 'C:\\Riot Games\\League of Legends',
   overlayHotkey: 'Alt+J',
-  hudCorner: 'top-right',
+  hudCorner: 'beside-minimap',
   hudOpacity: 92,
   targetDivision: 'PLATINUM IV',
   hasApiKey: false,

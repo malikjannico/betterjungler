@@ -155,7 +155,7 @@ export function ClimbLadderView({
 
         <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
           <div
-            className="h-full rounded-full bg-white/80 transition-all duration-500"
+            className="h-full rounded-full bg-white/80 transition-all duration-500 motion-reduce:transition-none"
             style={{ width: `${evaluation.overallReadinessPct}%` }}
           />
         </div>
@@ -195,7 +195,7 @@ export function ClimbLadderView({
                 </div>
                 <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.08]">
                   <div
-                    className={`h-full rounded-full transition-all duration-500 ${
+                    className={`h-full rounded-full transition-all duration-500 motion-reduce:transition-none ${
                       comp.status === 'on_track'
                         ? 'bg-emerald-400'
                         : comp.status === 'close'
@@ -348,7 +348,7 @@ export function ClimbLadderView({
                       type="button"
                       aria-label={`Delete goal ${goal.title}`}
                       onClick={() => void onDeleteGoal(goal.id)}
-                      className="text-slate-500 transition hover:text-rose-400"
+                      className="flex min-h-8 min-w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-rose-400"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -361,7 +361,7 @@ export function ClimbLadderView({
           <GlassSurface className="p-5">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold text-white">
-                High-Elo Match-V5 Meta Sampler
+                Challenger Meta Snapshot
               </h3>
               <button
                 type="button"

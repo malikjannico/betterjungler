@@ -248,7 +248,12 @@ export type DemoScenarioId =
 
 export type AiProvider = 'off' | 'gemini' | 'openai' | 'ollama';
 
-export type HudCorner = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
+export type HudCorner =
+  | 'beside-minimap'
+  | 'top-right'
+  | 'top-left'
+  | 'bottom-right'
+  | 'bottom-left';
 
 export type OverlayHotkeyPreset = 'Alt+J' | 'Alt+B' | 'Ctrl+Shift+J' | 'F8';
 

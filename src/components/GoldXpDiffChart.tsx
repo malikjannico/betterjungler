@@ -1,22 +1,41 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { buildGoldXpSeries } from '../domain/trendAnalyticsEngine';
 import type { MatchV5Detail } from '../types/riot';
 import { GlassSurface } from './GlassSurface';
 
 interface GoldXpDiffChartProps {
   match: MatchV5Detail;
+  activeMinute?: number;
+  onSelectMinute?: (minute: number) => void;
 }
 
-export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
+export function GoldXpDiffChart({
+  match,
+  activeMinute,
+  onSelectMinute,
+}: GoldXpDiffChartProps) {
+  const gradId = useId();
   const [metric, setMetric] = useState<'goldDiff' | 'xpDiff'>('goldDiff');
   const series = useMemo(() => buildGoldXpSeries(match), [match]);
-  const [selectedIdx, setSelectedIdx] = useState<number>(
+  const [internalIdx, setInternalIdx] = useState<number>(
     Math.max(0, series.points.length - 1)
   );
 
   if (series.points.length < 2) {
     return null;
   }
+
+  const controlledIdx =
+    activeMinute !== undefined
+      ? series.points.reduce(
+          (bestIdx, pt, idx) =>
+            Math.abs(pt.minute - activeMinute) <
+            Math.abs((series.points[bestIdx]?.minute ?? 0) - activeMinute)
+              ? idx
+              : bestIdx,
+          0
+        )
+      : internalIdx;
 
   const width = 620;
   const height = 148;
@@ -40,7 +59,7 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
   const firstCoord = coords[0]!;
   const lastCoord = coords[coords.length - 1]!;
   const areaPolygon = `${firstCoord.x},${zeroY} ${polyline} ${lastCoord.x},${zeroY}`;
-  const activeCoord = coords[Math.min(selectedIdx, coords.length - 1)] ?? firstCoord;
+  const activeCoord = coords[Math.min(controlledIdx, coords.length - 1)] ?? firstCoord;
 
   return (
     <GlassSurface className="p-5">
@@ -58,6 +77,7 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
           <div className="lg-segmented flex gap-0.5">
             <button
               type="button"
+              aria-pressed={metric === 'goldDiff'}
               onClick={() => setMetric('goldDiff')}
               className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
                 metric === 'goldDiff'
@@ -69,6 +89,7 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             </button>
             <button
               type="button"
+              aria-pressed={metric === 'xpDiff'}
               onClick={() => setMetric('xpDiff')}
               className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
                 metric === 'xpDiff'
@@ -82,15 +103,44 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
         </div>
       </div>
 
-      <div className="lg-inset p-2">
+      <div
+        role="slider"
+        tabIndex={0}
+        aria-label="Inspect match timeline minute"
+        aria-valuemin={series.points[0]!.minute}
+        aria-valuemax={series.points[series.points.length - 1]!.minute}
+        aria-valuenow={activeCoord.pt.minute}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowRight' && controlledIdx + 1 < coords.length) {
+            e.preventDefault();
+            const nextPt = coords[controlledIdx + 1]!.pt;
+            setInternalIdx(controlledIdx + 1);
+            onSelectMinute?.(nextPt.minute);
+          } else if (e.key === 'ArrowLeft' && controlledIdx > 0) {
+            e.preventDefault();
+            const prevPt = coords[controlledIdx - 1]!.pt;
+            setInternalIdx(controlledIdx - 1);
+            onSelectMinute?.(prevPt.minute);
+          } else if (e.key === 'Home') {
+            e.preventDefault();
+            setInternalIdx(0);
+            onSelectMinute?.(coords[0]!.pt.minute);
+          } else if (e.key === 'End') {
+            e.preventDefault();
+            const last = coords.length - 1;
+            setInternalIdx(last);
+            onSelectMinute?.(coords[last]!.pt.minute);
+          }
+        }}
+        className="lg-inset p-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+      >
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          role="img"
-          aria-label="Gold and XP Diff vs Enemy Jungler Chart"
+          aria-hidden="true"
           className="w-full rounded-[10px]"
         >
           <defs>
-            <linearGradient id="diffAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#ffffff" stopOpacity="0.16" />
               <stop offset="100%" stopColor="#ffffff" stopOpacity="0.01" />
             </linearGradient>
@@ -115,7 +165,7 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             -{maxAbs}
           </text>
 
-          <polygon points={areaPolygon} fill="url(#diffAreaGrad)" />
+          <polygon points={areaPolygon} fill={`url(#${gradId})`} />
 
           <polyline
             points={polyline}
@@ -126,15 +176,29 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             strokeLinejoin="round"
           />
 
+          <line
+            x1={activeCoord.x}
+            y1={padY / 2}
+            x2={activeCoord.x}
+            y2={height - padY / 2}
+            stroke="rgba(255,255,255,0.28)"
+            strokeDasharray="3 3"
+            strokeWidth="1"
+          />
+
           {coords.map((c, idx) => {
             const val = c.pt[metric];
-            const isSelected = idx === selectedIdx;
+            const isSelected = idx === controlledIdx;
             return (
               <g
                 key={c.pt.minute}
-                onClick={() => setSelectedIdx(idx)}
+                onClick={() => {
+                  setInternalIdx(idx);
+                  onSelectMinute?.(c.pt.minute);
+                }}
                 className="cursor-pointer"
               >
+                <circle cx={c.x} cy={c.y} r="14" fill="transparent" />
                 <circle
                   cx={c.x}
                   cy={c.y}

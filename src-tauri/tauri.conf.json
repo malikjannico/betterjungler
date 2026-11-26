@@ -17,9 +17,14 @@
         "title": "BetterJungler",
         "width": 1080,
         "height": 760,
+        "minWidth": 960,
+        "minHeight": 680,
         "resizable": true,
         "decorations": false,
         "transparent": true,
+        "windowEffects": {
+          "effects": ["acrylic"]
+        },
         "alwaysOnTop": true,
         "skipTaskbar": false,
         "center": true

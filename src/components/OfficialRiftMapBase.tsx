@@ -6,8 +6,8 @@ interface OfficialRiftMapBaseProps {
 }
 
 /**
- * Renders Riot's official Summoner's Rift (Map 11) image inside the SVG coordinate space [0..1000],
- * falling back seamlessly to the local bundled /map11.png if offline or blocked.
+ * Renders Riot's official Summoner's Rift (Map 11) image inside SVG [0..1000],
+ * applying #rift-desat contrast attenuation and offline /map11.png fallback.
  */
 export function OfficialRiftMapBase({ patchVersion }: OfficialRiftMapBaseProps) {
   const [useLocalFallback, setUseLocalFallback] = useState(false);
@@ -15,7 +15,7 @@ export function OfficialRiftMapBase({ patchVersion }: OfficialRiftMapBaseProps) 
 
   return (
     <>
-      <rect width="1000" height="1000" fill="#090d14" />
+      <rect width="1000" height="1000" fill="#080b11" />
       <image
         href={href}
         x="0"
@@ -23,12 +23,12 @@ export function OfficialRiftMapBase({ patchVersion }: OfficialRiftMapBaseProps) 
         width="1000"
         height="1000"
         preserveAspectRatio="xMidYMid slice"
+        filter="url(#rift-desat)"
         onError={() => {
           if (!useLocalFallback) setUseLocalFallback(true);
         }}
       />
-      {/* Subtle dark scrim so white/colored tactical overlays remain razor sharp */}
-      <rect width="1000" height="1000" fill="rgba(7, 10, 16, 0.28)" />
+      <rect width="1000" height="1000" fill="rgba(7, 10, 16, 0.22)" />
     </>
   );
 }

@@ -1,101 +1,128 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { CompactHudBar } from './components/CompactHudBar';
+import { LiquidGlassFilter } from './components/LiquidGlassFilter';
 
-vi.mock('./services/ddragonService', async () => {
-  const actual = await vi.importActual<typeof import('./services/ddragonService')>(
-    './services/ddragonService'
-  );
-  return {
-    ...actual,
-    fetchLatestPatchVersion: () => Promise.resolve('16.1.1'),
-    syncFullDdragonCatalog: () =>
-      Promise.resolve({
-        patch: '16.1.1',
-        championsById: {},
-        itemsById: {},
-      }),
-  };
-});
+vi.mock('./services/ddragonService', () => ({
+  fetchLatestPatchVersion: vi.fn().mockResolvedValue('16.23.1'),
+  syncFullDdragonCatalog: vi.fn().mockResolvedValue({
+    patch: '16.23.1',
+    championsById: {},
+    itemsById: {},
+  }),
+  getChampionIconUrl: (key: string) =>
+    `https://ddragon.leagueoflegends.com/cdn/16.23.1/img/champion/${key}.png`,
+  getItemIconUrl: (id: number) =>
+    `https://ddragon.leagueoflegends.com/cdn/16.23.1/img/item/${id}.png`,
+  getOfficialMapUrl: () => '/map11.png',
+}));
 
-describe('App HUD Integration', () => {
-  it('renders Champ Select coach with anonymized Solo/Duo names and Riot legal disclaimer', async () => {
-    render(<App />);
+async function renderAppAndFlush() {
+  render(<App />);
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
 
-    expect(await screen.findByText('BETTERJUNGLER')).toBeInTheDocument();
+describe('BetterJungler App Integration', () => {
+  it('renders sidebar rail navigation, preserves Solo/Duo anonymity, and synchronizes RiftMap + chart scrubber', async () => {
+    await renderAppAndFlush();
+
+    expect(screen.getByText('BETTERJUNGLER')).toBeInTheDocument();
     expect(screen.getByText('Champion Select Draft Coach')).toBeInTheDocument();
     expect(screen.getByText('Ally 1')).toBeInTheDocument();
-    expect(screen.getByText('Enemy 1')).toBeInTheDocument();
     expect(screen.queryByText('TopLanerRealName')).not.toBeInTheDocument();
+
+    // Switch to Win Plan & Map -> test interactive RiftMap step & ward buttons
+    fireEvent.click(screen.getByRole('button', { name: /Win Plan & Map/i }));
+    expect(screen.getByText(/Enemy Win Condition to Deny/i)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Summoner's Rift Jungle Route/i })).toBeInTheDocument();
+
+    const step1 = screen.getByRole('button', { name: /Step 1:/i });
+    fireEvent.click(step1);
+    expect(screen.getByRole('button', { name: 'Close step detail' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close step detail' }));
+
+    const wardBtn = screen.getByRole('button', { name: /Ward spot: Dragon River Control Ward/i });
+    fireEvent.click(wardBtn);
+    expect(screen.getByText('Dragon River Control Ward')).toBeInTheDocument();
+
+    // Open Simulator popover -> switch scenario to Mid Game
+    fireEvent.click(screen.getByRole('button', { name: /Simulator/i }));
+    const selector = screen.getByLabelText('Simulation scenario');
+    fireEvent.change(selector, { target: { value: 'in_game_mid' } });
+    expect(screen.getByText(/Elemental Dragon/i)).toBeInTheDocument();
+    expect(screen.getByText(/Adaptive Item Build/i)).toBeInTheDocument();
+
+    // Post-Game Review + synchronized chart <-> map timeline scrubber
+    fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
+    expect(screen.getByText(/What You Did Good/i)).toBeInTheDocument();
+    const scrubber = screen.getByLabelText('Timeline minute cutoff');
+    fireEvent.change(scrubber, { target: { value: '10' } });
+    expect(screen.getByText(/Jungle Path & Timeline Replay \(0m – 10m\)/i)).toBeInTheDocument();
+    expect(screen.getByText('10:00')).toBeInTheDocument();
+
+    // Keyboard slider navigation -> syncs chart & map
+    const chartSlider = screen.getByRole('slider', { name: 'Inspect match timeline minute' });
+    fireEvent.keyDown(chartSlider, { key: 'Home' });
+    fireEvent.keyDown(chartSlider, { key: 'ArrowRight' });
+    expect(screen.getByText(/Jungle Path & Timeline Replay \(0m – 2m\)/i)).toBeInTheDocument();
+
+    // Climb Ladder & Goals
+    fireEvent.click(screen.getByRole('button', { name: /Climb & Goals/i }));
+    expect(screen.getByText(/Division Climb Ladder/i)).toBeInTheDocument();
+    expect(screen.getByText(/Recommended Next Focus Goals/i)).toBeInTheDocument();
+  });
+
+  it('toggles into Compact HUD via button/expand roundtrip, Ctrl+K Simulator with Escape focus return, and renders LiquidGlassFilter', async () => {
+    const { container } = render(
+      <>
+        <LiquidGlassFilter />
+        <App />
+      </>
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('#lg-lens')).not.toBeNull();
+    expect(container.querySelector('#rift-desat')).not.toBeNull();
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    expect(screen.getByRole('dialog', { name: 'Scenario Simulator' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Scenario Simulator' })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Simulator/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Compact HUD/i }));
+    expect(screen.getByTestId('compact-hud-bar')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Expand/i }));
+    expect(screen.getByText('BETTERJUNGLER')).toBeInTheDocument();
+  });
+
+  it('renders passive kbd shortcut hint when CompactHudBar is click-through and displays Riot legal disclaimer', async () => {
+    const onExpand = vi.fn();
+    const { unmount } = render(
+      <CompactHudBar
+        phase="in_game"
+        gameTime={255}
+        objectives={[]}
+        buildPlan={null}
+        topCue={null}
+        hotkey="Alt+J"
+        clickThrough
+        onExpand={onExpand}
+      />
+    );
+    expect(screen.getByLabelText('Expand hotkey Alt+J').tagName).toBe('KBD');
+    unmount();
+
+    await renderAppAndFlush();
     expect(
       screen.getByText(/BetterJungler isn't endorsed by Riot Games/i)
     ).toBeInTheDocument();
-  });
-
-  it('switches to Win Plan & Map SVG and Live Coach adaptive build views', async () => {
-    render(<App />);
-    await screen.findByText('BETTERJUNGLER');
-
-    // Switch to Win Plan & Map tab
-    fireEvent.click(screen.getByRole('button', { name: /Win Plan & Map/i }));
-    expect(
-      screen.getByRole('img', { name: /Summoner's Rift Jungle Route and Ward Map/i })
-    ).toBeInTheDocument();
-
-    // Switch demo scenario to Full Build and inspect Live Coach (incl. dynamic late-game route map)
-    fireEvent.change(screen.getByLabelText('Simulation scenario'), {
-      target: { value: 'in_game_full_build' },
-    });
-    expect(screen.getByText('FULL BUILD OPTIMIZER ACTIVE')).toBeInTheDocument();
-    expect(screen.getByText('Full-Build Replacement Alternatives')).toBeInTheDocument();
-    expect(
-      screen.getByRole('img', { name: /Summoner's Rift Jungle Route and Ward Map/i })
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Clear 3 · Dragon Sync/i)).toBeInTheDocument();
-
-    // Toggle Compact HUD mode and back
-    fireEvent.click(screen.getByRole('button', { name: /Compact HUD/i }));
-    expect(screen.getByTestId('compact-hud-bar')).toBeInTheDocument();
-  });
-
-  it('renders Post-Game Review SVG timeline map, AI debrief, and Climb Ladder goals', async () => {
-    render(<App />);
-    await screen.findByText('BETTERJUNGLER');
-
-    // Open Post-Game Review tab
-    fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
-    expect(
-      screen.getByRole('img', { name: /Gold and XP Diff vs Enemy Jungler Chart/i })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('img', { name: /Post-Game Match-V5 Timeline Map/i })
-    ).toBeInTheDocument();
-    expect(screen.getByText('What You Did Good')).toBeInTheDocument();
-    expect(screen.getByText('Mistakes to Cut Out')).toBeInTheDocument();
-
-    // Switch to Amumu Loss match and trigger deterministic AI Debrief preview
-    fireEvent.click(screen.getByRole('button', { name: /Amumu/i }));
-    expect(screen.getByText(/Pre-Objective Death\(s\)/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Generate AI Coach Debrief/i }));
-    expect(await screen.findByText(/Match Verdict \(Amumu vs Lillia/i)).toBeInTheDocument();
-
-    // Open Climb & Goals tab, pin a suggested goal, and add a custom goal
-    fireEvent.click(screen.getByRole('button', { name: /Climb & Goals/i }));
-    expect(screen.getByText(/Division Climb Ladder/i)).toBeInTheDocument();
-    expect(screen.getByText('High-Elo Match-V5 Meta Sampler')).toBeInTheDocument();
-
-    const pinButtons = screen.getAllByRole('button', { name: /Pin Goal/i });
-    if (pinButtons[0]) {
-      fireEvent.click(pinButtons[0]);
-    }
-    expect(await screen.findByText(/Your Pinned Climb Goals \(1\)/i)).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /LP Progression Chart/i })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /Multi-Game Death Heatmap/i })).toBeInTheDocument();
-
-    // Open Settings and verify Overlay Ergonomics controls
-    fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
-    expect(screen.getByLabelText('Compact HUD Corner')).toBeInTheDocument();
-    expect(screen.getByLabelText('Global Hotkey')).toBeInTheDocument();
-    expect(screen.getByLabelText('HUD Opacity')).toBeInTheDocument();
   });
 });

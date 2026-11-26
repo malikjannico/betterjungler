@@ -287,25 +287,25 @@ export function buildOfficialWardSpots(side: MapSide): WardSpot[] {
     },
     {
       id: 'dragon-pit-control',
-      label: 'Dragon Pit Control Ward',
+      label: 'Dragon River Control Ward',
       kind: 'control',
       phase: 'objective',
-      x: 660,
-      y: 685,
+      x: 598,
+      y: 742,
       timing: '45s before Dragon spawn',
       reason:
-        'Blacks out enemy pit vision so you can sneak Dragon or force them to face-check.',
+        'Denies river entrance vision outside Dragon pit so you can sneak Dragon or trap face-checks.',
     },
     {
       id: 'baron-pit-control',
-      label: 'Baron / Grubs Control Ward',
+      label: 'Baron / Grubs River Control Ward',
       kind: 'control',
       phase: 'objective',
-      x: 342,
-      y: 318,
+      x: 396,
+      y: 262,
       timing: '45s before Grubs / Herald / Baron',
       reason:
-        'Denies pit vision and catches enemy support/jungler clearing river.',
+        'Denies top river entrance vision and catches enemy support/jungler clearing pit.',
     },
     {
       id: 'deep-quad-intersection',

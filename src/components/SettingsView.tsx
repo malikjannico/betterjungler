@@ -54,6 +54,7 @@ const DIVISIONS = [
   'MASTER',
 ];
 const HUD_CORNERS: Array<{ value: HudCorner; label: string }> = [
+  { value: 'beside-minimap', label: 'Beside Minimap (LoL Safe)' },
   { value: 'top-right', label: 'Top-Right' },
   { value: 'top-left', label: 'Top-Left' },
   { value: 'bottom-right', label: 'Bottom-Right' },
@@ -222,7 +223,7 @@ export function SettingsView({
           </div>
 
           <label className="block text-xs">
-            <span className="text-slate-300">League Install Path (for LCU lockfile)</span>
+            <span className="text-slate-300">League Install Folder</span>
             <input
               type="text"
               value={draft.lolInstallPath}
@@ -306,7 +307,7 @@ export function SettingsView({
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               Overlay Ergonomics
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
               <label className="block text-[11px]">
                 <span className="text-slate-400">Compact HUD Corner</span>
                 <select
@@ -316,6 +317,10 @@ export function SettingsView({
                     const next = { ...draft, hudCorner: e.target.value as HudCorner };
                     setDraft(next);
                     onSettingsChanged(next);
+                    void saveSettings(next).catch(() => {});
+                    void updateOverlayPreferences(next.hudCorner, next.overlayHotkey).catch((err) =>
+                      setErrorMessage(err instanceof Error ? err.message : 'Failed to apply HUD corner.')
+                    );
                   }}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
                 >
@@ -336,6 +341,10 @@ export function SettingsView({
                     const next = { ...draft, overlayHotkey: e.target.value };
                     setDraft(next);
                     onSettingsChanged(next);
+                    void saveSettings(next).catch(() => {});
+                    void updateOverlayPreferences(next.hudCorner, next.overlayHotkey).catch((err) =>
+                      setErrorMessage(err instanceof Error ? err.message : 'Failed to rebind hotkey.')
+                    );
                   }}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
                 >

@@ -33,7 +33,7 @@ impl Default for AiCoachConfig {
 }
 
 fn default_hud_corner() -> String {
-    "top-right".to_string()
+    "beside-minimap".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

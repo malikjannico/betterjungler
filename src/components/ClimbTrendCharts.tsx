@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import {
   aggregateDeathHeatmap,
   computeLpDeltaSummary,
@@ -19,6 +19,10 @@ export function ClimbTrendCharts({
   lpHistory,
   patchVersion,
 }: ClimbTrendChartsProps) {
+  const uid = useId();
+  const lpGradId = `${uid}-lp`;
+  const heatPreId = `${uid}-pre`;
+  const heatStdId = `${uid}-std`;
   const lpSummary = useMemo(() => computeLpDeltaSummary(lpHistory), [lpHistory]);
   const heatmap = useMemo(() => aggregateDeathHeatmap(matches), [matches]);
 
@@ -73,13 +77,13 @@ export function ClimbTrendCharts({
             className="w-full rounded-[10px]"
           >
             <defs>
-              <linearGradient id="lpAreaGrad" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id={lpGradId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#ffffff" stopOpacity="0.16" />
                 <stop offset="100%" stopColor="#ffffff" stopOpacity="0.01" />
               </linearGradient>
             </defs>
 
-            {lpArea && <polygon points={lpArea} fill="url(#lpAreaGrad)" />}
+            {lpArea && <polygon points={lpArea} fill={`url(#${lpGradId})`} />}
             {lpCoords.length > 1 && (
               <polyline
                 points={lpPolyline}
@@ -128,11 +132,11 @@ export function ClimbTrendCharts({
               className="aspect-square w-full rounded-[9px]"
             >
               <defs>
-                <radialGradient id="heatPreObj">
+                <radialGradient id={heatPreId}>
                   <stop offset="0%" stopColor="#ef4444" stopOpacity="0.82" />
                   <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
                 </radialGradient>
-                <radialGradient id="heatStd">
+                <radialGradient id={heatStdId}>
                   <stop offset="0%" stopColor="#fb7185" stopOpacity="0.68" />
                   <stop offset="100%" stopColor="#fb7185" stopOpacity="0" />
                 </radialGradient>
@@ -146,7 +150,7 @@ export function ClimbTrendCharts({
                     cx={pt.x}
                     cy={pt.y}
                     r={pt.isPreObjective ? 92 : 70}
-                    fill={pt.isPreObjective ? 'url(#heatPreObj)' : 'url(#heatStd)'}
+                    fill={pt.isPreObjective ? `url(#${heatPreId})` : `url(#${heatStdId})`}
                   />
                   <circle
                     cx={pt.x}
