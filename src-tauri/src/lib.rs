@@ -1,4 +1,6 @@
+mod ai_coach;
 mod error;
+mod high_elo_sampler;
 mod lcu;
 mod live_client;
 mod overlay;
@@ -18,7 +20,7 @@ use crate::lcu::{RunePageSpec, SanitizedChampSelectSession};
 use crate::live_client::LiveClientPollResult;
 use crate::overlay::OverlayController;
 use crate::riot_api::SummonerProfileSummary;
-use crate::storage::UserSettings;
+use crate::storage::{ClimbGoalRecord, UserSettings};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -156,6 +158,173 @@ async fn apply_runes_and_spells(
     })
 }
 
+#[tauri::command]
+async fn sync_recent_matches(
+    state: State<'_, Arc<SharedState>>,
+    puuid: String,
+    region: String,
+    count: usize,
+) -> AppResult<Vec<Value>> {
+    let api_key = storage::load_riot_api_key()?;
+    let ids =
+        riot_api::fetch_recent_ranked_match_ids(&state.riot_web_client, &api_key, &puuid, &region, count)
+            .await?;
+
+    let mut details = Vec::new();
+    for match_id in ids {
+        let cached = {
+            let conn = state
+                .db
+                .lock()
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+            storage::get_cached_match_detail(&conn, &match_id)?
+        };
+
+        if let Some(detail) = cached {
+            details.push(detail);
+            continue;
+        }
+
+        let detail = riot_api::fetch_match_detail_and_timeline(
+            &state.riot_web_client,
+            &api_key,
+            &match_id,
+            &puuid,
+            &region,
+        )
+        .await?;
+
+        let played_at = detail["playedAt"]
+            .as_str()
+            .unwrap_or("2026-11-26T00:00:00Z")
+            .to_string();
+        let summary_stub = serde_json::json!({
+            "matchId": match_id,
+            "playedAt": played_at,
+            "championId": detail["championId"],
+            "championName": detail["championName"],
+            "win": detail["win"]
+        });
+
+        {
+            let conn = state
+                .db
+                .lock()
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+            storage::cache_match_record(&conn, &match_id, &puuid, &played_at, &summary_stub, &detail)?;
+        }
+
+        details.push(detail);
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+
+    Ok(details)
+}
+
+#[tauri::command]
+fn get_cached_matches(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<Value>> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let (_summaries, details) = storage::list_cached_matches(&conn, 15)?;
+    Ok(details)
+}
+
+#[tauri::command]
+fn get_climb_goals(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<ClimbGoalRecord>> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::list_climb_goals(&conn)
+}
+
+#[tauri::command]
+fn upsert_climb_goal(
+    state: State<'_, Arc<SharedState>>,
+    goal: ClimbGoalRecord,
+) -> AppResult<()> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::upsert_climb_goal(&conn, &goal)
+}
+
+#[tauri::command]
+fn delete_climb_goal(state: State<'_, Arc<SharedState>>, goal_id: String) -> AppResult<()> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::delete_climb_goal(&conn, &goal_id)
+}
+
+#[tauri::command]
+async fn refresh_high_elo_meta(
+    state: State<'_, Arc<SharedState>>,
+    region: String,
+    max_matches: usize,
+) -> AppResult<Value> {
+    let api_key = storage::load_riot_api_key()?;
+    let patch = {
+        state
+            .runtime
+            .lock()
+            .map(|r| r.patch_version.clone())
+            .unwrap_or_else(|_| "16.1.1".to_string())
+    };
+    let snap = high_elo_sampler::sample_high_elo_jungle_meta(
+        &state.riot_web_client,
+        &api_key,
+        &region,
+        &patch,
+        max_matches,
+    )
+    .await?;
+    let val = serde_json::to_value(&snap).map_err(|e| AppError::Storage(e.to_string()))?;
+    {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        storage::save_meta_snapshot(&conn, &patch, &region, &val)?;
+    }
+    Ok(val)
+}
+
+#[tauri::command]
+fn get_cached_meta_snapshot(state: State<'_, Arc<SharedState>>) -> AppResult<Option<Value>> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::load_meta_snapshot(&conn)
+}
+
+#[tauri::command]
+fn save_ai_api_key(api_key: String) -> AppResult<bool> {
+    storage::save_ai_api_key(&api_key)?;
+    Ok(true)
+}
+
+#[tauri::command]
+async fn generate_ai_debrief(
+    state: State<'_, Arc<SharedState>>,
+    context: String,
+) -> AppResult<String> {
+    let config = {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        storage::load_settings(&conn)?.ai_coach
+    };
+    let api_key = storage::load_ai_api_key().ok();
+    ai_coach::generate_ai_debrief(&state.riot_web_client, &config, api_key, &context).await
+}
+
 fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(1800));
@@ -259,7 +428,16 @@ pub fn run() {
             save_riot_api_key,
             sync_ddragon,
             fetch_summoner_profile,
-            apply_runes_and_spells
+            apply_runes_and_spells,
+            sync_recent_matches,
+            get_cached_matches,
+            get_climb_goals,
+            upsert_climb_goal,
+            delete_climb_goal,
+            refresh_high_elo_meta,
+            get_cached_meta_snapshot,
+            save_ai_api_key,
+            generate_ai_debrief
         ])
         .run(tauri::generate_context!())
         .expect("error while running BetterJungler");

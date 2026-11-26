@@ -1,6 +1,7 @@
 import { JUNGLE_CHAMPIONS, getChampionMeta } from '../data/jungleKnowledgePack';
 import type {
   ChampSelectRecommendation,
+  HighEloMetaSnapshot,
   TeamCompAnalysis,
 } from '../types/coaching';
 import type { ChampSelectPlayerSlot, LcuChampSelectSession } from '../types/riot';
@@ -118,6 +119,7 @@ export interface RecommendJungleInput {
   bannedChampionIds: number[];
   enemyJunglerId?: number;
   masteryChampionIds?: number[];
+  highEloMeta?: HighEloMetaSnapshot | null;
 }
 
 export function recommendJunglePicks(
@@ -148,8 +150,18 @@ export function recommendJunglePicks(
     const reasons: string[] = [];
     const warnings: string[] = [];
 
-    // 1. Meta Tier baseline (0..35)
-    const metaPoints = Math.round(((jungler.metaScore - 75) / 25) * 35);
+    // 1. Meta Tier baseline (0..35) + optional High-Elo Match-V5 sample blend (-5..+5)
+    let metaPoints = Math.round(((jungler.metaScore - 75) / 25) * 35);
+    const highEloStat = input.highEloMeta?.champions.find(
+      (c) => c.championId === jungler.championId && c.games >= 2
+    );
+    if (highEloStat) {
+      const delta = Math.max(-5, Math.min(5, Math.round((highEloStat.winRate - 50) / 4)));
+      metaPoints = Math.max(0, Math.min(40, metaPoints + delta));
+      reasons.push(
+        `High-Elo Sample: ${highEloStat.winRate.toFixed(0)}% WR (${highEloStat.games} Challenger/GM games)`
+      );
+    }
 
     // 2. Team Need Fit (0..32)
     let teamNeedPoints = 10;

@@ -48,10 +48,11 @@ flowchart LR
 5. **PostGame**: Active game ended; transitions back to `PostGame` / `Idle` (ready for Milestone 2 Match-V5 timeline fetch).
 
 ## 3. Local SQLite Schema (`betterjungler.db`)
-- `settings`: Key-value JSON configuration (region, Riot ID, install path, HUD opacity/hotkey).
+- `settings`: Key-value JSON configuration (region, Riot ID, install path, HUD opacity/hotkey, optional BYOK AI coach config).
 - `ddragon_cache`: Cached patch version and metadata timestamps.
-- `match_summaries` *(M2 ready)*: Cached Match-V5 jungle KPI summaries.
-- `climb_goals` *(M2 ready)*: Active and completed division improvement goals.
+- `match_details_cache` & `match_summaries`: Cached Match-V5 + Timeline payloads and rolling jungle KPI summaries.
+- `climb_goals_v2`: Active and completed division improvement goals (auto-suggested bottlenecks & custom goals).
+- `meta_snapshots`: Cached Challenger/GM Match-V5 jungle meta sample snapshots.
 
 ## 4. Security Boundaries
 - **API Keys**: Stored via `keyring` crate in Windows Credential Manager (`service = "betterjungler"`, `user = "riot_api_key"`). Never logged or returned in plaintext IPC responses.

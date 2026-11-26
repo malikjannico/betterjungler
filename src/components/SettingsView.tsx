@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Check, KeyRound, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Bot, Check, KeyRound, RefreshCw, ShieldCheck } from 'lucide-react';
 import {
   fetchSummonerProfile,
+  saveAiApiKey,
   saveRiotApiKey,
   saveSettings,
   syncDdragonPatch,
 } from '../services/tauriBridge';
-import type { UserSettings } from '../types/coaching';
+import type { AiProvider, UserSettings } from '../types/coaching';
 import type { SummonerProfileSummary } from '../types/riot';
 
 interface SettingsViewProps {
@@ -36,6 +37,7 @@ export function SettingsView({
 }: SettingsViewProps) {
   const [draft, setDraft] = useState<UserSettings>(settings);
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [aiKeyInput, setAiKeyInput] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -78,6 +80,26 @@ export function SettingsView({
     const patch = await syncDdragonPatch();
     onPatchSynced(patch);
     setStatusMessage(`Data Dragon synced to patch ${patch}.`);
+  }
+
+  async function handleSaveAiKey() {
+    setErrorMessage(null);
+    if (!aiKeyInput.trim()) {
+      setErrorMessage('Enter an AI provider API key first.');
+      return;
+    }
+    const ok = await saveAiApiKey(aiKeyInput.trim());
+    if (ok) {
+      const updated: UserSettings = {
+        ...draft,
+        aiCoach: { ...draft.aiCoach, hasApiKey: true },
+      };
+      setDraft(updated);
+      await saveSettings(updated);
+      onSettingsChanged(updated);
+      setAiKeyInput('');
+      setStatusMessage('AI Coach API key stored in Windows Credential Manager.');
+    }
   }
 
   return (
@@ -225,6 +247,104 @@ export function SettingsView({
               ultimates, and enforces Solo/Duo Champ Select anonymity.
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Optional BYOK AI Coach */}
+      <div className="hud-card space-y-3 rounded-xl p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-violet-300">
+            <Bot className="h-4 w-4" />
+            Optional BYOK AI Coach (Natural-Language Debriefs)
+          </div>
+          <span className="text-[11px] text-slate-400">
+            Deterministic coaching always runs offline; AI is strictly optional.
+          </span>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-3">
+          <label className="block text-xs">
+            <span className="text-slate-400">AI Provider</span>
+            <select
+              aria-label="AI Provider"
+              value={draft.aiCoach.provider}
+              onChange={(e) => {
+                const provider = e.target.value as AiProvider;
+                const defaultModel =
+                  provider === 'gemini'
+                    ? 'gemini-2.5-flash'
+                    : provider === 'openai'
+                      ? 'gpt-4o-mini'
+                      : provider === 'ollama'
+                        ? 'llama3.1'
+                        : draft.aiCoach.model;
+                setDraft({
+                  ...draft,
+                  aiCoach: { ...draft.aiCoach, provider, model: defaultModel },
+                });
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+            >
+              <option value="off">Off (Deterministic Only)</option>
+              <option value="gemini">Google Gemini (BYOK)</option>
+              <option value="openai">OpenAI (BYOK)</option>
+              <option value="ollama">Local Ollama (127.0.0.1)</option>
+            </select>
+          </label>
+
+          <label className="block text-xs">
+            <span className="text-slate-400">Model</span>
+            <input
+              type="text"
+              value={draft.aiCoach.model}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  aiCoach: { ...draft.aiCoach, model: e.target.value },
+                })
+              }
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+            />
+          </label>
+
+          {draft.aiCoach.provider === 'ollama' ? (
+            <label className="block text-xs">
+              <span className="text-slate-400">Local Ollama URL</span>
+              <input
+                type="text"
+                value={draft.aiCoach.endpoint}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    aiCoach: { ...draft.aiCoach, endpoint: e.target.value },
+                  })
+                }
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+              />
+            </label>
+          ) : (
+            <label className="block text-xs">
+              <span className="text-slate-400">
+                AI Key ({draft.aiCoach.hasApiKey ? 'Stored Securely' : 'Not Saved'})
+              </span>
+              <div className="mt-1 flex gap-1.5">
+                <input
+                  type="password"
+                  value={aiKeyInput}
+                  onChange={(e) => setAiKeyInput(e.target.value)}
+                  placeholder="Paste Gemini / OpenAI key"
+                  className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveAiKey}
+                  className="rounded-lg border border-violet-500/40 bg-violet-500/15 px-2.5 py-1.5 text-xs font-semibold text-violet-200 hover:bg-violet-500/25"
+                >
+                  Save
+                </button>
+              </div>
+            </label>
+          )}
         </div>
       </div>
 

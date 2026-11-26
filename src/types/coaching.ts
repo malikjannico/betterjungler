@@ -236,6 +236,15 @@ export type DemoScenarioId =
   | 'in_game_mid'
   | 'in_game_full_build';
 
+export type AiProvider = 'off' | 'gemini' | 'openai' | 'ollama';
+
+export interface AiCoachConfig {
+  provider: AiProvider;
+  model: string;
+  endpoint: string;
+  hasApiKey: boolean;
+}
+
 export interface UserSettings {
   riotId: string;
   region: string;
@@ -244,8 +253,139 @@ export interface UserSettings {
   hudOpacity: number;
   targetDivision: string;
   hasApiKey: boolean;
+  aiCoach: AiCoachConfig;
 }
 
-export type ActiveTab = 'champ_select' | 'win_plan' | 'live_coach' | 'climb_m2' | 'settings';
+export type ActiveTab =
+  | 'champ_select'
+  | 'win_plan'
+  | 'live_coach'
+  | 'post_game'
+  | 'climb_goals'
+  | 'settings';
 
 export type LaneAssignmentMap = Partial<Record<LaneRole, number>>;
+
+export interface NormalizedMapPoint {
+  minute: number;
+  x: number;
+  y: number;
+}
+
+export type TimelineMarkerKind =
+  | 'kill'
+  | 'death'
+  | 'pre_obj_death'
+  | 'assist'
+  | 'ward'
+  | 'control_ward'
+  | 'objective';
+
+export interface TimelineMapMarker {
+  id: string;
+  minute: number;
+  timestampSec: number;
+  kind: TimelineMarkerKind;
+  x: number;
+  y: number;
+  label: string;
+  detail: string;
+}
+
+export interface ReviewFinding {
+  id: string;
+  category: 'farming' | 'pathing' | 'objectives' | 'vision' | 'fighting';
+  title: string;
+  detail: string;
+  timestampSec?: number;
+  severity: 'positive' | 'mistake' | 'action';
+}
+
+export interface PostGameKpis {
+  csPerMin: number;
+  csAt4: number;
+  goldDiffAt10: number;
+  goldDiffAt15: number;
+  xpDiffAt15: number;
+  visionPerMin: number;
+  controlWardsBought: number;
+  objectiveSharePct: number;
+  killParticipationPct: number;
+  earlyDeaths: number;
+  preObjectiveDeaths: number;
+}
+
+export interface PostGameReviewReport {
+  matchId: string;
+  championName: string;
+  enemyJunglerName: string;
+  win: boolean;
+  durationSeconds: number;
+  grade: 'S' | 'A' | 'B' | 'C' | 'D';
+  kpis: PostGameKpis;
+  highlights: ReviewFinding[];
+  mistakes: ReviewFinding[];
+  improvements: ReviewFinding[];
+  pathPoints: NormalizedMapPoint[];
+  markers: TimelineMapMarker[];
+}
+
+export type DivisionTier =
+  | 'IRON'
+  | 'BRONZE'
+  | 'SILVER'
+  | 'GOLD'
+  | 'PLATINUM'
+  | 'EMERALD'
+  | 'DIAMOND'
+  | 'MASTER';
+
+export type JungleKpiKey =
+  | 'csPerMin'
+  | 'goldDiffAt15'
+  | 'objectiveSharePct'
+  | 'preObjectiveDeaths'
+  | 'visionPerMin'
+  | 'killParticipationPct';
+
+export interface DivisionBenchmarkComparison {
+  metric: JungleKpiKey;
+  label: string;
+  unit: string;
+  currentValue: number;
+  targetValue: number;
+  lowerIsBetter: boolean;
+  status: 'on_track' | 'close' | 'bottleneck';
+  gapText: string;
+  progressPct: number;
+}
+
+export interface ClimbGoal {
+  id: string;
+  targetDivision: string;
+  metric: JungleKpiKey;
+  title: string;
+  targetValue: number;
+  currentValue: number;
+  unit: string;
+  lowerIsBetter: boolean;
+  status: 'active' | 'completed';
+  source: 'auto' | 'custom';
+  createdAt: string;
+}
+
+export interface HighEloChampStat {
+  championId: number;
+  games: number;
+  wins: number;
+  winRate: number;
+  topItemIds: number[];
+}
+
+export interface HighEloMetaSnapshot {
+  patch: string;
+  region: string;
+  sampleMatches: number;
+  updatedAt: string;
+  champions: HighEloChampStat[];
+}

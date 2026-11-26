@@ -11,18 +11,21 @@ import {
 } from '../domain/champSelectEngine';
 import { getChampionIconUrl } from '../services/ddragonService';
 import { applyRunesAndSpells } from '../services/tauriBridge';
+import type { HighEloMetaSnapshot } from '../types/coaching';
 import type { LcuChampSelectSession, SummonerProfileSummary } from '../types/riot';
 
 interface ChampSelectViewProps {
   session: LcuChampSelectSession | null;
   patchVersion: string;
   summonerProfile: SummonerProfileSummary | null;
+  highEloMeta: HighEloMetaSnapshot | null;
 }
 
 export function ChampSelectView({
   session,
   patchVersion,
   summonerProfile,
+  highEloMeta,
 }: ChampSelectViewProps) {
   const [selectedChampionId, setSelectedChampionId] = useState<number | null>(null);
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
@@ -59,8 +62,9 @@ export function ChampSelectView({
         bannedChampionIds: bannedIds,
         enemyJunglerId,
         masteryChampionIds: summonerProfile?.topMasteryChampionIds,
+        highEloMeta,
       }),
-    [allyIds, enemyIds, bannedIds, enemyJunglerId, summonerProfile]
+    [allyIds, enemyIds, bannedIds, enemyJunglerId, summonerProfile, highEloMeta]
   );
 
   const activePick =
@@ -86,7 +90,7 @@ export function ChampSelectView({
           <h2 className="text-sm font-bold text-slate-100">Champion Select Draft Coach</h2>
           <p className="text-[11px] text-slate-400">
             {sanitized
-              ? `${sanitized.mapSide.toUpperCase()} Side • Patch ${patchVersion} • Picks weighted by meta, team gaps & matchup`
+              ? `${sanitized.mapSide.toUpperCase()} Side • Patch ${patchVersion} • Picks weighted by meta${highEloMeta ? ` (+${highEloMeta.sampleMatches} High-Elo games)` : ''}, team gaps & matchup`
               : 'Waiting for League Client Champ Select (or switch to Demo: Champ Select above)'}
           </p>
         </div>

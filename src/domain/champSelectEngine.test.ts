@@ -4,6 +4,7 @@ import {
   recommendJunglePicks,
   sanitizeChampSelectSession,
 } from './champSelectEngine';
+import { DEMO_HIGH_ELO_SNAPSHOT } from './postGameFixtures';
 import { DEMO_CHAMP_SELECT } from './simulationFixtures';
 
 describe('champSelectEngine', () => {
@@ -39,5 +40,19 @@ describe('champSelectEngine', () => {
     expect(ids).not.toContain(64);
     // Amumu (32) fills AP, frontline, engage, CC, counters Viego, and matches mastery
     expect(recs[0]?.champion.championId).toBe(32);
+  });
+
+  it('blends High-Elo Match-V5 sample winrates into Champ Select rationale', () => {
+    const recs = recommendJunglePicks({
+      allyChampionIds: [58, 61, 145, 111],
+      enemyChampionIds: [266, 56, 517, 222, 16],
+      bannedChampionIds: [],
+      highEloMeta: DEMO_HIGH_ELO_SNAPSHOT,
+    });
+
+    const sampled = recs.find((r) =>
+      r.reasons.some((reason) => reason.includes('High-Elo Sample'))
+    );
+    expect(sampled).toBeDefined();
   });
 });

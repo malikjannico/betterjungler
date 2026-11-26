@@ -23,11 +23,11 @@
 - **Built-in Demo Simulation Mode**:
   - Test every phase (`Idle`, `Champ Select`, `Loading`, `Early Game`, `Mid Game`, `Full Build`) immediately without needing a live League of Legends match.
 
-### Milestone 2 (Roadmap)
-- **Post-Game Match-V5 Timeline Review**: Coordinate-level pathing & ward map replay, mistakes & highlights breakdown.
-- **Division-Benchmarked Climb Ladder**: Rolling jungle KPIs benchmarked against your next target division with 1–3 focused improvement goals.
-- **Rate-Limit-Safe High-Elo Ladder Sampler**: Organic Challenger/GM/Master Match-V5 build/meta enrichment stored in local SQLite.
-- **Optional BYOK AI Coach**: Plug in your own Gemini, OpenAI, or local Ollama endpoint for natural-language match narratives.
+### Milestone 2 (Implemented)
+- **Post-Game Match-V5 Timeline Review**: Coordinate-level pathing, kill/death/pre-objective death, ward, and objective replay map on Summoner's Rift with What You Did Good / Mistakes / Where to Improve breakdowns.
+- **Division-Benchmarked Climb Ladder & Goals**: Compares rolling jungle KPIs (`CS/min`, `GD@15`, `Objective Share`, `Pre-Objective Deaths`, `Vision/min`, `KP%`) against your next target division, suggests top 1–3 bottleneck goals, and persists custom goals in SQLite.
+- **Rate-Limit-Safe High-Elo Match-V5 Sampler**: Caches Challenger/GM jungle sample stats into SQLite and blends live high-elo winrates into Champ Select recommendations.
+- **Optional BYOK AI Coach**: Supports user-supplied Gemini, OpenAI, or local Ollama (`127.0.0.1`) for natural-language pre-game briefs and post-game debriefs (deterministic core works 100% offline).
 
 ---
 

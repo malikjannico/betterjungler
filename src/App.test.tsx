@@ -47,4 +47,34 @@ describe('App HUD Integration', () => {
     fireEvent.click(screen.getByRole('button', { name: /Compact HUD/i }));
     expect(screen.getByTestId('compact-hud-bar')).toBeInTheDocument();
   });
+
+  it('renders Post-Game Review SVG timeline map, AI debrief, and Climb Ladder goals', async () => {
+    render(<App />);
+    await screen.findByText('BETTERJUNGLER');
+
+    // Open Post-Game Review tab
+    fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
+    expect(
+      screen.getByRole('img', { name: /Post-Game Match-V5 Timeline Map/i })
+    ).toBeInTheDocument();
+    expect(screen.getByText('What You Did Good')).toBeInTheDocument();
+    expect(screen.getByText('Mistakes to Cut Out')).toBeInTheDocument();
+
+    // Switch to Amumu Loss match and trigger deterministic AI Debrief preview
+    fireEvent.click(screen.getByRole('button', { name: /Amumu/i }));
+    expect(screen.getByText(/Pre-Objective Death\(s\)/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Generate AI Coach Debrief/i }));
+    expect(await screen.findByText(/Match Verdict \(Amumu vs Lillia/i)).toBeInTheDocument();
+
+    // Open Climb & Goals tab, pin a suggested goal, and add a custom goal
+    fireEvent.click(screen.getByRole('button', { name: /Climb & Goals/i }));
+    expect(screen.getByText(/Division Climb Ladder/i)).toBeInTheDocument();
+    expect(screen.getByText('High-Elo Match-V5 Meta Sampler')).toBeInTheDocument();
+
+    const pinButtons = screen.getAllByRole('button', { name: /Pin Goal/i });
+    if (pinButtons[0]) {
+      fireEvent.click(pinButtons[0]);
+    }
+    expect(await screen.findByText(/Your Pinned Climb Goals \(1\)/i)).toBeInTheDocument();
+  });
 });

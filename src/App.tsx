@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  BarChart3,
   Compass,
   Map as MapIcon,
   Minimize2,
@@ -9,9 +10,10 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { ChampSelectView } from './components/ChampSelectView';
-import { ClimbRoadmapView } from './components/ClimbRoadmapView';
+import { ClimbLadderView } from './components/ClimbLadderView';
 import { CompactHudBar } from './components/CompactHudBar';
 import { LiveCoachView } from './components/LiveCoachView';
+import { PostGameReviewView } from './components/PostGameReviewView';
 import { SettingsView } from './components/SettingsView';
 import { WinConditionView } from './components/WinConditionView';
 import { findJungleChampionById, findJungleChampionByName } from './data/jungleKnowledgePack';
@@ -21,6 +23,12 @@ import {
   computeObjectiveWindows,
 } from './domain/liveCoachEngine';
 import {
+  DEMO_HIGH_ELO_SNAPSHOT,
+  DEMO_POST_GAME_MATCHES,
+  DEMO_ROLLING_SUMMARIES,
+} from './domain/postGameFixtures';
+import { analyzePostGameMatch, toMatchSummaryRecord } from './domain/postGameReviewEngine';
+import {
   DEMO_CHAMP_SELECT,
   DEMO_LOADING_CHAMP_SELECT,
   getDemoRuntimeState,
@@ -28,18 +36,33 @@ import {
 import { generateWinConditionPlan } from './domain/winConditionEngine';
 import { fetchLatestPatchVersion } from './services/ddragonService';
 import {
+  deleteClimbGoal,
   getAppState,
+  getCachedMatches,
+  getCachedMetaSnapshot,
+  isTauriEnvironment,
+  loadClimbGoals,
   loadSettings,
+  refreshHighEloMeta,
   setOverlayMode,
   subscribeGameState,
+  syncRecentMatches,
+  upsertClimbGoal,
 } from './services/tauriBridge';
 import type {
   ActiveTab,
+  ClimbGoal,
   DemoScenarioId,
+  HighEloMetaSnapshot,
   OverlayMode,
   UserSettings,
 } from './types/coaching';
-import type { AppRuntimeState, LaneRole, SummonerProfileSummary } from './types/riot';
+import type {
+  AppRuntimeState,
+  LaneRole,
+  MatchV5Detail,
+  SummonerProfileSummary,
+} from './types/riot';
 
 const DEMO_OPTIONS: Array<{ id: DemoScenarioId; label: string }> = [
   { id: 'champ_select', label: 'Demo: Champ Select' },
@@ -69,6 +92,11 @@ export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('champ_select');
   const [patchVersion, setPatchVersion] = useState<string>('16.1.1');
   const [summonerProfile, setSummonerProfile] = useState<SummonerProfileSummary | null>(null);
+  const [matches, setMatches] = useState<MatchV5Detail[]>(DEMO_POST_GAME_MATCHES);
+  const [climbGoals, setClimbGoals] = useState<ClimbGoal[]>([]);
+  const [highEloMeta, setHighEloMeta] = useState<HighEloMetaSnapshot | null>(
+    DEMO_HIGH_ELO_SNAPSHOT
+  );
   const [settings, setSettings] = useState<UserSettings>({
     riotId: '',
     region: 'EUW1',
@@ -77,6 +105,12 @@ export function App() {
     hudOpacity: 92,
     targetDivision: 'PLATINUM IV',
     hasApiKey: false,
+    aiCoach: {
+      provider: 'off',
+      model: 'gemini-2.5-flash',
+      endpoint: 'http://127.0.0.1:11434',
+      hasApiKey: false,
+    },
   });
 
   useEffect(() => {
@@ -90,12 +124,23 @@ export function App() {
     void getAppState().then((state) => {
       if (active && state) setLiveState(state);
     });
+    void loadClimbGoals().then((g) => {
+      if (active) setClimbGoals(g);
+    });
+    void getCachedMetaSnapshot().then((snap) => {
+      if (active && snap) setHighEloMeta(snap);
+    });
+    void getCachedMatches().then((cached) => {
+      if (active && cached.length > 0) setMatches(cached);
+    });
+
     const unsubPromise = subscribeGameState(
       (state) => {
         setLiveState(state);
         if (state.phase === 'champ_select') setActiveTab('champ_select');
         else if (state.phase === 'loading') setActiveTab('win_plan');
         else if (state.phase === 'in_game') setActiveTab('live_coach');
+        else if (state.phase === 'post_game') setActiveTab('post_game');
       },
       (mode) => setMode(mode)
     );
@@ -106,7 +151,6 @@ export function App() {
     };
   }, []);
 
-  // Browser-friendly Alt+J toggle fallback
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.altKey && e.key.toLowerCase() === 'j') {
@@ -129,16 +173,14 @@ export function App() {
     return liveState ?? getDemoRuntimeState('idle');
   }, [demoScenario, liveState]);
 
-  const effectiveChampSelect =
-    runtimeState.champSelect ?? DEMO_LOADING_CHAMP_SELECT;
+  const effectiveChampSelect = runtimeState.champSelect ?? DEMO_LOADING_CHAMP_SELECT;
 
   const winPlan = useMemo(() => {
     const allyRoles = extractRoleMap(effectiveChampSelect.myTeam);
     const enemyRoles = extractRoleMap(effectiveChampSelect.theirTeam);
     const playerSlot = effectiveChampSelect.myTeam.find((s) => s.isLocalPlayer);
-    const playerChampId = playerSlot?.championId && playerSlot.championId > 0
-      ? playerSlot.championId
-      : 234;
+    const playerChampId =
+      playerSlot?.championId && playerSlot.championId > 0 ? playerSlot.championId : 234;
     return generateWinConditionPlan({
       allyRoles,
       enemyRoles,
@@ -179,6 +221,17 @@ export function App() {
     return computeMacroGuidance(runtimeState.liveGame, winPlan, objectives);
   }, [runtimeState.liveGame, winPlan, objectives]);
 
+  const effectiveProfile = summonerProfile ?? runtimeState.summonerProfile;
+
+  const rollingSummaries = useMemo(() => {
+    if (demoScenario !== 'idle' || matches === DEMO_POST_GAME_MATCHES) {
+      return DEMO_ROLLING_SUMMARIES;
+    }
+    return matches.map((m) =>
+      toMatchSummaryRecord(m, analyzePostGameMatch(m, settings.targetDivision))
+    );
+  }, [demoScenario, matches, settings.targetDivision]);
+
   async function toggleOverlayMode(next: OverlayMode) {
     setMode(next);
     await setOverlayMode(next);
@@ -189,6 +242,29 @@ export function App() {
     if (nextScenario === 'champ_select') setActiveTab('champ_select');
     else if (nextScenario === 'loading') setActiveTab('win_plan');
     else if (nextScenario.startsWith('in_game')) setActiveTab('live_coach');
+  }
+
+  async function handleSyncMatches() {
+    const puuid = effectiveProfile?.puuid ?? 'demo-puuid';
+    const synced = await syncRecentMatches(puuid, settings.region, 8);
+    if (synced.length > 0) {
+      setMatches(synced);
+    }
+  }
+
+  async function handleUpsertGoal(goal: ClimbGoal) {
+    await upsertClimbGoal(goal);
+    setClimbGoals((prev) => [goal, ...prev.filter((g) => g.id !== goal.id)]);
+  }
+
+  async function handleDeleteGoal(goalId: string) {
+    await deleteClimbGoal(goalId);
+    setClimbGoals((prev) => prev.filter((g) => g.id !== goalId));
+  }
+
+  async function handleRefreshHighElo() {
+    const snap = await refreshHighEloMeta(settings.region, 10);
+    setHighEloMeta(snap);
   }
 
   if (overlayMode === 'compact') {
@@ -207,7 +283,7 @@ export function App() {
     );
   }
 
-  const effectiveProfile = summonerProfile ?? runtimeState.summonerProfile;
+  const canSyncLive = isTauriEnvironment() && settings.hasApiKey;
 
   return (
     <div className="flex min-h-full items-center justify-center p-3">
@@ -270,7 +346,8 @@ export function App() {
               { id: 'champ_select', label: 'Champ Select', icon: Sparkles },
               { id: 'win_plan', label: 'Win Plan & Map', icon: MapIcon },
               { id: 'live_coach', label: 'Live Coach', icon: Activity },
-              { id: 'climb_m2', label: 'Climb & Review (M2)', icon: TrendingUp },
+              { id: 'post_game', label: 'Post-Game Review', icon: BarChart3 },
+              { id: 'climb_goals', label: 'Climb & Goals', icon: TrendingUp },
               { id: 'settings', label: 'Settings', icon: SettingsIcon },
             ] as const
           ).map((tab) => {
@@ -301,6 +378,7 @@ export function App() {
               session={runtimeState.champSelect ?? DEMO_CHAMP_SELECT}
               patchVersion={patchVersion}
               summonerProfile={effectiveProfile}
+              highEloMeta={highEloMeta}
             />
           )}
           {activeTab === 'win_plan' && (
@@ -308,6 +386,7 @@ export function App() {
               plan={winPlan}
               mapSide={effectiveChampSelect.mapSide}
               championName={playerChampionName}
+              aiConfig={settings.aiCoach}
             />
           )}
           {activeTab === 'live_coach' && (
@@ -319,10 +398,26 @@ export function App() {
               patchVersion={patchVersion}
             />
           )}
-          {activeTab === 'climb_m2' && (
-            <ClimbRoadmapView
+          {activeTab === 'post_game' && (
+            <PostGameReviewView
+              matches={matches}
+              targetDivision={settings.targetDivision}
+              aiConfig={settings.aiCoach}
+              canSyncLive={canSyncLive}
+              onSyncMatches={handleSyncMatches}
+            />
+          )}
+          {activeTab === 'climb_goals' && (
+            <ClimbLadderView
               summonerProfile={effectiveProfile}
               targetDivision={settings.targetDivision}
+              summaries={rollingSummaries}
+              goals={climbGoals}
+              highEloMeta={highEloMeta}
+              canSyncLive={canSyncLive}
+              onUpsertGoal={handleUpsertGoal}
+              onDeleteGoal={handleDeleteGoal}
+              onRefreshHighElo={handleRefreshHighElo}
             />
           )}
           {activeTab === 'settings' && (

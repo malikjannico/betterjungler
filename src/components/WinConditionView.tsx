@@ -1,21 +1,48 @@
 import { useState } from 'react';
-import { Crosshair, Shield, Swords, Target } from 'lucide-react';
+import { Bot, Crosshair, Shield, Swords, Target } from 'lucide-react';
+import { synthesizeDemoWinConBrief } from '../domain/aiCoachFallback';
+import { generateAiDebrief } from '../services/tauriBridge';
 import { SummonersRiftMap } from './SummonersRiftMap';
-import type { WinConditionPlan } from '../types/coaching';
+import type { AiCoachConfig, WinConditionPlan } from '../types/coaching';
 import type { MapSide } from '../types/riot';
 
 interface WinConditionViewProps {
   plan: WinConditionPlan;
   mapSide: MapSide;
   championName: string;
+  aiConfig: AiCoachConfig;
 }
 
 export function WinConditionView({
   plan,
   mapSide,
   championName,
+  aiConfig,
 }: WinConditionViewProps) {
   const [selectedRouteId, setSelectedRouteId] = useState<string>(plan.recommendedRouteId);
+  const [aiBrief, setAiBrief] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  async function handleGenerateBrief() {
+    setAiLoading(true);
+    try {
+      const ctx = JSON.stringify({
+        championName,
+        mapSide,
+        strongSide: plan.strongSide,
+        allyArchetype: plan.allyAnalysis.archetype,
+        enemyArchetype: plan.enemyAnalysis.archetype,
+        primaryWinCondition: plan.primaryWinCondition,
+        enemyWinConditionToDeny: plan.enemyWinConditionToDeny,
+      });
+      const text = await generateAiDebrief(ctx);
+      setAiBrief(text);
+    } catch {
+      setAiBrief(synthesizeDemoWinConBrief(plan, championName));
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   const activeRoute =
     plan.routes.find((r) => r.id === selectedRouteId) ??
@@ -129,6 +156,34 @@ export function WinConditionView({
         route={activeRoute}
         wardSpots={plan.wardSpots}
       />
+
+      <div className="hud-card rounded-xl p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-violet-300">
+            <Bot className="h-4 w-4" />
+            <span>
+              AI Coach Pre-Game Brief (
+              {aiConfig.provider === 'off'
+                ? 'Deterministic Preview'
+                : `${aiConfig.provider.toUpperCase()} • ${aiConfig.model}`}
+              )
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={aiLoading}
+            onClick={() => void handleGenerateBrief()}
+            className="rounded-lg border border-violet-500/40 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 hover:bg-violet-500/25 disabled:opacity-50"
+          >
+            {aiLoading ? 'Summarizing...' : 'Summarize Win-Con Brief'}
+          </button>
+        </div>
+        {aiBrief && (
+          <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-900/80 p-2.5 font-sans text-xs leading-relaxed text-slate-200">
+            {aiBrief}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

@@ -18,7 +18,7 @@ Help a solo-queue League of Legends jungler climb **division by division** by tr
 | M1-04 | As a player in-game, I want an unobstructed HUD overlay that updates builds, objectives, and macro cues live. | Compact click-through dark HUD strip with `Alt+J` toggle to Expanded mode. Updates items, trinkets, potions, full-build swaps, and objective windows from `127.0.0.1:2999`. |
 | M1-05 | As a developer/tester, I want a Demo Simulation Mode to inspect every phase offline. | Instant switching across `Idle`, `Champ Select`, `Loading`, `Early Game`, `Mid Game`, and `Full Build` fixtures. |
 
-### Milestone 2 — Post-Game Review & Climb Ladder (Next Iteration)
+### Milestone 2 — Post-Game Review & Climb Ladder (Implemented)
 | ID | User Story | Acceptance Criteria |
 |---|---|---|
 | M2-01 | Post-Game Match-V5 Timeline Review | Fetches latest Match-V5 + Timeline, plots pathing/wards/deaths on Summoner's Rift, highlights good plays vs mistakes. |

@@ -119,3 +119,87 @@ export interface AppRuntimeState {
   summonerProfile: SummonerProfileSummary | null;
   patchVersion: string;
 }
+
+export interface MatchV5TimelinePosition {
+  x: number;
+  y: number;
+}
+
+export type MatchV5EventType =
+  | 'CHAMPION_KILL'
+  | 'WARD_PLACED'
+  | 'WARD_KILL'
+  | 'ELITE_MONSTER_KILL'
+  | 'ITEM_PURCHASED';
+
+export interface MatchV5TimelineEvent {
+  type: MatchV5EventType;
+  /** Seconds since match start */
+  timestampSec: number;
+  position?: MatchV5TimelinePosition;
+  killerId?: number;
+  victimId?: number;
+  assistingParticipantIds?: number[];
+  creatorId?: number;
+  wardType?: string;
+  monsterType?: string;
+  killerTeamId?: number;
+  itemId?: number;
+}
+
+export interface MatchV5FramePoint {
+  minute: number;
+  position: MatchV5TimelinePosition;
+  totalGold: number;
+  xp: number;
+  cs: number;
+  enemyJunglerGold: number;
+  enemyJunglerXp: number;
+  enemyJunglerCs: number;
+}
+
+export interface MatchV5Detail {
+  matchId: string;
+  playedAt: string;
+  durationSeconds: number;
+  patch: string;
+  queueId: number;
+  win: boolean;
+  mapSide: MapSide;
+  playerParticipantId: number;
+  championId: number;
+  championName: string;
+  enemyJunglerChampionId: number;
+  enemyJunglerName: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  cs: number;
+  visionScore: number;
+  controlWardsBought: number;
+  teamKills: number;
+  teamObjectives: number;
+  enemyObjectives: number;
+  items: number[];
+  frames: MatchV5FramePoint[];
+  events: MatchV5TimelineEvent[];
+}
+
+export interface MatchSummaryRecord {
+  matchId: string;
+  playedAt: string;
+  championId: number;
+  championName: string;
+  win: boolean;
+  durationSeconds: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  csPerMin: number;
+  visionPerMin: number;
+  controlWards: number;
+  goldDiffAt15: number;
+  objectiveSharePct: number;
+  killParticipationPct: number;
+  preObjectiveDeaths: number;
+}

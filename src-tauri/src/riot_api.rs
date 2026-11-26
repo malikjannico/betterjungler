@@ -3,6 +3,7 @@ use std::time::Duration;
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
 
@@ -61,7 +62,7 @@ pub async fn fetch_latest_ddragon_patch(client: &Client) -> AppResult<String> {
         .ok_or_else(|| AppError::RiotApi("Empty Data Dragon versions list".to_string()))
 }
 
-async fn riot_get_json<T: for<'de> Deserialize<'de>>(
+pub async fn riot_get_json<T: for<'de> Deserialize<'de>>(
     client: &Client,
     url: &str,
     api_key: &str,
@@ -205,6 +206,195 @@ fn urlencoding_segment(input: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+pub async fn fetch_recent_ranked_match_ids(
+    client: &Client,
+    api_key: &str,
+    puuid: &str,
+    region: &str,
+    count: usize,
+) -> AppResult<Vec<String>> {
+    let regional = platform_to_regional_route(region);
+    let url = format!(
+        "https://{regional}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids?queue=420&start=0&count={}",
+        count.clamp(1, 20)
+    );
+    riot_get_json(client, &url, api_key).await
+}
+
+pub async fn fetch_match_detail_and_timeline(
+    client: &Client,
+    api_key: &str,
+    match_id: &str,
+    puuid: &str,
+    region: &str,
+) -> AppResult<Value> {
+    let regional = platform_to_regional_route(region);
+    let match_url = format!("https://{regional}.api.riotgames.com/lol/match/v5/matches/{match_id}");
+    let timeline_url =
+        format!("https://{regional}.api.riotgames.com/lol/match/v5/matches/{match_id}/timeline");
+
+    let match_json: Value = riot_get_json(client, &match_url, api_key).await?;
+    let timeline_json: Value = riot_get_json(client, &timeline_url, api_key).await?;
+
+    Ok(normalize_match_v5_detail(match_id, puuid, &match_json, &timeline_json))
+}
+
+pub fn normalize_match_v5_detail(
+    match_id: &str,
+    puuid: &str,
+    match_json: &Value,
+    timeline_json: &Value,
+) -> Value {
+    let info = &match_json["info"];
+    let empty_vec = vec![];
+    let participants = info["participants"].as_array().unwrap_or(&empty_vec);
+
+    let player = participants
+        .iter()
+        .find(|p| p["puuid"].as_str() == Some(puuid))
+        .or_else(|| participants.first());
+
+    let player_pid = player
+        .and_then(|p| p["participantId"].as_i64())
+        .unwrap_or(1);
+    let my_team_id = player.and_then(|p| p["teamId"].as_i64()).unwrap_or(100);
+
+    let enemy_jg = participants.iter().find(|p| {
+        p["teamId"].as_i64() != Some(my_team_id)
+            && p["teamPosition"].as_str() == Some("JUNGLE")
+    });
+    let enemy_jg_pid = enemy_jg
+        .and_then(|p| p["participantId"].as_i64())
+        .unwrap_or(0);
+
+    let team_kills: i64 = participants
+        .iter()
+        .filter(|p| p["teamId"].as_i64() == Some(my_team_id))
+        .map(|p| p["kills"].as_i64().unwrap_or(0))
+        .sum();
+
+    let count_team_objectives = |team_id: i64| -> i64 {
+        let teams = info["teams"].as_array().unwrap_or(&empty_vec);
+        let team = teams.iter().find(|t| t["teamId"].as_i64() == Some(team_id));
+        if let Some(t) = team {
+            let objs = &t["objectives"];
+            objs["dragon"]["kills"].as_i64().unwrap_or(0)
+                + objs["baron"]["kills"].as_i64().unwrap_or(0)
+                + objs["riftHerald"]["kills"].as_i64().unwrap_or(0)
+                + objs["horde"]["kills"].as_i64().unwrap_or(0)
+        } else {
+            0
+        }
+    };
+
+    let mut frames_out = Vec::new();
+    let mut events_out = Vec::new();
+
+    if let Some(frames) = timeline_json["info"]["frames"].as_array() {
+        for (idx, frame) in frames.iter().enumerate() {
+            let pf = &frame["participantFrames"];
+            let p_key = player_pid.to_string();
+            let e_key = enemy_jg_pid.to_string();
+            let p_frame = &pf[&p_key];
+            let e_frame = &pf[&e_key];
+
+            if p_frame.is_object() {
+                let cs = p_frame["minionsKilled"].as_i64().unwrap_or(0)
+                    + p_frame["jungleMinionsKilled"].as_i64().unwrap_or(0);
+                let e_cs = e_frame["minionsKilled"].as_i64().unwrap_or(0)
+                    + e_frame["jungleMinionsKilled"].as_i64().unwrap_or(0);
+
+                frames_out.push(json!({
+                    "minute": idx,
+                    "position": {
+                        "x": p_frame["position"]["x"].as_i64().unwrap_or(7435),
+                        "y": p_frame["position"]["y"].as_i64().unwrap_or(7435)
+                    },
+                    "totalGold": p_frame["totalGold"].as_i64().unwrap_or(0),
+                    "xp": p_frame["xp"].as_i64().unwrap_or(0),
+                    "cs": cs,
+                    "enemyJunglerGold": e_frame["totalGold"].as_i64().unwrap_or(0),
+                    "enemyJunglerXp": e_frame["xp"].as_i64().unwrap_or(0),
+                    "enemyJunglerCs": e_cs
+                }));
+            }
+
+            if let Some(ev_arr) = frame["events"].as_array() {
+                for ev in ev_arr {
+                    let ev_type = ev["type"].as_str().unwrap_or("");
+                    if matches!(
+                        ev_type,
+                        "CHAMPION_KILL"
+                            | "WARD_PLACED"
+                            | "WARD_KILL"
+                            | "ELITE_MONSTER_KILL"
+                            | "ITEM_PURCHASED"
+                    ) {
+                        let ts_sec = ev["timestamp"].as_i64().unwrap_or(0) / 1000;
+                        events_out.push(json!({
+                            "type": ev_type,
+                            "timestampSec": ts_sec,
+                            "position": ev.get("position").cloned(),
+                            "killerId": ev.get("killerId").and_then(|v| v.as_i64()),
+                            "victimId": ev.get("victimId").and_then(|v| v.as_i64()),
+                            "assistingParticipantIds": ev.get("assistingParticipantIds").cloned(),
+                            "creatorId": ev.get("creatorId").and_then(|v| v.as_i64()),
+                            "wardType": ev.get("wardType").and_then(|v| v.as_str()),
+                            "monsterType": ev.get("monsterType").and_then(|v| v.as_str()),
+                            "killerTeamId": ev.get("killerTeamId").and_then(|v| v.as_i64()),
+                            "itemId": ev.get("itemId").and_then(|v| v.as_i64())
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    let ts_ms = info["gameCreation"].as_i64().unwrap_or(0);
+    let played_at = chrono::DateTime::from_timestamp_millis(ts_ms)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+
+    let items: Vec<i64> = (0..=6)
+        .filter_map(|slot| player.and_then(|p| p[format!("item{slot}")].as_i64()))
+        .filter(|&id| id > 0)
+        .collect();
+
+    let cs_total = player
+        .map(|p| {
+            p["totalMinionsKilled"].as_i64().unwrap_or(0)
+                + p["neutralMinionsKilled"].as_i64().unwrap_or(0)
+        })
+        .unwrap_or(0);
+
+    json!({
+        "matchId": match_id,
+        "playedAt": played_at,
+        "durationSeconds": info["gameDuration"].as_i64().unwrap_or(1800),
+        "patch": info["gameVersion"].as_str().unwrap_or("16.1"),
+        "queueId": info["queueId"].as_i64().unwrap_or(420),
+        "win": player.and_then(|p| p["win"].as_bool()).unwrap_or(false),
+        "mapSide": if my_team_id == 200 { "red" } else { "blue" },
+        "playerParticipantId": player_pid,
+        "championId": player.and_then(|p| p["championId"].as_i64()).unwrap_or(0),
+        "championName": player.and_then(|p| p["championName"].as_str()).unwrap_or("Jungler"),
+        "enemyJunglerChampionId": enemy_jg.and_then(|p| p["championId"].as_i64()).unwrap_or(0),
+        "enemyJunglerName": enemy_jg.and_then(|p| p["championName"].as_str()).unwrap_or("Enemy Jungler"),
+        "kills": player.and_then(|p| p["kills"].as_i64()).unwrap_or(0),
+        "deaths": player.and_then(|p| p["deaths"].as_i64()).unwrap_or(0),
+        "assists": player.and_then(|p| p["assists"].as_i64()).unwrap_or(0),
+        "cs": cs_total,
+        "visionScore": player.and_then(|p| p["visionScore"].as_i64()).unwrap_or(0),
+        "controlWardsBought": player.and_then(|p| p["visionWardsBoughtInGame"].as_i64()).unwrap_or(0),
+        "teamKills": team_kills,
+        "teamObjectives": count_team_objectives(my_team_id),
+        "enemyObjectives": count_team_objectives(if my_team_id == 100 { 200 } else { 100 }),
+        "items": items,
+        "frames": frames_out,
+        "events": events_out
+    })
 }
 
 #[cfg(test)]
