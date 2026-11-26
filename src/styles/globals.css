@@ -3,12 +3,11 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --r-shell: 26px;
+    --r-shell: 28px;
     --r-surface: 18px;
     --r-inset: 12px;
     --r-control: 10px;
-    --phase-orb-a: rgba(56, 189, 248, 0.16);
-    --phase-orb-b: rgba(99, 102, 241, 0.12);
+    --phase-tint: rgba(255, 255, 255, 0.035);
     --spring-ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
 
@@ -19,7 +18,8 @@
     margin: 0;
     padding: 0;
     font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
-    letter-spacing: -0.005em;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
   }
 }
 
@@ -27,85 +27,76 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Studio dark backdrop ONLY when running in standalone browser preview */
+/* Restrained architectural studio backdrop for standalone browser preview */
 .lg-canvas-browser {
   background:
-    radial-gradient(circle at 18% 12%, rgba(56, 189, 248, 0.14), transparent 44%),
-    radial-gradient(circle at 84% 82%, rgba(99, 102, 241, 0.12), transparent 46%),
-    radial-gradient(circle at 50% 50%, #0d131f 0%, #05070c 100%);
+    radial-gradient(1100px 520px at 50% -10%, rgba(255, 255, 255, 0.055), transparent 60%),
+    linear-gradient(180deg, #0b0c10 0%, #060709 100%);
 }
 
-/* Adaptive phase light refraction */
+/* Subtle adaptive top refraction tint based on live match state */
 [data-phase="champ_select"] {
-  --phase-orb-a: rgba(56, 189, 248, 0.18);
-  --phase-orb-b: rgba(59, 130, 246, 0.12);
+  --phase-tint: rgba(148, 197, 255, 0.045);
 }
 
 [data-phase="loading"] {
-  --phase-orb-a: rgba(99, 102, 241, 0.18);
-  --phase-orb-b: rgba(34, 211, 238, 0.13);
+  --phase-tint: rgba(165, 180, 252, 0.05);
 }
 
 [data-phase="in_game"] {
-  --phase-orb-a: rgba(16, 185, 129, 0.15);
-  --phase-orb-b: rgba(56, 189, 248, 0.14);
+  --phase-tint: rgba(110, 231, 183, 0.04);
 }
 
 [data-phase="in_game"][data-urgent="true"] {
-  --phase-orb-a: rgba(245, 158, 11, 0.2);
-  --phase-orb-b: rgba(56, 189, 248, 0.14);
+  --phase-tint: rgba(251, 191, 36, 0.07);
 }
 
 [data-phase="post_game"] {
-  --phase-orb-a: rgba(139, 92, 246, 0.16);
-  --phase-orb-b: rgba(56, 189, 248, 0.12);
+  --phase-tint: rgba(196, 181, 253, 0.045);
 }
 
-/* Outer Concentric Liquid Glass Shell */
+/* Outer Concentric Smoked-Crystal Liquid Glass Shell */
 .lg-shell,
 .hud-panel {
   position: relative;
   border-radius: var(--r-shell);
   background:
-    radial-gradient(640px circle at 12% -8%, var(--phase-orb-a), transparent 55%),
-    radial-gradient(560px circle at 92% 108%, var(--phase-orb-b), transparent 55%),
+    radial-gradient(900px 260px at 50% 0%, var(--phase-tint), transparent 65%),
     linear-gradient(
-      155deg,
-      rgba(22, 29, 44, var(--hud-alpha, 0.88)) 0%,
-      rgba(10, 14, 23, var(--hud-alpha, 0.92)) 100%
+      165deg,
+      rgba(28, 30, 38, var(--hud-alpha, 0.82)) 0%,
+      rgba(15, 17, 22, var(--hud-alpha, 0.88)) 100%
     );
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(185%);
+  -webkit-backdrop-filter: blur(40px) saturate(185%);
   border: 1px solid rgba(255, 255, 255, 0.11);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
     inset 0 -1px 0 rgba(255, 255, 255, 0.04),
-    0 28px 64px -12px rgba(0, 0, 0, 0.72),
-    0 0 0 1px rgba(0, 0, 0, 0.35);
-  transition: background 450ms var(--spring-ease), border-color 300ms var(--spring-ease);
+    0 32px 72px -16px rgba(0, 0, 0, 0.78),
+    0 0 0 1px rgba(0, 0, 0, 0.45);
+  transition: background 420ms var(--spring-ease), border-color 280ms var(--spring-ease);
 }
 
-/* Secondary Liquid Glass Surface */
+/* Neutral Frosted Glass Pane */
 .lg-surface,
 .hud-card {
   position: relative;
   border-radius: var(--r-surface);
   background: linear-gradient(
-    145deg,
-    rgba(255, 255, 255, 0.065) 0%,
-    rgba(255, 255, 255, 0.02) 55%,
-    rgba(15, 23, 42, 0.35) 100%
+    160deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.02) 100%
   );
-  backdrop-filter: blur(18px) saturate(160%);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.085);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.13),
-    0 10px 26px -10px rgba(0, 0, 0, 0.5);
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 24px -12px rgba(0, 0, 0, 0.45);
   transition:
     transform 240ms var(--spring-ease),
-    border-color 240ms var(--spring-ease),
-    box-shadow 240ms var(--spring-ease);
+    border-color 240ms var(--spring-ease);
 }
 
 .lg-surface-interactive::after {
@@ -116,8 +107,8 @@
   pointer-events: none;
   opacity: 0;
   background: radial-gradient(
-    300px circle at var(--mx, 50%) var(--my, 50%),
-    rgba(125, 211, 252, 0.11),
+    280px circle at var(--mx, 50%) var(--my, 50%),
+    rgba(255, 255, 255, 0.075),
     transparent 65%
   );
   transition: opacity 220ms ease;
@@ -128,58 +119,55 @@
 }
 
 .lg-surface-interactive:hover {
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
-/* Recessed Smoked-Glass Data Well */
+/* Recessed Smoked-Glass Well */
 .lg-inset {
   border-radius: var(--r-inset);
-  background: rgba(6, 10, 18, 0.56);
-  border: 1px solid rgba(255, 255, 255, 0.055);
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.45),
-    0 1px 0 rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-/* Floating Segmented Rail */
+/* Floating Smoked-Glass Segmented Control */
 .lg-segmented {
   border-radius: 9999px;
-  background: rgba(8, 12, 22, 0.68);
+  background: rgba(0, 0, 0, 0.38);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.42);
   padding: 3px;
 }
 
 .lg-segment-active {
   background: linear-gradient(
     180deg,
-    rgba(125, 211, 252, 0.22) 0%,
-    rgba(56, 189, 248, 0.11) 100%
+    rgba(255, 255, 255, 0.16) 0%,
+    rgba(255, 255, 255, 0.08) 100%
   );
-  border: 1px solid rgba(125, 211, 252, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 4px 12px -2px rgba(14, 165, 233, 0.28);
-  color: #f0f9ff;
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 4px 12px -4px rgba(0, 0, 0, 0.5);
+  color: #ffffff;
 }
 
-/* Tactile Liquid Glass Buttons */
+/* High-Contrast Alabaster Primary CTA */
 .lg-btn-primary {
   border-radius: var(--r-control);
-  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
-  border: 1px solid rgba(186, 230, 253, 0.45);
+  background: linear-gradient(180deg, #ffffff 0%, #e5e7eb 100%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    0 8px 20px -6px rgba(14, 165, 233, 0.55);
-  color: #03111c;
+    inset 0 1px 0 #ffffff,
+    0 8px 20px -8px rgba(255, 255, 255, 0.35);
+  color: #090a0f;
   transition:
     transform 180ms var(--spring-ease),
-    filter 180ms ease,
-    box-shadow 180ms ease;
+    filter 180ms ease;
 }
 
 .lg-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+  filter: brightness(1.04);
   transform: translateY(-1px);
 }
 
@@ -187,14 +175,15 @@
   transform: scale(0.985);
 }
 
+/* Neutral Frosted Control */
 .lg-btn-glass {
   border-radius: var(--r-control);
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.09) 0%,
+    rgba(255, 255, 255, 0.08) 0%,
     rgba(255, 255, 255, 0.03) 100%
   );
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.11);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
   transition:
     transform 180ms var(--spring-ease),
@@ -205,21 +194,20 @@
 .lg-btn-glass:hover:not(:disabled) {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.13) 0%,
     rgba(255, 255, 255, 0.05) 100%
   );
-  border-color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .lg-btn-glass:active:not(:disabled) {
   transform: scale(0.98);
 }
 
-/* Smooth Spring Entrance */
 @keyframes lgViewEnter {
   from {
     opacity: 0;
-    transform: translateY(6px) scale(0.994);
+    transform: translateY(5px) scale(0.996);
   }
   to {
     opacity: 1;
@@ -228,7 +216,7 @@
 }
 
 .lg-view-enter {
-  animation: lgViewEnter 260ms var(--spring-ease) both;
+  animation: lgViewEnter 240ms var(--spring-ease) both;
 }
 
 .hud-scroll::-webkit-scrollbar {
@@ -241,12 +229,12 @@
 }
 
 .hud-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 9999px;
 }
 
 .hud-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(125, 211, 252, 0.45);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 @media (prefers-reduced-motion: reduce) {

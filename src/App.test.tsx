@@ -42,12 +42,16 @@ describe('App HUD Integration', () => {
       screen.getByRole('img', { name: /Summoner's Rift Jungle Route and Ward Map/i })
     ).toBeInTheDocument();
 
-    // Switch demo scenario to Full Build and inspect Live Coach
+    // Switch demo scenario to Full Build and inspect Live Coach (incl. dynamic late-game route map)
     fireEvent.change(screen.getByLabelText('Simulation scenario'), {
       target: { value: 'in_game_full_build' },
     });
     expect(screen.getByText('FULL BUILD OPTIMIZER ACTIVE')).toBeInTheDocument();
     expect(screen.getByText('Full-Build Replacement Alternatives')).toBeInTheDocument();
+    expect(
+      screen.getByRole('img', { name: /Summoner's Rift Jungle Route and Ward Map/i })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Clear 3 · Dragon Sync/i)).toBeInTheDocument();
 
     // Toggle Compact HUD mode and back
     fireEvent.click(screen.getByRole('button', { name: /Compact HUD/i }));

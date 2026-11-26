@@ -73,10 +73,10 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
         ? 'Enemy wants early river skirmishes & invades — track their start with a 1:15 ward and trade opposite-side camps/objectives.'
         : 'Enemy wants to stall for 5v5 scaling — punish greedy wave clears, take Voidgrubs/Dragons on spawn, and deny free Baron setup.';
 
-  const routes = buildRoutesForSide(input.mapSide, strongSide);
   const preferredStyle = playerProfile?.preferredFirstClear ?? 'full_clear';
+  const routes = buildRoutesForSide(input.mapSide, strongSide, preferredStyle);
   const recommendedRoute =
-    routes.find((r) => r.style === preferredStyle) ?? routes[0]!;
+    routes.find((r) => r.stage === 'clear_1' && r.style === preferredStyle) ?? routes[0]!;
 
   const wardSpots = buildWardSpotsForSide(input.mapSide);
 

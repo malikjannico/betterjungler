@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Bot, Crosshair, Shield, Swords, Target } from 'lucide-react';
 import { synthesizeDemoWinConBrief } from '../domain/aiCoachFallback';
 import { generateAiDebrief } from '../services/tauriBridge';
 import type { AiCoachConfig, WinConditionPlan } from '../types/coaching';
@@ -11,6 +10,7 @@ interface WinConditionViewProps {
   plan: WinConditionPlan;
   mapSide: MapSide;
   championName: string;
+  patchVersion: string;
   aiConfig: AiCoachConfig;
 }
 
@@ -18,6 +18,7 @@ export function WinConditionView({
   plan,
   mapSide,
   championName,
+  patchVersion,
   aiConfig,
 }: WinConditionViewProps) {
   const [selectedRouteId, setSelectedRouteId] = useState<string>(plan.recommendedRouteId);
@@ -51,87 +52,68 @@ export function WinConditionView({
   }
 
   return (
-    <div className="space-y-3.5">
-      {/* Win Conditions */}
-      <div className="grid gap-3.5 md:grid-cols-2">
-        <GlassSurface interactive className="p-4">
-          <div className="flex items-center gap-2 text-xs font-bold text-sky-200">
-            <Target className="h-4 w-4 text-sky-300" />
-            How We Win ({championName})
+    <div className="space-y-4">
+      {/* Hairline-Divided Win Conditions */}
+      <GlassSurface className="p-5">
+        <div className="grid gap-6 md:grid-cols-2">
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+              How We Win · {championName}
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-100">
+              {plan.primaryWinCondition}
+            </p>
+            <div className="mt-2.5 text-[11px] text-slate-400">
+              Strong Side:{' '}
+              <span className="font-semibold text-white">
+                {plan.strongSide.toUpperCase()}
+              </span>{' '}
+              · Weak Side: {plan.weakSide.toUpperCase()} · {plan.allyAnalysis.archetype}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">{plan.strongSideReason}</p>
           </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-200">
-            {plan.primaryWinCondition}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-1.5 text-[10px]">
-            <span className="rounded-full border border-sky-300/30 bg-sky-400/15 px-2.5 py-0.5 font-semibold text-sky-200">
-              Strong Side: {plan.strongSide.toUpperCase()}
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-slate-300">
-              Weak Side: {plan.weakSide.toUpperCase()}
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-slate-300">
-              {plan.allyAnalysis.archetype}
-            </span>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">{plan.strongSideReason}</p>
-        </GlassSurface>
 
-        <GlassSurface interactive className="p-4">
-          <div className="flex items-center gap-2 text-xs font-bold text-rose-200">
-            <Shield className="h-4 w-4 text-rose-300" />
-            Enemy Win Condition to Deny
+          <div className="border-t border-white/[0.08] pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+              Enemy Win Condition to Deny
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-100">
+              {plan.enemyWinConditionToDeny}
+            </p>
+            <div className="mt-2.5 text-[11px] text-slate-400">
+              Enemy Comp: {plan.enemyAnalysis.archetype} · AD {plan.enemyAnalysis.adScore} / AP{' '}
+              {plan.enemyAnalysis.apScore}
+            </div>
           </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-200">
-            {plan.enemyWinConditionToDeny}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-1.5 text-[10px]">
-            <span className="rounded-full border border-rose-300/30 bg-rose-400/15 px-2.5 py-0.5 font-semibold text-rose-200">
-              Enemy Comp: {plan.enemyAnalysis.archetype}
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-slate-300">
-              AD {plan.enemyAnalysis.adScore} / AP {plan.enemyAnalysis.apScore}
-            </span>
-          </div>
-        </GlassSurface>
-      </div>
+        </div>
 
-      {/* 3-Phase Gameplan */}
-      <div className="grid gap-3 md:grid-cols-3">
-        <GlassSurface className="p-3.5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-300">
-            <Crosshair className="h-3.5 w-3.5" />
-            Early Game (0–14m)
+        {/* 3-Phase Gameplan */}
+        <div className="mt-5 grid gap-4 border-t border-white/[0.08] pt-4 md:grid-cols-3">
+          <div>
+            <div className="text-[11px] font-semibold text-white">Early Game (0–14m)</div>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+              {plan.phasePlaybook.early}
+            </p>
           </div>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-300">
-            {plan.phasePlaybook.early}
-          </p>
-        </GlassSurface>
-
-        <GlassSurface className="p-3.5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-300">
-            <Swords className="h-3.5 w-3.5" />
-            Mid Game (14–25m)
+          <div>
+            <div className="text-[11px] font-semibold text-white">Mid Game (14–25m)</div>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+              {plan.phasePlaybook.mid}
+            </p>
           </div>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-300">
-            {plan.phasePlaybook.mid}
-          </p>
-        </GlassSurface>
-
-        <GlassSurface className="p-3.5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-violet-300">
-            <Target className="h-3.5 w-3.5" />
-            Late Game (25m+)
+          <div>
+            <div className="text-[11px] font-semibold text-white">Late Game (25m+)</div>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+              {plan.phasePlaybook.late}
+            </p>
           </div>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-300">
-            {plan.phasePlaybook.late}
-          </p>
-        </GlassSurface>
-      </div>
+        </div>
+      </GlassSurface>
 
-      {/* Segmented Route Switcher */}
+      {/* Multi-Clear Stage Selector */}
       <div className="flex flex-wrap items-center gap-2.5">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-          Clear Route
+        <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+          Clear Sequence
         </span>
         <div className="lg-segmented flex flex-wrap gap-1">
           {plan.routes.map((r) => {
@@ -141,10 +123,10 @@ export function WinConditionView({
                 key={r.id}
                 type="button"
                 onClick={() => setSelectedRouteId(r.id)}
-                className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                className={`rounded-full px-3 py-1 text-[11px] font-medium transition ${
                   isCurrent
-                    ? 'lg-segment-active'
-                    : 'border border-transparent text-slate-300 hover:bg-white/[0.04]'
+                    ? 'lg-segment-active font-semibold'
+                    : 'border border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-100'
                 }`}
               >
                 {r.label}
@@ -157,34 +139,31 @@ export function WinConditionView({
 
       <SummonersRiftMap
         mapSide={mapSide}
-        strongSide={plan.strongSide}
+        patchVersion={patchVersion}
         route={activeRoute}
         wardSpots={plan.wardSpots}
       />
 
       <GlassSurface className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-violet-200">
-            <Bot className="h-4 w-4 text-violet-300" />
-            <span>
-              AI Coach Pre-Game Brief (
-              {aiConfig.provider === 'off'
-                ? 'Deterministic Preview'
-                : `${aiConfig.provider.toUpperCase()} • ${aiConfig.model}`}
-              )
-            </span>
-          </div>
+          <span className="text-xs font-medium text-slate-300">
+            AI Coach Pre-Game Brief (
+            {aiConfig.provider === 'off'
+              ? 'Deterministic Preview'
+              : `${aiConfig.provider.toUpperCase()} · ${aiConfig.model}`}
+            )
+          </span>
           <button
             type="button"
             disabled={aiLoading}
             onClick={() => void handleGenerateBrief()}
-            className="lg-btn-glass px-3 py-1 text-xs font-semibold text-violet-200 disabled:opacity-50"
+            className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
             {aiLoading ? 'Summarizing...' : 'Summarize Win-Con Brief'}
           </button>
         </div>
         {aiBrief && (
-          <pre className="lg-inset mt-2.5 whitespace-pre-wrap p-3 font-sans text-xs leading-relaxed text-slate-200">
+          <pre className="lg-inset mt-3 whitespace-pre-wrap p-3 font-sans text-xs leading-relaxed text-slate-200">
             {aiBrief}
           </pre>
         )}

@@ -5,7 +5,7 @@ import type {
   DdragonItemLite,
 } from '../types/coaching';
 
-const FALLBACK_PATCH = '16.1.1';
+const FALLBACK_PATCH = '16.23.1';
 const CATALOG_STORAGE_KEY = 'betterjungler_ddragon_catalog';
 
 let cachedPatch = FALLBACK_PATCH;
@@ -30,6 +30,10 @@ export function getChampionIconUrl(championKey: string, patch = cachedPatch): st
 
 export function getItemIconUrl(itemId: number, patch = cachedPatch): string {
   return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/item/${itemId}.png`;
+}
+
+export function getOfficialMapUrl(patch = cachedPatch): string {
+  return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/map/map11.png`;
 }
 
 export function loadCachedDdragonCatalog(): DdragonHydratedCatalog | null {

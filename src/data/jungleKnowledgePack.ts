@@ -1,3 +1,7 @@
+import {
+  buildMultiClearRoutes,
+  buildOfficialWardSpots,
+} from '../domain/jungleRoutingEngine';
 import type {
   ChampionMetaEntry,
   DdragonHydratedCatalog,
@@ -1469,186 +1473,16 @@ export function getChampionMeta(championId: number): ChampionMetaEntry {
 }
 
 /**
- * Generates standard Blue or Red side jungle clear routes in normalized [0..1000]
- * Summoner's Rift coordinates (0,0 top-left, 1000,1000 bottom-right).
+ * Generates multi-clear jungle routes in normalized [0..1000] official map11.png coordinates.
  */
 export function buildRoutesForSide(
   side: MapSide,
-  strongSide: 'top' | 'bot' | 'mid'
+  strongSide: 'top' | 'bot' | 'mid',
+  preferredFirstClear: 'full_clear' | 'three_camp_gank' = 'full_clear'
 ): JungleRoute[] {
-  if (side === 'blue') {
-    const fullClearBotToTop: JungleRoute = {
-      id: 'blue-full-top',
-      label: 'Blue Full Clear -> Top/Mid Scuttle',
-      side: 'blue',
-      style: 'full_clear',
-      summary:
-        'Start Red Buff (bot-side), clear Krugs -> Raptors -> Wolves -> Blue -> Gromp for Level 4 at 3:25, contesting Top Scuttle.',
-      steps: [
-        { order: 1, campId: 'blue-red', campName: 'Red Buff', x: 525, y: 720, targetTime: '1:30', note: 'Start Red, drag toward Krugs on last auto' },
-        { order: 2, campId: 'blue-krugs', campName: 'Krugs', x: 565, y: 805, targetTime: '1:54', note: 'Clear big + medium Krug first' },
-        { order: 3, campId: 'blue-raptors', campName: 'Raptors', x: 470, y: 635, targetTime: '2:16', note: 'AoE small raptors while kiting toward mid' },
-        { order: 4, campId: 'blue-wolves', campName: 'Wolves', x: 265, y: 560, targetTime: '2:40', note: 'Hit Level 3; watch mid priority' },
-        { order: 5, campId: 'blue-blue', campName: 'Blue Buff', x: 260, y: 465, targetTime: '3:02', note: 'Pull Blue toward Gromp to double-camp finish' },
-        { order: 6, campId: 'blue-gromp', campName: 'Gromp', x: 165, y: 425, targetTime: '3:22', note: 'Save Smite for 3:30 Top Scuttle fight' },
-        { order: 7, campId: 'top-scuttle', campName: 'Top Scuttle', x: 295, y: 315, targetTime: '3:30', note: 'Take Crab, then look Top/Mid gank or reset' },
-      ],
-    };
-
-    const fullClearTopToBot: JungleRoute = {
-      id: 'blue-full-bot',
-      label: 'Blue Full Clear -> Bot Scuttle',
-      side: 'blue',
-      style: 'full_clear',
-      summary:
-        'Start Blue Buff (top-side), clear Gromp -> Wolves -> Raptors -> Red -> Krugs to arrive Bot-side Level 4 at 3:25.',
-      steps: [
-        { order: 1, campId: 'blue-blue', campName: 'Blue Buff', x: 260, y: 465, targetTime: '1:30', note: 'Start Blue, pull toward Gromp' },
-        { order: 2, campId: 'blue-gromp', campName: 'Gromp', x: 165, y: 425, targetTime: '1:54', note: 'Save Smite or use 1st charge on Gromp' },
-        { order: 3, campId: 'blue-wolves', campName: 'Wolves', x: 265, y: 560, targetTime: '2:18', note: 'Transition across mid lane safely' },
-        { order: 4, campId: 'blue-raptors', campName: 'Raptors', x: 470, y: 635, targetTime: '2:40', note: 'Check bot lane wave state while clearing' },
-        { order: 5, campId: 'blue-red', campName: 'Red Buff', x: 525, y: 720, targetTime: '3:02', note: 'Hit Level 4 after Krugs/Red' },
-        { order: 6, campId: 'blue-krugs', campName: 'Krugs', x: 565, y: 805, targetTime: '3:24', note: 'Kite toward river/tri-bush' },
-        { order: 7, campId: 'bot-scuttle', campName: 'Bot Scuttle', x: 705, y: 685, targetTime: '3:30', note: 'Secure Bot Crab & pressure strong-side Bot' },
-      ],
-    };
-
-    const threeCampGank: JungleRoute = {
-      id: 'blue-3camp-gank',
-      label: strongSide === 'bot' ? '3-Camp Bot Gank / Dive (2:45)' : '3-Camp Top/Mid Gank (2:45)',
-      side: 'blue',
-      style: 'three_camp_gank',
-      summary:
-        'Fast Level 3 gank/invade timing: clear Red -> Krugs -> Raptors (or Blue -> Gromp -> Wolves) and impact your volatile strong side before enemy full clear.',
-      steps:
-        strongSide === 'bot'
-          ? [
-              { order: 1, campId: 'blue-blue', campName: 'Blue Buff', x: 260, y: 465, targetTime: '1:30', note: 'Fast leashless start' },
-              { order: 2, campId: 'blue-gromp', campName: 'Gromp', x: 165, y: 425, targetTime: '1:52', note: 'Smite Gromp for speed' },
-              { order: 3, campId: 'blue-red', campName: 'Red Buff', x: 525, y: 720, targetTime: '2:28', note: 'Cross to Red for Level 3 + Red slow' },
-              { order: 4, campId: 'gank-bot', campName: 'Gank / Dive Bot', x: 830, y: 855, targetTime: '2:45', note: 'Gank extended enemy bot or invade enemy Blue' },
-            ]
-          : [
-              { order: 1, campId: 'blue-red', campName: 'Red Buff', x: 525, y: 720, targetTime: '1:30', note: 'Start Red for burn + slow' },
-              { order: 2, campId: 'blue-blue', campName: 'Blue Buff', x: 260, y: 465, targetTime: '2:05', note: 'Direct cross to Blue' },
-              { order: 3, campId: 'blue-gromp', campName: 'Gromp', x: 165, y: 425, targetTime: '2:30', note: 'Hit Level 3 with Double Buffs' },
-              { order: 4, campId: 'gank-top', campName: 'Gank Top / Invade', x: 175, y: 165, targetTime: '2:45', note: 'Punish overextended Top or catch enemy jungler at Red' },
-            ],
-    };
-
-    return strongSide === 'bot'
-      ? [fullClearTopToBot, threeCampGank, fullClearBotToTop]
-      : [fullClearBotToTop, threeCampGank, fullClearTopToBot];
-  }
-
-  // Red side routes
-  const redFullToBot: JungleRoute = {
-    id: 'red-full-bot',
-    label: 'Red Full Clear -> Bot Scuttle',
-    side: 'red',
-    style: 'full_clear',
-    summary:
-      'Start Red Buff (top-side), clear Krugs -> Raptors -> Wolves -> Blue -> Gromp to finish Level 4 near strong-side Bot.',
-    steps: [
-      { order: 1, campId: 'red-red', campName: 'Red Buff', x: 475, y: 275, targetTime: '1:30', note: 'Start Red, kite toward Krugs' },
-      { order: 2, campId: 'red-krugs', campName: 'Krugs', x: 430, y: 195, targetTime: '1:54', note: 'Finish big + medium Krug' },
-      { order: 3, campId: 'red-raptors', campName: 'Raptors', x: 530, y: 365, targetTime: '2:18', note: 'Clear AoE while scanning Mid' },
-      { order: 4, campId: 'red-wolves', campName: 'Wolves', x: 735, y: 440, targetTime: '2:42', note: 'Cross mid into bot quadrant' },
-      { order: 5, campId: 'red-blue', campName: 'Blue Buff', x: 745, y: 535, targetTime: '3:04', note: 'Kite Blue toward Gromp' },
-      { order: 6, campId: 'red-gromp', campName: 'Gromp', x: 835, y: 575, targetTime: '3:24', note: 'Save Smite for Scuttle contest' },
-      { order: 7, campId: 'bot-scuttle', campName: 'Bot Scuttle', x: 705, y: 685, targetTime: '3:30', note: 'Take Bot Scuttle -> gank Bot or recall' },
-    ],
-  };
-
-  const redFullToTop: JungleRoute = {
-    id: 'red-full-top',
-    label: 'Red Full Clear -> Top Scuttle',
-    side: 'red',
-    style: 'full_clear',
-    summary:
-      'Start Blue Buff (bot-side), clear Gromp -> Wolves -> Raptors -> Red -> Krugs for Level 4 Top-side play at 3:25.',
-    steps: [
-      { order: 1, campId: 'red-blue', campName: 'Blue Buff', x: 745, y: 535, targetTime: '1:30', note: 'Start Blue, pull toward Gromp' },
-      { order: 2, campId: 'red-gromp', campName: 'Gromp', x: 835, y: 575, targetTime: '1:54', note: 'Clear Gromp cleanly' },
-      { order: 3, campId: 'red-wolves', campName: 'Wolves', x: 735, y: 440, targetTime: '2:18', note: 'Transition top side' },
-      { order: 4, campId: 'red-raptors', campName: 'Raptors', x: 530, y: 365, targetTime: '2:40', note: 'Watch Mid & Top wave push' },
-      { order: 5, campId: 'red-red', campName: 'Red Buff', x: 475, y: 275, targetTime: '3:02', note: 'Keep Smite ready for Scuttle' },
-      { order: 6, campId: 'red-krugs', campName: 'Krugs', x: 430, y: 195, targetTime: '3:24', note: 'Hit Level 4' },
-      { order: 7, campId: 'top-scuttle', campName: 'Top Scuttle', x: 295, y: 315, targetTime: '3:30', note: 'Secure Top Crab & look Top gank' },
-    ],
-  };
-
-  const redThreeCamp: JungleRoute = {
-    id: 'red-3camp-gank',
-    label: strongSide === 'bot' ? '3-Camp Bot Pressure (2:45)' : '3-Camp Top Gank (2:45)',
-    side: 'red',
-    style: 'three_camp_gank',
-    summary: 'Early Level 3 double-buff tempo to ambush volatile lanes before 3:00.',
-    steps: [
-      { order: 1, campId: 'red-red', campName: 'Red Buff', x: 475, y: 275, targetTime: '1:30', note: 'Start Red for burn + slow' },
-      { order: 2, campId: 'red-blue', campName: 'Blue Buff', x: 745, y: 535, targetTime: '2:06', note: 'Cross directly to Blue' },
-      { order: 3, campId: 'red-gromp', campName: 'Gromp', x: 835, y: 575, targetTime: '2:30', note: 'Level 3 with Red + Blue' },
-      { order: 4, campId: 'gank-bot', campName: 'Gank Strong Side', x: 835, y: 840, targetTime: '2:45', note: 'Gank Bot/Mid or invade Blue-side Krugs' },
-    ],
-  };
-
-  return strongSide === 'bot'
-    ? [redFullToBot, redThreeCamp, redFullToTop]
-    : [redFullToTop, redThreeCamp, redFullToBot];
+  return buildMultiClearRoutes(side, strongSide, preferredFirstClear);
 }
 
 export function buildWardSpotsForSide(side: MapSide): WardSpot[] {
-  const isBlue = side === 'blue';
-  return [
-    {
-      id: 'early-raptor-ward',
-      label: 'Enemy Raptor Tracking Ward',
-      kind: 'deep',
-      phase: 'early',
-      x: isBlue ? 535 : 465,
-      y: isBlue ? 390 : 610,
-      timing: '1:10 – 1:25 (before recall for Sweeper)',
-      reason: 'Spots enemy jungler raptor start/clear direction so your lanes know which side gets ganked at 3:15.',
-    },
-    {
-      id: 'river-entrance-ward',
-      label: 'Defensive Jungle Entrance Ward',
-      kind: 'stealth',
-      phase: 'early',
-      x: isBlue ? 360 : 640,
-      y: isBlue ? 470 : 530,
-      timing: '1:20 (if facing aggressive early invader)',
-      reason: 'Protects your opposite quadrant against Level 2/3 invades from Lee Sin, Xin Zhao, or Graves.',
-    },
-    {
-      id: 'dragon-control-ward',
-      label: 'Dragon Pit Control Ward',
-      kind: 'control',
-      phase: 'objective',
-      x: 680,
-      y: 710,
-      timing: '4:30 – 4:50 (45s before Dragon spawn)',
-      reason: 'Denies enemy pit vision so you can sneak Dragon or force a blind face-check.',
-    },
-    {
-      id: 'grubs-baron-control',
-      label: 'Grubs / Baron Pit Control Ward',
-      kind: 'control',
-      phase: 'objective',
-      x: 325,
-      y: 285,
-      timing: '5:30 (Grubs) / 24:15 (Baron)',
-      reason: 'Clears pit vision and spots river rotations before starting Voidgrubs, Herald, or Baron.',
-    },
-    {
-      id: 'deep-quadrant-ward',
-      label: 'Deep Quadrant Cross-Map Ward',
-      kind: 'deep',
-      phase: 'mid_late',
-      x: isBlue ? 730 : 270,
-      y: isBlue ? 545 : 455,
-      timing: 'Mid-game after pushing Tier 1 tower',
-      reason: 'Tracks enemy jungler respawning on their camp so your team can safely push side lanes or cross-map.',
-    },
-  ];
+  return buildOfficialWardSpots(side);
 }

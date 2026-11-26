@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { Flame, TrendingUp } from 'lucide-react';
 import {
   aggregateDeathHeatmap,
   computeLpDeltaSummary,
@@ -7,13 +6,19 @@ import {
 import type { LpHistoryPoint } from '../types/coaching';
 import type { MatchV5Detail } from '../types/riot';
 import { GlassSurface } from './GlassSurface';
+import { OfficialRiftMapBase } from './OfficialRiftMapBase';
 
 interface ClimbTrendChartsProps {
   matches: MatchV5Detail[];
   lpHistory: LpHistoryPoint[];
+  patchVersion: string;
 }
 
-export function ClimbTrendCharts({ matches, lpHistory }: ClimbTrendChartsProps) {
+export function ClimbTrendCharts({
+  matches,
+  lpHistory,
+  patchVersion,
+}: ClimbTrendChartsProps) {
   const lpSummary = useMemo(() => computeLpDeltaSummary(lpHistory), [lpHistory]);
   const heatmap = useMemo(() => aggregateDeathHeatmap(matches), [matches]);
 
@@ -40,26 +45,23 @@ export function ClimbTrendCharts({ matches, lpHistory }: ClimbTrendChartsProps) 
       : '';
 
   return (
-    <div className="grid gap-3.5 lg:grid-cols-[1.3fr_1fr]">
+    <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
       {/* LP Climb Progression Chart */}
-      <GlassSurface interactive className="p-4">
-        <div className="mb-2.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-100">
-            <TrendingUp className="h-4 w-4 text-emerald-300" />
-            <span>LP Climb Progression ({lpHistory.length} games)</span>
-          </div>
+      <GlassSurface className="p-5">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-white">
+            LP Climb Progression ({lpHistory.length} games)
+          </h3>
           <div className="flex items-center gap-2 text-[11px]">
             <span
-              className={`tabular-nums rounded-full px-2.5 py-0.5 font-bold ${
-                lpSummary.netLpChange >= 0
-                  ? 'bg-emerald-400/15 text-emerald-200'
-                  : 'bg-rose-400/15 text-rose-200'
+              className={`tabular-nums font-bold ${
+                lpSummary.netLpChange >= 0 ? 'text-emerald-300' : 'text-rose-300'
               }`}
             >
               {lpSummary.netLpChange >= 0 ? '+' : ''}
               {lpSummary.netLpChange} LP
             </span>
-            <span className="text-slate-400">{lpSummary.streakText}</span>
+            <span className="text-slate-400">· {lpSummary.streakText}</span>
           </div>
         </div>
 
@@ -68,12 +70,12 @@ export function ClimbTrendCharts({ matches, lpHistory }: ClimbTrendChartsProps) 
             viewBox={`0 0 ${width} ${height}`}
             role="img"
             aria-label="LP Progression Chart"
-            className="w-full rounded-[10px] bg-[#080d18]"
+            className="w-full rounded-[10px]"
           >
             <defs>
               <linearGradient id="lpAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.28" />
-                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.01" />
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.16" />
+                <stop offset="100%" stopColor="#ffffff" stopOpacity="0.01" />
               </linearGradient>
             </defs>
 
@@ -82,8 +84,8 @@ export function ClimbTrendCharts({ matches, lpHistory }: ClimbTrendChartsProps) 
               <polyline
                 points={lpPolyline}
                 fill="none"
-                stroke="#38bdf8"
-                strokeWidth="2.5"
+                stroke="#e2e8f0"
+                strokeWidth="2.2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
@@ -102,80 +104,57 @@ export function ClimbTrendCharts({ matches, lpHistory }: ClimbTrendChartsProps) 
 
         <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
           <span>Current: {lpSummary.currentLabel}</span>
-          <span>Emerald = Win • Coral = Loss</span>
+          <span>Emerald = Win · Coral = Loss</span>
         </div>
       </GlassSurface>
 
-      {/* Multi-Game Death Cluster Heatmap */}
-      <GlassSurface interactive className="p-4">
-        <div className="mb-2.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-100">
-            <Flame className="h-4 w-4 text-rose-300" />
-            <span>Multi-Game Death Heatmap ({heatmap.totalDeaths})</span>
-          </div>
-          <span className="rounded-full bg-rose-400/15 px-2.5 py-0.5 text-[10px] font-bold text-rose-200">
+      {/* Multi-Game Death Heatmap on Official map11.png */}
+      <GlassSurface className="p-5">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-white">
+            Multi-Game Death Heatmap ({heatmap.totalDeaths})
+          </h3>
+          <span className="text-[11px] font-semibold text-rose-300">
             {heatmap.preObjectiveDeaths} Pre-Obj
           </span>
         </div>
 
-        <div className="grid grid-cols-[145px_1fr] items-center gap-3">
+        <div className="grid grid-cols-[150px_1fr] items-center gap-3.5">
           <div className="lg-inset p-1.5">
             <svg
               viewBox="0 0 1000 1000"
               role="img"
               aria-label="Multi-Game Death Heatmap"
-              className="aspect-square w-full rounded-[9px] bg-[#080e1a]"
+              className="aspect-square w-full rounded-[9px]"
             >
               <defs>
                 <radialGradient id="heatPreObj">
-                  <stop offset="0%" stopColor="#ef4444" stopOpacity="0.7" />
+                  <stop offset="0%" stopColor="#ef4444" stopOpacity="0.82" />
                   <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
                 </radialGradient>
                 <radialGradient id="heatStd">
-                  <stop offset="0%" stopColor="#fb7185" stopOpacity="0.6" />
+                  <stop offset="0%" stopColor="#fb7185" stopOpacity="0.68" />
                   <stop offset="100%" stopColor="#fb7185" stopOpacity="0" />
                 </radialGradient>
               </defs>
 
-              <path
-                d="M 115 885 L 115 125 L 885 125"
-                fill="none"
-                stroke="rgba(148,163,184,0.18)"
-                strokeWidth="22"
-              />
-              <path
-                d="M 115 885 L 885 885 L 885 125"
-                fill="none"
-                stroke="rgba(148,163,184,0.18)"
-                strokeWidth="22"
-              />
-              <line
-                x1="120"
-                y1="880"
-                x2="880"
-                y2="120"
-                stroke="rgba(148,163,184,0.18)"
-                strokeWidth="20"
-              />
-              <path
-                d="M 160 175 Q 500 500 840 825"
-                fill="none"
-                stroke="rgba(56,189,248,0.16)"
-                strokeWidth="52"
-              />
+              <OfficialRiftMapBase patchVersion={patchVersion} />
+
               {heatmap.points.map((pt) => (
                 <g key={pt.id}>
                   <circle
                     cx={pt.x}
                     cy={pt.y}
-                    r={pt.isPreObjective ? 88 : 68}
+                    r={pt.isPreObjective ? 92 : 70}
                     fill={pt.isPreObjective ? 'url(#heatPreObj)' : 'url(#heatStd)'}
                   />
                   <circle
                     cx={pt.x}
                     cy={pt.y}
-                    r="13"
+                    r="14"
                     fill={pt.isPreObjective ? '#ef4444' : '#fda4af'}
+                    stroke="rgba(0,0,0,0.75)"
+                    strokeWidth="4"
                   />
                 </g>
               ))}
@@ -184,10 +163,10 @@ export function ClimbTrendCharts({ matches, lpHistory }: ClimbTrendChartsProps) 
 
           <div className="space-y-2 text-[11px]">
             <div className="lg-inset p-2.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
                 Highest-Risk Zone
               </div>
-              <div className="mt-0.5 font-bold text-rose-200">
+              <div className="mt-0.5 font-semibold text-rose-300">
                 {heatmap.topDangerZone ?? 'No deaths recorded'}
               </div>
             </div>

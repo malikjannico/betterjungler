@@ -1,13 +1,5 @@
 import { useMemo, useState } from 'react';
-import {
-  CheckCircle2,
-  Database,
-  Plus,
-  RefreshCw,
-  Target,
-  Trash2,
-  TrendingUp,
-} from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { findJungleChampionById } from '../data/jungleKnowledgePack';
 import {
   KPI_META,
@@ -33,6 +25,7 @@ interface ClimbLadderViewProps {
   summaries: MatchSummaryRecord[];
   matches: MatchV5Detail[];
   lpHistory: LpHistoryPoint[];
+  patchVersion: string;
   goals: ClimbGoal[];
   highEloMeta: HighEloMetaSnapshot | null;
   canSyncLive: boolean;
@@ -56,6 +49,7 @@ export function ClimbLadderView({
   summaries,
   matches,
   lpHistory,
+  patchVersion,
   goals,
   highEloMeta,
   canSyncLive,
@@ -123,73 +117,70 @@ export function ClimbLadderView({
   const existingIds = new Set(goals.map((g) => g.id));
 
   return (
-    <div className="space-y-3.5">
+    <div className="space-y-4">
       {/* Division Climb Header */}
-      <GlassSurface className="p-4">
+      <GlassSurface className="p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-sky-300" />
-              <h2 className="text-sm font-bold text-slate-50">
-                Division Climb Ladder → {targetDivision}
-              </h2>
-            </div>
+            <h2 className="text-sm font-semibold text-white">
+              Division Climb Ladder → {targetDivision}
+            </h2>
             <p className="mt-0.5 text-[11px] text-slate-400">
-              Rolling last {evaluation.matchCount} ranked matches ({evaluation.winRatePct}% WR) •
-              Readiness Score:{' '}
-              <span className="font-bold text-sky-300">{evaluation.overallReadinessPct}%</span>
+              Rolling last {evaluation.matchCount} ranked matches ({evaluation.winRatePct}% WR) ·
+              Readiness:{' '}
+              <span className="font-semibold text-white">
+                {evaluation.overallReadinessPct}%
+              </span>
             </p>
           </div>
 
           {summonerProfile ? (
-            <div className="lg-inset border-sky-300/30 bg-sky-400/10 px-3 py-1.5 text-xs">
-              <div className="font-bold text-sky-200">{summonerProfile.riotId}</div>
-              <div className="text-[11px] text-slate-300">
-                {summonerProfile.tier} {summonerProfile.rank} • {summonerProfile.leaguePoints} LP (
+            <div className="lg-inset px-3 py-1.5 text-xs">
+              <div className="font-semibold text-white">{summonerProfile.riotId}</div>
+              <div className="text-[11px] text-slate-400">
+                {summonerProfile.tier} {summonerProfile.rank} · {summonerProfile.leaguePoints} LP (
                 {summonerProfile.wins}W / {summonerProfile.losses}L)
               </div>
             </div>
           ) : (
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-slate-300">
+            <span className="text-[11px] text-slate-400">
               Using {evaluation.matchCount} local/demo ranked games
             </span>
           )}
         </div>
 
-        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/[0.08]">
+        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-all duration-500"
+            className="h-full rounded-full bg-white/80 transition-all duration-500"
             style={{ width: `${evaluation.overallReadinessPct}%` }}
           />
         </div>
       </GlassSurface>
 
       {/* 6-Pillar Division Benchmarks */}
-      <GlassSurface className="p-4">
-        <div className="mb-2.5 text-xs font-bold text-slate-100">
+      <GlassSurface className="p-5">
+        <div className="mb-3 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
           Jungle KPIs vs. {evaluation.targetTier} Benchmark
         </div>
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
           {evaluation.comparisons.map((comp) => {
-            const badgeStyle =
+            const statusTextColor =
               comp.status === 'on_track'
-                ? 'bg-emerald-400/15 text-emerald-200'
+                ? 'text-emerald-300'
                 : comp.status === 'close'
-                  ? 'bg-amber-400/15 text-amber-200'
-                  : 'bg-rose-400/15 text-rose-200';
+                  ? 'text-amber-300'
+                  : 'text-rose-300';
 
             return (
               <div key={comp.metric} className="lg-inset p-3 text-xs">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-200">{comp.label}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${badgeStyle}`}
-                  >
-                    {comp.status.replace('_', ' ').toUpperCase()}
+                  <span className="font-medium text-slate-200">{comp.label}</span>
+                  <span className={`text-[10px] font-semibold uppercase ${statusTextColor}`}>
+                    {comp.status.replace('_', ' ')}
                   </span>
                 </div>
                 <div className="mt-1.5 flex items-baseline justify-between">
-                  <span className="tabular-nums text-base font-extrabold text-sky-200">
+                  <span className="tabular-nums text-base font-bold text-white">
                     {comp.currentValue}
                     {comp.unit}
                   </span>
@@ -198,7 +189,7 @@ export function ClimbLadderView({
                     {comp.unit}
                   </span>
                 </div>
-                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
+                <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.08]">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${
                       comp.status === 'on_track'
@@ -217,26 +208,29 @@ export function ClimbLadderView({
         </div>
       </GlassSurface>
 
-      {/* LP Progression & Multi-Game Death Heatmap */}
-      <ClimbTrendCharts matches={matches} lpHistory={lpHistory} />
+      {/* LP Progression & Official Map Multi-Game Death Heatmap */}
+      <ClimbTrendCharts
+        matches={matches}
+        lpHistory={lpHistory}
+        patchVersion={patchVersion}
+      />
 
       {/* Goals & High-Elo Sampler */}
-      <div className="grid gap-3.5 lg:grid-cols-2">
-        <GlassSurface className="space-y-2.5 p-4">
-          <div className="flex items-center gap-2 text-xs font-bold text-amber-200">
-            <Target className="h-4 w-4 text-amber-300" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <GlassSurface className="space-y-3 p-5">
+          <h3 className="text-xs font-semibold text-white">
             Recommended Next Focus Goals
-          </div>
+          </h3>
           {evaluation.suggestedGoals.length > 0 ? (
             evaluation.suggestedGoals.map((sg) => {
               const pinned = existingIds.has(sg.id);
               return (
                 <div
                   key={sg.id}
-                  className="lg-inset flex items-center justify-between gap-2 p-2.5 text-xs"
+                  className="lg-inset flex items-center justify-between gap-2 p-3 text-xs"
                 >
                   <div>
-                    <div className="font-semibold text-slate-100">{sg.title}</div>
+                    <div className="font-medium text-white">{sg.title}</div>
                     <div className="text-[11px] text-slate-400">
                       Current: {sg.currentValue}
                       {sg.unit} → Target: {sg.targetValue}
@@ -247,7 +241,7 @@ export function ClimbLadderView({
                     type="button"
                     disabled={pinned}
                     onClick={() => void handlePinSuggested(sg)}
-                    className="lg-btn-glass shrink-0 px-2.5 py-1 text-[11px] font-semibold text-sky-200 disabled:opacity-50"
+                    className="lg-btn-glass shrink-0 px-3 py-1 text-[11px] font-medium text-white disabled:opacity-50"
                   >
                     {pinned ? 'Pinned' : 'Pin Goal'}
                   </button>
@@ -257,15 +251,15 @@ export function ClimbLadderView({
           ) : (
             <p className="text-xs text-emerald-300">
               All KPIs meet {evaluation.targetTier} benchmarks — consider raising your Target
-              Division in Settings!
+              Division in Settings.
             </p>
           )}
 
           <form
             onSubmit={(e) => void handleAddCustomGoal(e)}
-            className="mt-3 space-y-2 border-t border-white/[0.07] pt-3"
+            className="mt-3 space-y-2 border-t border-white/[0.08] pt-3"
           >
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+            <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
               Add Custom Improvement Goal
             </div>
             <div className="grid grid-cols-[1fr_90px] gap-2">
@@ -276,7 +270,7 @@ export function ClimbLadderView({
                 className="lg-inset px-2.5 py-1.5 text-xs text-slate-100 outline-none"
               >
                 {KPI_OPTIONS.map((k) => (
-                  <option key={k} value={k} className="bg-slate-900">
+                  <option key={k} value={k} className="bg-zinc-900">
                     {KPI_META[k].label}
                   </option>
                 ))}
@@ -300,50 +294,47 @@ export function ClimbLadderView({
               />
               <button
                 type="submit"
-                className="lg-btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold"
+                className="lg-btn-primary px-3.5 py-1.5 text-xs font-bold"
               >
-                <Plus className="h-3.5 w-3.5" />
                 Add
               </button>
             </div>
           </form>
         </GlassSurface>
 
-        <div className="space-y-3.5">
-          <GlassSurface className="p-4">
-            <div className="mb-2.5 text-xs font-bold text-slate-100">
+        <div className="space-y-4">
+          <GlassSurface className="p-5">
+            <h3 className="mb-2.5 text-xs font-semibold text-white">
               Your Pinned Climb Goals ({goals.length})
-            </div>
+            </h3>
             {goals.length === 0 ? (
               <p className="text-[11px] text-slate-400">
                 Pin one of the recommended bottleneck goals or create your own on the left.
               </p>
             ) : (
-              <div className="space-y-1.5">
+              <div className="divide-y divide-white/[0.06]">
                 {goals.map((goal) => (
                   <div
                     key={goal.id}
-                    className={`lg-inset flex items-center justify-between gap-2 p-2.5 text-xs ${
-                      goal.status === 'completed'
-                        ? 'border-emerald-400/35 bg-emerald-400/10'
-                        : ''
-                    }`}
+                    className="flex items-center justify-between gap-2 py-2.5 text-xs"
                   >
                     <button
                       type="button"
                       onClick={() => void handleToggleGoalStatus(goal)}
-                      className="flex items-center gap-2 text-left"
+                      className="flex items-center gap-2.5 text-left"
                     >
-                      <CheckCircle2
-                        className={`h-4 w-4 shrink-0 ${
-                          goal.status === 'completed' ? 'text-emerald-300' : 'text-slate-500'
+                      <span
+                        className={`h-3 w-3 rounded-full border ${
+                          goal.status === 'completed'
+                            ? 'border-emerald-300 bg-emerald-400'
+                            : 'border-slate-500'
                         }`}
                       />
                       <span
                         className={
                           goal.status === 'completed'
-                            ? 'text-slate-400 line-through'
-                            : 'font-medium text-slate-100'
+                            ? 'text-slate-500 line-through'
+                            : 'font-medium text-white'
                         }
                       >
                         {goal.title}
@@ -363,26 +354,28 @@ export function ClimbLadderView({
             )}
           </GlassSurface>
 
-          <GlassSurface className="p-4">
+          <GlassSurface className="p-5">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-bold text-sky-200">
-                <Database className="h-4 w-4 text-sky-300" />
+              <h3 className="text-xs font-semibold text-white">
                 High-Elo Match-V5 Meta Sampler
-              </div>
+              </h3>
               <button
                 type="button"
                 disabled={refreshingMeta}
                 onClick={() => void handleRefreshMeta()}
-                className="lg-btn-glass inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-sky-200 disabled:opacity-50"
+                className="lg-btn-glass px-3 py-1 text-[11px] font-medium text-white disabled:opacity-50"
               >
-                <RefreshCw className={`h-3 w-3 ${refreshingMeta ? 'animate-spin' : ''}`} />
-                {canSyncLive ? 'Sample Challenger' : 'Refresh Demo Sample'}
+                {refreshingMeta
+                  ? 'Sampling...'
+                  : canSyncLive
+                    ? 'Sample Challenger'
+                    : 'Refresh Demo Sample'}
               </button>
             </div>
             {highEloMeta ? (
               <div className="mt-2.5 space-y-2 text-[11px]">
                 <div className="text-slate-400">
-                  Patch {highEloMeta.patch} ({highEloMeta.region}) •{' '}
+                  Patch {highEloMeta.patch} ({highEloMeta.region}) ·{' '}
                   {highEloMeta.sampleMatches} sampled high-elo matches blended into Champ Select
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -394,7 +387,7 @@ export function ClimbLadderView({
                         className="lg-inset px-2.5 py-1 text-[11px] text-slate-200"
                       >
                         {champ?.name ?? `#${stat.championId}`}:{' '}
-                        <span className="font-bold text-sky-300">{stat.winRate}%</span> (
+                        <span className="font-semibold text-white">{stat.winRate}%</span> (
                         {stat.games}g)
                       </span>
                     );

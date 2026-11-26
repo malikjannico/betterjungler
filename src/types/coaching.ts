@@ -34,10 +34,20 @@ export interface JungleRouteStep {
   note: string;
 }
 
+export type JungleRouteStage =
+  | 'clear_1'
+  | 'clear_2'
+  | 'objective_sync'
+  | 'late_baron';
+
 export interface JungleRoute {
   id: string;
   label: string;
   side: MapSide;
+  stage: JungleRouteStage;
+  stageLabel: string;
+  timeWindow: string;
+  whyThisClear: string;
   style: 'full_clear' | 'three_camp_gank' | 'invade';
   summary: string;
   steps: JungleRouteStep[];

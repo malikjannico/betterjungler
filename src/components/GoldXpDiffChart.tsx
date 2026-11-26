@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { Activity } from 'lucide-react';
 import { buildGoldXpSeries } from '../domain/trendAnalyticsEngine';
 import type { MatchV5Detail } from '../types/riot';
 import { GlassSurface } from './GlassSurface';
@@ -44,16 +43,13 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
   const activeCoord = coords[Math.min(selectedIdx, coords.length - 1)] ?? firstCoord;
 
   return (
-    <GlassSurface className="p-4">
-      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs font-bold text-slate-100">
-          <Activity className="h-4 w-4 text-sky-300" />
-          <span>
-            {metric === 'goldDiff' ? 'Gold' : 'XP'} Diff vs {match.enemyJunglerName}
-          </span>
-        </div>
+    <GlassSurface className="p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold text-white">
+          {metric === 'goldDiff' ? 'Gold' : 'XP'} Diff vs {match.enemyJunglerName}
+        </h3>
 
-        <div className="flex items-center gap-2.5 text-[11px]">
+        <div className="flex items-center gap-3 text-[11px]">
           <span className="text-slate-400">
             Peak Lead:{' '}
             <strong className="tabular-nums text-emerald-300">+{series.maxLead}g</strong>
@@ -63,9 +59,9 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             <button
               type="button"
               onClick={() => setMetric('goldDiff')}
-              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
                 metric === 'goldDiff'
-                  ? 'lg-segment-active'
+                  ? 'lg-segment-active font-semibold'
                   : 'border border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -74,9 +70,9 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             <button
               type="button"
               onClick={() => setMetric('xpDiff')}
-              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
                 metric === 'xpDiff'
-                  ? 'lg-segment-active'
+                  ? 'lg-segment-active font-semibold'
                   : 'border border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -91,20 +87,12 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
           viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label="Gold and XP Diff vs Enemy Jungler Chart"
-          className="w-full rounded-[10px] bg-[#080d18]"
+          className="w-full rounded-[10px]"
         >
           <defs>
             <linearGradient id="diffAreaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop
-                offset="0%"
-                stopColor={metric === 'goldDiff' ? '#38bdf8' : '#a78bfa'}
-                stopOpacity="0.28"
-              />
-              <stop
-                offset="100%"
-                stopColor={metric === 'goldDiff' ? '#38bdf8' : '#a78bfa'}
-                stopOpacity="0.02"
-              />
+              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.16" />
+              <stop offset="100%" stopColor="#ffffff" stopOpacity="0.01" />
             </linearGradient>
           </defs>
 
@@ -113,9 +101,9 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             y1={zeroY}
             x2={width - padX}
             y2={zeroY}
-            stroke="rgba(148,163,184,0.3)"
+            stroke="rgba(255,255,255,0.16)"
             strokeDasharray="4 4"
-            strokeWidth="1.2"
+            strokeWidth="1"
           />
           <text x={8} y={zeroY + 3} fill="#64748b" fontSize="10">
             0
@@ -132,8 +120,8 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
           <polyline
             points={polyline}
             fill="none"
-            stroke={metric === 'goldDiff' ? '#38bdf8' : '#c4b5fd'}
-            strokeWidth="2.5"
+            stroke="#e2e8f0"
+            strokeWidth="2.2"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -150,9 +138,9 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
                 <circle
                   cx={c.x}
                   cy={c.y}
-                  r={isSelected ? 5.5 : 3.5}
+                  r={isSelected ? 5 : 3.5}
                   fill={val >= 0 ? '#34d399' : '#fb7185'}
-                  stroke={isSelected ? '#f8fafc' : 'none'}
+                  stroke={isSelected ? '#ffffff' : 'none'}
                   strokeWidth="1.5"
                 />
               </g>
@@ -161,9 +149,9 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
         </svg>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center justify-between text-[11px] text-slate-300">
+      <div className="mt-2 flex flex-wrap items-center justify-between text-[11px] text-slate-400">
         <span>
-          Minute <strong className="text-sky-300">{activeCoord.pt.minute}:00</strong> — Gold{' '}
+          Minute <strong className="text-white">{activeCoord.pt.minute}:00</strong> · Gold{' '}
           <strong
             className={`tabular-nums ${
               activeCoord.pt.goldDiff >= 0 ? 'text-emerald-300' : 'text-rose-300'
@@ -172,7 +160,7 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             {activeCoord.pt.goldDiff >= 0 ? '+' : ''}
             {activeCoord.pt.goldDiff}g
           </strong>
-          {' • '}XP{' '}
+          {' · '}XP{' '}
           <strong
             className={`tabular-nums ${
               activeCoord.pt.xpDiff >= 0 ? 'text-emerald-300' : 'text-rose-300'
@@ -181,7 +169,7 @@ export function GoldXpDiffChart({ match }: GoldXpDiffChartProps) {
             {activeCoord.pt.xpDiff >= 0 ? '+' : ''}
             {activeCoord.pt.xpDiff}
           </strong>
-          {' • '}CS{' '}
+          {' · '}CS{' '}
           <strong className="tabular-nums text-slate-200">
             {activeCoord.pt.csDiff >= 0 ? '+' : ''}
             {activeCoord.pt.csDiff}
