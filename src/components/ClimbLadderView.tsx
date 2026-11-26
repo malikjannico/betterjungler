@@ -61,6 +61,7 @@ export function ClimbLadderView({
   const [customTarget, setCustomTarget] = useState<string>('6.8');
   const [customTitle, setCustomTitle] = useState<string>('');
   const [refreshingMeta, setRefreshingMeta] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
 
   const evaluation = useMemo(
     () => evaluateDivisionProgress(summaries, targetDivision),
@@ -107,8 +108,11 @@ export function ClimbLadderView({
 
   async function handleRefreshMeta() {
     setRefreshingMeta(true);
+    setMetaError(null);
     try {
       await onRefreshHighElo();
+    } catch (err) {
+      setMetaError(err instanceof Error ? err.message : 'High-Elo meta refresh failed.');
     } finally {
       setRefreshingMeta(false);
     }
@@ -372,6 +376,11 @@ export function ClimbLadderView({
                     : 'Refresh Demo Sample'}
               </button>
             </div>
+            {metaError && (
+              <p className="mt-2 rounded-lg border border-rose-400/35 bg-rose-400/10 px-3 py-1.5 text-[11px] text-rose-200">
+                {metaError}
+              </p>
+            )}
             {highEloMeta ? (
               <div className="mt-2.5 space-y-2 text-[11px]">
                 <div className="text-slate-400">

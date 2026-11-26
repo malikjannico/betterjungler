@@ -108,7 +108,7 @@ export function buildMultiClearRoutes(
 
   const clear1Full: JungleRoute = {
     id: `${side}-clear1-full`,
-    label: `Clear 1 · Full Clear (${strongSide === 'bot' ? 'Top → Bot' : 'Bot → Top'})`,
+    label: `Clear 1 · Full Clear (${strongSide === 'bot' ? 'Top → Bot' : strongSide === 'mid' ? 'Bot → Top (Mid Focus)' : 'Bot → Top'})`,
     side,
     stage: 'clear_1',
     stageLabel: 'Clear 1 · Opening',
@@ -125,7 +125,7 @@ export function buildMultiClearRoutes(
 
   const clear1ThreeCamp: JungleRoute = {
     id: `${side}-clear1-3camp`,
-    label: `Clear 1 · 3-Camp ${strongSide === 'bot' ? 'Bot' : 'Top'} Gank`,
+    label: `Clear 1 · 3-Camp ${strongSide === 'bot' ? 'Bot' : strongSide === 'mid' ? 'Mid/Top' : 'Top'} Gank`,
     side,
     stage: 'clear_1',
     stageLabel: 'Clear 1 · Fast Lv3',
@@ -142,12 +142,19 @@ export function buildMultiClearRoutes(
             makeStep(3, '3c-3', isBlue ? 'Red Buff' : 'Blue Buff', isBlue ? own.red : own.blue, '2:26', 'Hit Level 3 + Red slow'),
             makeStep(4, '3c-gank', 'Gank / Dive Bot', own.gankBot, '2:45', 'Punish extended Bot or invade enemy buff'),
           ]
-        : [
-            makeStep(1, '3c-1', isBlue ? 'Red Buff' : 'Blue Buff', isBlue ? own.red : own.blue, '1:30', 'Fast opening buff'),
-            makeStep(2, '3c-2', isBlue ? 'Blue Buff' : 'Red Buff', isBlue ? own.blue : own.red, '2:05', 'Cross directly to opposite buff'),
-            makeStep(3, '3c-3', 'Gromp', own.gromp, '2:28', 'Hit Level 3 with Double Buffs'),
-            makeStep(4, '3c-gank', 'Gank Top / Invade', own.gankTop, '2:45', 'Gank extended Top or catch enemy jungler'),
-          ],
+        : isBlue
+          ? [
+              makeStep(1, '3c-1', 'Red Buff', own.red, '1:30', 'Fast opening buff'),
+              makeStep(2, '3c-2', 'Blue Buff', own.blue, '2:05', 'Cross directly to Top quadrant buff'),
+              makeStep(3, '3c-3', 'Gromp', own.gromp, '2:28', 'Hit Level 3 adjacent to Top lane'),
+              makeStep(4, '3c-gank', 'Gank Top / Invade', own.gankTop, '2:45', 'Gank extended Top or catch enemy jungler'),
+            ]
+          : [
+              makeStep(1, '3c-1', 'Red Buff', own.red, '1:30', 'Fast Top-side opening buff'),
+              makeStep(2, '3c-2', 'Raptors', own.raptors, '1:52', 'Fast AoE clear while checking Mid'),
+              makeStep(3, '3c-3', 'Krugs', own.krugs, '2:18', 'Hit Level 3 adjacent to Top lane (no cross-map backtrack)'),
+              makeStep(4, '3c-gank', 'Gank Top / Invade', own.gankTop, '2:45', 'Gank extended Top or invade Blue quadrant'),
+            ],
   };
 
   // Clear 2: Repeat starting quadrant order (minor camps respawn ~2:15 after kill!)

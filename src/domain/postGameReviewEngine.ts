@@ -71,7 +71,7 @@ export function analyzePostGameMatch(
   const enemyMonsterKills = match.events.filter(
     (e) =>
       e.type === 'ELITE_MONSTER_KILL' &&
-      e.killerTeamId !== undefined &&
+      typeof e.killerTeamId === 'number' &&
       e.killerTeamId !== myTeamId
   );
 
@@ -122,7 +122,9 @@ export function analyzePostGameMatch(
   const markers: TimelineMapMarker[] = [];
 
   match.events.forEach((ev, index) => {
-    if (!ev.position) return;
+    if (!ev.position || typeof ev.position.x !== 'number' || typeof ev.position.y !== 'number') {
+      return;
+    }
     const { x, y } = normalizeRiotCoordinate(ev.position.x, ev.position.y);
     const minute = Math.floor(ev.timestampSec / 60);
     const timeLabel = formatClock(ev.timestampSec);

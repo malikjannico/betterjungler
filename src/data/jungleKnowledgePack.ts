@@ -600,8 +600,8 @@ export const JUNGLE_CHAMPIONS: JungleChampionProfile[] = [
       name: 'BetterJungler: Vi Hail of Blades',
       primaryStyleId: 8100,
       subStyleId: 8000,
-      selectedPerkIds: [9923, 8143, 8138, 8135, 9111, 9104, 5005, 5008, 5001],
-      summaryLabels: ['Hail of Blades', 'Sudden Impact', 'Eyeball', 'Treasure Hunter', 'Triumph', 'Alacrity'],
+      selectedPerkIds: [9923, 8143, 8140, 8135, 9111, 9104, 5005, 5008, 5001],
+      summaryLabels: ['Hail of Blades', 'Sudden Impact', 'Grisly Mementos', 'Treasure Hunter', 'Triumph', 'Alacrity'],
     },
     coreItemIds: [6610, 3071, 3053],
     situationalItemIds: [6333, 3156, 3026, 6609, 3143],
@@ -874,8 +874,8 @@ export const JUNGLE_CHAMPIONS: JungleChampionProfile[] = [
       name: 'BetterJungler: Evelynn Electrocute',
       primaryStyleId: 8100,
       subStyleId: 8200,
-      selectedPerkIds: [8112, 8143, 8138, 8106, 8233, 8236, 5008, 5008, 5001],
-      summaryLabels: ['Electrocute', 'Sudden Impact', 'Eyeball', 'Ultimate Hunter', 'Absolute Focus', 'Gathering Storm'],
+      selectedPerkIds: [8112, 8143, 8141, 8106, 8233, 8236, 5008, 5008, 5001],
+      summaryLabels: ['Electrocute', 'Sudden Impact', 'Deep Ward', 'Ultimate Hunter', 'Absolute Focus', 'Gathering Storm'],
     },
     coreItemIds: [4645, 3089, 3135],
     situationalItemIds: [3102, 3157, 3165],
@@ -935,8 +935,8 @@ export const JUNGLE_CHAMPIONS: JungleChampionProfile[] = [
       name: 'BetterJungler: Elise Electrocute',
       primaryStyleId: 8100,
       subStyleId: 8200,
-      selectedPerkIds: [8112, 8143, 8138, 8105, 8233, 8232, 5005, 5008, 5001],
-      summaryLabels: ['Electrocute', 'Sudden Impact', 'Eyeball', 'Relentless Hunter', 'Absolute Focus', 'Waterwalking'],
+      selectedPerkIds: [8112, 8143, 8141, 8105, 8233, 8232, 5005, 5008, 5001],
+      summaryLabels: ['Electrocute', 'Sudden Impact', 'Deep Ward', 'Relentless Hunter', 'Absolute Focus', 'Waterwalking'],
     },
     coreItemIds: [4645, 3157, 3135],
     situationalItemIds: [3165, 3102, 3089],
@@ -1025,8 +1025,8 @@ export const JUNGLE_CHAMPIONS: JungleChampionProfile[] = [
       name: 'BetterJungler: Karthus Dark Harvest',
       primaryStyleId: 8100,
       subStyleId: 8000,
-      selectedPerkIds: [8128, 8126, 8138, 8106, 8009, 8014, 5008, 5008, 5001],
-      summaryLabels: ['Dark Harvest', 'Cheap Shot', 'Eyeball', 'Ultimate Hunter', 'Presence of Mind', 'Coup de Grace'],
+      selectedPerkIds: [8128, 8126, 8140, 8106, 8009, 8014, 5008, 5008, 5001],
+      summaryLabels: ['Dark Harvest', 'Cheap Shot', 'Grisly Mementos', 'Ultimate Hunter', 'Presence of Mind', 'Coup de Grace'],
     },
     coreItemIds: [6653, 4645, 3089],
     situationalItemIds: [3157, 3135, 3165, 3102],
@@ -1239,8 +1239,8 @@ export const JUNGLE_CHAMPIONS: JungleChampionProfile[] = [
       name: 'BetterJungler: Ekko Hail of Blades',
       primaryStyleId: 8100,
       subStyleId: 8300,
-      selectedPerkIds: [9923, 8143, 8138, 8135, 8304, 8347, 5005, 5008, 5001],
-      summaryLabels: ['Hail of Blades', 'Sudden Impact', 'Eyeball', 'Treasure Hunter', 'Magical Footwear', 'Cosmic Insight'],
+      selectedPerkIds: [9923, 8143, 8140, 8135, 8304, 8347, 5005, 5008, 5001],
+      summaryLabels: ['Hail of Blades', 'Sudden Impact', 'Grisly Mementos', 'Treasure Hunter', 'Magical Footwear', 'Cosmic Insight'],
     },
     coreItemIds: [3115, 4645, 3089],
     situationalItemIds: [3157, 3135, 3102, 3165],
@@ -1331,8 +1331,8 @@ export const JUNGLE_CHAMPIONS: JungleChampionProfile[] = [
       name: 'BetterJungler: Shaco Hail of Blades',
       primaryStyleId: 8100,
       subStyleId: 8200,
-      selectedPerkIds: [9923, 8143, 8138, 8135, 8233, 8232, 5005, 5008, 5001],
-      summaryLabels: ['Hail of Blades', 'Sudden Impact', 'Eyeball', 'Treasure Hunter', 'Absolute Focus', 'Waterwalking'],
+      selectedPerkIds: [9923, 8143, 8141, 8135, 8233, 8232, 5005, 5008, 5001],
+      summaryLabels: ['Hail of Blades', 'Sudden Impact', 'Deep Ward', 'Treasure Hunter', 'Absolute Focus', 'Waterwalking'],
     },
     coreItemIds: [6692, 6694, 3026],
     situationalItemIds: [3156, 6609, 3153],
@@ -1485,4 +1485,34 @@ export function buildRoutesForSide(
 
 export function buildWardSpotsForSide(side: MapSide): WardSpot[] {
   return buildOfficialWardSpots(side);
+}
+
+/**
+ * Legacy removed rune IDs that will fail LCU /lol-perks/v1/pages validation (e.g. 8138 Eyeball Collection).
+ */
+export const REMOVED_RUNE_IDS = new Set([8138, 8136, 8120]);
+
+export function validateRunePage(
+  spec: { primaryStyleId: number; subStyleId: number; selectedPerkIds: number[] },
+  liveRuneIds?: Set<number>
+): string[] {
+  const issues: string[] = [];
+  if (spec.primaryStyleId <= 0 || spec.subStyleId <= 0 || spec.primaryStyleId === spec.subStyleId) {
+    issues.push('Primary and secondary rune styles must be distinct non-zero tree IDs.');
+  }
+  if (spec.selectedPerkIds.length !== 9) {
+    issues.push(`Expected 9 selected perk IDs, found ${spec.selectedPerkIds.length}.`);
+  }
+  for (const perkId of spec.selectedPerkIds) {
+    if (REMOVED_RUNE_IDS.has(perkId)) {
+      issues.push(`Removed Riot perk ID detected: ${perkId}`);
+    } else if (
+      liveRuneIds &&
+      liveRuneIds.size > 0 &&
+      (perkId < 5000 || (perkId >= 8000 && !liveRuneIds.has(perkId)))
+    ) {
+      issues.push(`Unknown perk ID not present in Data Dragon runesReforged: ${perkId}`);
+    }
+  }
+  return issues;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ChampSelectView } from './components/ChampSelectView';
 import { ClimbLadderView } from './components/ClimbLadderView';
@@ -12,6 +12,7 @@ import {
   computeAdaptiveBuild,
   computeMacroGuidance,
   computeObjectiveWindows,
+  resolveSelfPlayer,
 } from './domain/liveCoachEngine';
 import {
   DEMO_HIGH_ELO_SNAPSHOT,
@@ -35,6 +36,7 @@ import {
   getAppState,
   getCachedMatches,
   getCachedMetaSnapshot,
+  getLcuProfile,
   isTauriEnvironment,
   loadClimbGoals,
   loadLpHistory,
@@ -42,6 +44,7 @@ import {
   refreshHighEloMeta,
   setOverlayMode,
   subscribeGameState,
+  syncDdragonPatch,
   syncRecentMatches,
   upsertClimbGoal,
 } from './services/tauriBridge';
@@ -57,6 +60,7 @@ import type {
 } from './types/coaching';
 import type {
   AppRuntimeState,
+  GamePhase,
   LaneRole,
   MatchV5Detail,
   SummonerProfileSummary,
@@ -107,7 +111,10 @@ function cornerAlignmentClasses(corner: HudCorner): string {
 }
 
 export function App() {
-  const [demoScenario, setDemoScenario] = useState<DemoScenarioId>('champ_select');
+  const isTauri = isTauriEnvironment();
+  const [demoScenario, setDemoScenario] = useState<DemoScenarioId>(() =>
+    isTauriEnvironment() ? 'idle' : 'champ_select'
+  );
   const [liveState, setLiveState] = useState<AppRuntimeState | null>(null);
   const [overlayMode, setMode] = useState<OverlayMode>('expanded');
   const [activeTab, setActiveTab] = useState<ActiveTab>('champ_select');
@@ -117,11 +124,15 @@ export function App() {
     items: 0,
   });
   const [summonerProfile, setSummonerProfile] = useState<SummonerProfileSummary | null>(null);
-  const [matches, setMatches] = useState<MatchV5Detail[]>(DEMO_POST_GAME_MATCHES);
-  const [lpHistory, setLpHistory] = useState<LpHistoryPoint[]>(DEMO_LP_HISTORY);
+  const [matches, setMatches] = useState<MatchV5Detail[]>(() =>
+    isTauriEnvironment() ? [] : DEMO_POST_GAME_MATCHES
+  );
+  const [lpHistory, setLpHistory] = useState<LpHistoryPoint[]>(() =>
+    isTauriEnvironment() ? [] : DEMO_LP_HISTORY
+  );
   const [climbGoals, setClimbGoals] = useState<ClimbGoal[]>([]);
-  const [highEloMeta, setHighEloMeta] = useState<HighEloMetaSnapshot | null>(
-    DEMO_HIGH_ELO_SNAPSHOT
+  const [highEloMeta, setHighEloMeta] = useState<HighEloMetaSnapshot | null>(() =>
+    isTauriEnvironment() ? null : DEMO_HIGH_ELO_SNAPSHOT
   );
   const [settings, setSettings] = useState<UserSettings>({
     riotId: '',
@@ -140,12 +151,17 @@ export function App() {
     },
   });
 
+  const lastPhaseRef = useRef<GamePhase | null>(null);
+
   useEffect(() => {
     let active = true;
     void loadSettings().then((s) => {
       if (active) setSettings(s);
     });
-    void fetchLatestPatchVersion().then((patch) => {
+    const resolvePatch = isTauri
+      ? syncDdragonPatch().catch(() => fetchLatestPatchVersion())
+      : fetchLatestPatchVersion();
+    void resolvePatch.then((patch) => {
       if (!active) return;
       setPatchVersion(patch);
       void syncFullDdragonCatalog(patch).then((catalog) => {
@@ -157,7 +173,12 @@ export function App() {
       });
     });
     void getAppState().then((state) => {
-      if (active && state) setLiveState(state);
+      if (!active || !state) return;
+      lastPhaseRef.current = state.phase;
+      setLiveState(state);
+      if (state.summonerProfile) {
+        setSummonerProfile(state.summonerProfile);
+      }
     });
     void loadClimbGoals().then((g) => {
       if (active) setClimbGoals(g);
@@ -175,10 +196,16 @@ export function App() {
     const unsubPromise = subscribeGameState(
       (state) => {
         setLiveState(state);
-        if (state.phase === 'champ_select') setActiveTab('champ_select');
-        else if (state.phase === 'loading') setActiveTab('win_plan');
-        else if (state.phase === 'in_game') setActiveTab('live_coach');
-        else if (state.phase === 'post_game') setActiveTab('post_game');
+        if (state.summonerProfile) {
+          setSummonerProfile(state.summonerProfile);
+        }
+        if (state.phase !== lastPhaseRef.current) {
+          lastPhaseRef.current = state.phase;
+          if (state.phase === 'champ_select') setActiveTab('champ_select');
+          else if (state.phase === 'loading') setActiveTab('win_plan');
+          else if (state.phase === 'in_game') setActiveTab('live_coach');
+          else if (state.phase === 'post_game') setActiveTab('post_game');
+        }
       },
       (mode) => setMode(mode)
     );
@@ -187,9 +214,29 @@ export function App() {
       active = false;
       void unsubPromise.then((fn) => fn());
     };
-  }, []);
+  }, [isTauri]);
 
   useEffect(() => {
+    if (!isTauri || !liveState?.lcuConnected || summonerProfile) return;
+    let active = true;
+    void getLcuProfile(settings.region)
+      .then((profile) => {
+        if (!active) return;
+        setSummonerProfile(profile);
+        if (profile.puuid) {
+          void getCachedMatches(profile.puuid).then((cached) => {
+            if (active && cached.length > 0) setMatches(cached);
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isTauri, liveState?.lcuConnected, summonerProfile, settings.region]);
+
+  useEffect(() => {
+    if (isTauri) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (matchesHotkey(e, settings.overlayHotkey)) {
         e.preventDefault();
@@ -202,7 +249,7 @@ export function App() {
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [settings.overlayHotkey]);
+  }, [isTauri, settings.overlayHotkey]);
 
   const runtimeState: AppRuntimeState = useMemo(() => {
     if (demoScenario !== 'idle') {
@@ -211,40 +258,53 @@ export function App() {
     return liveState ?? getDemoRuntimeState('idle');
   }, [demoScenario, liveState]);
 
-  const effectiveChampSelect = runtimeState.champSelect ?? DEMO_LOADING_CHAMP_SELECT;
+  const effectiveChampSelect =
+    runtimeState.champSelect ?? (demoScenario !== 'idle' ? DEMO_LOADING_CHAMP_SELECT : null);
+
+  const resolvedMapSide = useMemo(() => {
+    if (effectiveChampSelect?.mapSide) return effectiveChampSelect.mapSide;
+    if (runtimeState.liveGame) {
+      const liveSelf = resolveSelfPlayer(runtimeState.liveGame);
+      if (liveSelf) return liveSelf.team === 'CHAOS' ? 'red' : 'blue';
+    }
+    return 'blue';
+  }, [effectiveChampSelect, runtimeState.liveGame]);
 
   const winPlan = useMemo(() => {
-    const allyRoles = extractRoleMap(effectiveChampSelect.myTeam);
-    const enemyRoles = extractRoleMap(effectiveChampSelect.theirTeam);
-    const playerSlot = effectiveChampSelect.myTeam.find((s) => s.isLocalPlayer);
+    const allyRoles = effectiveChampSelect ? extractRoleMap(effectiveChampSelect.myTeam) : {};
+    const enemyRoles = effectiveChampSelect ? extractRoleMap(effectiveChampSelect.theirTeam) : {};
+    const playerSlot = effectiveChampSelect?.myTeam.find((s) => s.isLocalPlayer);
+    const liveSelf = runtimeState.liveGame ? resolveSelfPlayer(runtimeState.liveGame) : null;
+    const liveProfile = liveSelf ? findJungleChampionByName(liveSelf.championName) : undefined;
     const playerChampId =
-      playerSlot?.championId && playerSlot.championId > 0 ? playerSlot.championId : 234;
+      liveProfile?.championId ??
+      (playerSlot?.championId && playerSlot.championId > 0 ? playerSlot.championId : 234);
     return generateWinConditionPlan({
       allyRoles,
       enemyRoles,
       playerChampionId: playerChampId,
-      mapSide: effectiveChampSelect.mapSide,
+      mapSide: resolvedMapSide,
     });
-  }, [effectiveChampSelect]);
+  }, [effectiveChampSelect, resolvedMapSide, runtimeState.liveGame]);
 
   const playerChampionName = useMemo(() => {
-    const activePlayerName = runtimeState.liveGame?.activePlayer.summonerName;
-    const liveSelf = runtimeState.liveGame?.allPlayers.find(
-      (p) => p.summonerName === activePlayerName
-    );
-    if (liveSelf) return liveSelf.championName;
-    const slot = effectiveChampSelect.myTeam.find((s) => s.isLocalPlayer);
+    if (runtimeState.liveGame) {
+      const liveSelf = resolveSelfPlayer(runtimeState.liveGame);
+      if (liveSelf) return liveSelf.championName;
+    }
+    const slot = effectiveChampSelect?.myTeam.find((s) => s.isLocalPlayer);
     if (slot && slot.championId > 0) {
       return findJungleChampionById(slot.championId)?.name ?? 'Jungler';
     }
-    return 'Viego';
-  }, [effectiveChampSelect, runtimeState.liveGame]);
+    return demoScenario === 'idle' ? 'Unassigned' : 'Viego';
+  }, [effectiveChampSelect, runtimeState.liveGame, demoScenario]);
 
   const objectives = useMemo(() => {
     if (!runtimeState.liveGame) return [];
     return computeObjectiveWindows(
       runtimeState.liveGame.gameData.gameTime,
-      runtimeState.liveGame.events.Events
+      runtimeState.liveGame.events.Events,
+      runtimeState.liveGame.allPlayers
     );
   }, [runtimeState.liveGame]);
 
@@ -262,7 +322,7 @@ export function App() {
   const effectiveProfile = summonerProfile ?? runtimeState.summonerProfile;
 
   const rollingSummaries = useMemo(() => {
-    if (demoScenario !== 'idle' || matches === DEMO_POST_GAME_MATCHES) {
+    if (demoScenario !== 'idle') {
       return DEMO_ROLLING_SUMMARIES;
     }
     return matches.map((m) =>
@@ -283,6 +343,11 @@ export function App() {
   }
 
   async function handleSyncMatches() {
+    if (!effectiveProfile?.puuid && isTauri) {
+      throw new Error(
+        'Load your Riot profile in Settings (or open League Client) before syncing Match-V5 games.'
+      );
+    }
     const puuid = effectiveProfile?.puuid ?? 'demo-puuid';
     const synced = await syncRecentMatches(puuid, settings.region, 8);
     if (synced.length > 0) {
@@ -301,11 +366,22 @@ export function App() {
   }
 
   async function handleRefreshHighElo() {
-    const snap = await refreshHighEloMeta(settings.region, 10);
+    const snap = await refreshHighEloMeta(settings.region, 10, patchVersion);
     setHighEloMeta(snap);
   }
 
-  const isTauri = isTauriEnvironment();
+  function handleProfileLoaded(profile: SummonerProfileSummary) {
+    setSummonerProfile(profile);
+    void loadLpHistory().then((hist) => {
+      if (hist.length > 0) setLpHistory(hist);
+    });
+    if (profile.puuid) {
+      void getCachedMatches(profile.puuid).then((cached) => {
+        if (cached.length > 0) setMatches(cached);
+      });
+    }
+  }
+
   const hudStyle = {
     '--hud-alpha': String(Math.max(0.5, Math.min(1, settings.hudOpacity / 100))),
   } as CSSProperties;
@@ -443,7 +519,7 @@ export function App() {
           <div key={activeTab} className="lg-view-enter">
             {activeTab === 'champ_select' && (
               <ChampSelectView
-                session={runtimeState.champSelect ?? DEMO_CHAMP_SELECT}
+                session={runtimeState.champSelect ?? (demoScenario !== 'idle' ? DEMO_CHAMP_SELECT : null)}
                 patchVersion={patchVersion}
                 summonerProfile={effectiveProfile}
                 highEloMeta={highEloMeta}
@@ -452,7 +528,7 @@ export function App() {
             {activeTab === 'win_plan' && (
               <WinConditionView
                 plan={winPlan}
-                mapSide={effectiveChampSelect.mapSide}
+                mapSide={resolvedMapSide}
                 championName={playerChampionName}
                 patchVersion={patchVersion}
                 aiConfig={settings.aiCoach}
@@ -465,7 +541,7 @@ export function App() {
                 buildPlan={buildPlan}
                 macroCues={macroCues}
                 winPlan={winPlan}
-                mapSide={effectiveChampSelect.mapSide}
+                mapSide={resolvedMapSide}
                 patchVersion={patchVersion}
               />
             )}
@@ -501,7 +577,7 @@ export function App() {
                 patchVersion={patchVersion}
                 catalogCounts={catalogCounts}
                 onSettingsChanged={setSettings}
-                onProfileLoaded={setSummonerProfile}
+                onProfileLoaded={handleProfileLoaded}
                 onPatchSynced={(patch, counts) => {
                   setPatchVersion(patch);
                   if (counts) setCatalogCounts(counts);

@@ -4,10 +4,11 @@ mod high_elo_sampler;
 mod lcu;
 mod live_client;
 mod overlay;
+mod rate_limiter;
 mod riot_api;
 mod storage;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -19,10 +20,9 @@ use crate::error::{AppError, AppResult};
 use crate::lcu::{RunePageSpec, SanitizedChampSelectSession};
 use crate::live_client::LiveClientPollResult;
 use crate::overlay::OverlayController;
+use crate::rate_limiter::RiotRateLimiter;
 use crate::riot_api::SummonerProfileSummary;
-use crate::storage::{
-    tier_rank_to_absolute_lp, ClimbGoalRecord, LpHistoryRecord, UserSettings,
-};
+use crate::storage::{tier_rank_to_absolute_lp, ClimbGoalRecord, LpHistoryRecord, UserSettings};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +45,7 @@ impl Default for AppRuntimeState {
             champ_select: None,
             live_game: None,
             summoner_profile: None,
-            patch_version: "16.1.1".to_string(),
+            patch_version: "16.23.1".to_string(),
         }
     }
 }
@@ -62,6 +62,9 @@ struct SharedState {
     overlay: OverlayController,
     loopback_client: reqwest::Client,
     riot_web_client: reqwest::Client,
+    ai_client: reqwest::Client,
+    riot_limiter: Arc<RiotRateLimiter>,
+    install_path: Arc<RwLock<String>>,
 }
 
 #[tauri::command]
@@ -94,6 +97,9 @@ fn get_settings(state: State<'_, Arc<SharedState>>) -> AppResult<UserSettings> {
 
 #[tauri::command]
 fn save_settings(state: State<'_, Arc<SharedState>>, settings: UserSettings) -> AppResult<()> {
+    if let Ok(mut path_guard) = state.install_path.write() {
+        *path_guard = settings.lol_install_path.clone();
+    }
     let conn = state
         .db
         .lock()
@@ -116,6 +122,35 @@ async fn sync_ddragon(state: State<'_, Arc<SharedState>>) -> AppResult<String> {
     Ok(patch)
 }
 
+fn record_lp_if_changed(conn: &Connection, profile: &SummonerProfileSummary) {
+    if profile.tier == "UNRANKED" {
+        return;
+    }
+    let abs_lp = tier_rank_to_absolute_lp(&profile.tier, &profile.rank, profile.league_points);
+    let latest = storage::get_latest_lp_snapshot(conn).ok().flatten();
+    let should_insert = match &latest {
+        Some(prev) => prev.absolute_lp != abs_lp,
+        None => true,
+    };
+    if should_insert {
+        let won = latest
+            .as_ref()
+            .map(|prev| abs_lp >= prev.absolute_lp)
+            .unwrap_or_else(|| profile.wins >= profile.losses);
+        let _ = storage::append_lp_snapshot(
+            conn,
+            &LpHistoryRecord {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                tier: profile.tier.clone(),
+                rank: profile.rank.clone(),
+                league_points: profile.league_points,
+                absolute_lp: abs_lp,
+                win: won,
+            },
+        );
+    }
+}
+
 #[tauri::command]
 async fn fetch_summoner_profile(
     state: State<'_, Arc<SharedState>>,
@@ -123,27 +158,40 @@ async fn fetch_summoner_profile(
     region: String,
 ) -> AppResult<SummonerProfileSummary> {
     let api_key = storage::load_riot_api_key()?;
-    let profile =
-        riot_api::fetch_summoner_profile(&state.riot_web_client, &api_key, &riot_id, &region)
-            .await?;
-    if profile.tier != "UNRANKED" {
-        if let Ok(conn) = state.db.lock() {
-            let _ = storage::append_lp_snapshot(
-                &conn,
-                &LpHistoryRecord {
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    tier: profile.tier.clone(),
-                    rank: profile.rank.clone(),
-                    league_points: profile.league_points,
-                    absolute_lp: tier_rank_to_absolute_lp(
-                        &profile.tier,
-                        &profile.rank,
-                        profile.league_points,
-                    ),
-                    win: true,
-                },
-            );
-        }
+    let profile = riot_api::fetch_summoner_profile(
+        &state.riot_web_client,
+        &state.riot_limiter,
+        &api_key,
+        &riot_id,
+        &region,
+    )
+    .await?;
+
+    if let Ok(conn) = state.db.lock() {
+        record_lp_if_changed(&conn, &profile);
+    }
+    if let Ok(mut rt) = state.runtime.lock() {
+        rt.summoner_profile = Some(profile.clone());
+    }
+    Ok(profile)
+}
+
+#[tauri::command]
+async fn get_lcu_profile(
+    state: State<'_, Arc<SharedState>>,
+    region: String,
+) -> AppResult<SummonerProfileSummary> {
+    let install_path = state
+        .install_path
+        .read()
+        .map(|p| p.clone())
+        .unwrap_or_default();
+    let creds = lcu::discover_lockfile(&install_path).ok_or_else(|| {
+        AppError::Lcu("League Client not detected. Open League of Legends first.".to_string())
+    })?;
+    let profile = lcu::fetch_lcu_profile(&state.loopback_client, &creds, &region).await?;
+    if let Ok(conn) = state.db.lock() {
+        record_lp_if_changed(&conn, &profile);
     }
     if let Ok(mut rt) = state.runtime.lock() {
         rt.summoner_profile = Some(profile.clone());
@@ -158,13 +206,11 @@ async fn apply_runes_and_spells(
     spell1_id: u32,
     spell2_id: u32,
 ) -> AppResult<ApplyActionResult> {
-    let install_path = {
-        let conn = state
-            .db
-            .lock()
-            .map_err(|e| AppError::Storage(e.to_string()))?;
-        storage::load_settings(&conn)?.lol_install_path
-    };
+    let install_path = state
+        .install_path
+        .read()
+        .map(|p| p.clone())
+        .unwrap_or_default();
 
     let creds = lcu::discover_lockfile(&install_path).ok_or_else(|| {
         AppError::Lcu("League Client not detected. Open League of Legends first.".to_string())
@@ -187,9 +233,15 @@ async fn sync_recent_matches(
     count: usize,
 ) -> AppResult<Vec<Value>> {
     let api_key = storage::load_riot_api_key()?;
-    let ids =
-        riot_api::fetch_recent_ranked_match_ids(&state.riot_web_client, &api_key, &puuid, &region, count)
-            .await?;
+    let ids = riot_api::fetch_recent_ranked_match_ids(
+        &state.riot_web_client,
+        &state.riot_limiter,
+        &api_key,
+        &puuid,
+        &region,
+        count,
+    )
+    .await?;
 
     let mut details = Vec::new();
     for match_id in ids {
@@ -198,7 +250,7 @@ async fn sync_recent_matches(
                 .db
                 .lock()
                 .map_err(|e| AppError::Storage(e.to_string()))?;
-            storage::get_cached_match_detail(&conn, &match_id)?
+            storage::get_cached_match_detail(&conn, &match_id, &puuid)?
         };
 
         if let Some(detail) = cached {
@@ -206,14 +258,33 @@ async fn sync_recent_matches(
             continue;
         }
 
-        let detail = riot_api::fetch_match_detail_and_timeline(
+        let detail = match riot_api::fetch_match_detail_and_timeline(
             &state.riot_web_client,
+            &state.riot_limiter,
             &api_key,
             &match_id,
             &puuid,
             &region,
         )
-        .await?;
+        .await
+        {
+            Ok(d) => d,
+            Err(AppError::RateLimited { retry_after_secs }) => {
+                if details.is_empty() {
+                    return Err(AppError::RateLimited { retry_after_secs });
+                }
+                tracing::warn!(
+                    match_id = %match_id,
+                    retry_after_secs,
+                    "Rate limited during match sync; returning partial batch"
+                );
+                break;
+            }
+            Err(err) => {
+                tracing::warn!(match_id = %match_id, error = %err, "Skipping failed match fetch");
+                continue;
+            }
+        };
 
         let played_at = detail["playedAt"]
             .as_str()
@@ -232,23 +303,32 @@ async fn sync_recent_matches(
                 .db
                 .lock()
                 .map_err(|e| AppError::Storage(e.to_string()))?;
-            storage::cache_match_record(&conn, &match_id, &puuid, &played_at, &summary_stub, &detail)?;
+            storage::cache_match_record(
+                &conn,
+                &match_id,
+                &puuid,
+                &played_at,
+                &summary_stub,
+                &detail,
+            )?;
         }
 
         details.push(detail);
-        tokio::time::sleep(Duration::from_millis(120)).await;
     }
 
     Ok(details)
 }
 
 #[tauri::command]
-fn get_cached_matches(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<Value>> {
+fn get_cached_matches(
+    state: State<'_, Arc<SharedState>>,
+    puuid: Option<String>,
+) -> AppResult<Vec<Value>> {
     let conn = state
         .db
         .lock()
         .map_err(|e| AppError::Storage(e.to_string()))?;
-    let (_summaries, details) = storage::list_cached_matches(&conn, 15)?;
+    let (_summaries, details) = storage::list_cached_matches(&conn, puuid.as_deref(), 15)?;
     Ok(details)
 }
 
@@ -287,20 +367,25 @@ async fn refresh_high_elo_meta(
     state: State<'_, Arc<SharedState>>,
     region: String,
     max_matches: usize,
+    patch: Option<String>,
 ) -> AppResult<Value> {
     let api_key = storage::load_riot_api_key()?;
-    let patch = {
-        state
-            .runtime
-            .lock()
-            .map(|r| r.patch_version.clone())
-            .unwrap_or_else(|_| "16.1.1".to_string())
-    };
+    let active_patch = patch
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| {
+            state
+                .runtime
+                .lock()
+                .map(|r| r.patch_version.clone())
+                .unwrap_or_else(|_| "16.23.1".to_string())
+        });
     let snap = high_elo_sampler::sample_high_elo_jungle_meta(
         &state.riot_web_client,
+        &state.riot_limiter,
         &api_key,
         &region,
-        &patch,
+        &active_patch,
         max_matches,
     )
     .await?;
@@ -310,7 +395,7 @@ async fn refresh_high_elo_meta(
             .db
             .lock()
             .map_err(|e| AppError::Storage(e.to_string()))?;
-        storage::save_meta_snapshot(&conn, &patch, &region, &val)?;
+        storage::save_meta_snapshot(&conn, &active_patch, &region, &val)?;
     }
     Ok(val)
 }
@@ -343,7 +428,7 @@ async fn generate_ai_debrief(
         storage::load_settings(&conn)?.ai_coach
     };
     let api_key = storage::load_ai_api_key().ok();
-    ai_coach::generate_ai_debrief(&state.riot_web_client, &config, api_key, &context).await
+    ai_coach::generate_ai_debrief(&state.ai_client, &config, api_key, &context).await
 }
 
 #[tauri::command]
@@ -369,14 +454,14 @@ fn get_lp_history(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<LpHistory
 fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(1800));
+        let mut post_game_latch_ticks: u8 = 0;
+
         loop {
             interval.tick().await;
             let install_path = shared
-                .db
-                .lock()
-                .ok()
-                .and_then(|c| storage::load_settings(&c).ok())
-                .map(|s| s.lol_install_path)
+                .install_path
+                .read()
+                .map(|p| p.clone())
                 .unwrap_or_default();
 
             let live_result = live_client::poll_live_client(&shared.loopback_client).await;
@@ -401,11 +486,13 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
 
                 match live_result {
                     LiveClientPollResult::Active(payload) => {
+                        post_game_latch_ticks = 0;
                         rt.phase = "in_game".to_string();
                         rt.live_client_connected = true;
                         rt.live_game = Some(payload);
                     }
                     LiveClientPollResult::Loading => {
+                        post_game_latch_ticks = 0;
                         rt.phase = "loading".to_string();
                         rt.live_client_connected = true;
                         rt.live_game = None;
@@ -415,12 +502,21 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                         rt.live_client_connected = false;
                         rt.live_game = None;
                         if let Some(cs) = champ_select {
+                            post_game_latch_ticks = 0;
                             rt.phase = "champ_select".to_string();
                             rt.champ_select = Some(cs);
-                        } else if was_in_game {
-                            rt.phase = "post_game".to_string();
                         } else {
-                            rt.phase = "idle".to_string();
+                            // Clear stale champ select immediately on dodge / exit
+                            rt.champ_select = None;
+                            if was_in_game {
+                                post_game_latch_ticks = 10;
+                                rt.phase = "post_game".to_string();
+                            } else if post_game_latch_ticks > 0 {
+                                post_game_latch_ticks -= 1;
+                                rt.phase = "post_game".to_string();
+                            } else {
+                                rt.phase = "idle".to_string();
+                            }
                         }
                     }
                 }
@@ -445,15 +541,18 @@ pub fn run() {
             let conn = storage::init_database(&db_path)?;
             let loopback_client = lcu::build_loopback_client()?;
             let riot_web_client = riot_api::build_riot_web_client()?;
+            let ai_client = ai_coach::build_ai_client()?;
             let overlay_ctrl = OverlayController::default();
             let initial_settings = storage::load_settings(&conn).unwrap_or_default();
             overlay_ctrl.set_corner(&initial_settings.hud_corner);
 
-            overlay::setup_overlay_controls(
+            if let Err(err) = overlay::setup_overlay_controls(
                 app.handle(),
                 overlay_ctrl.clone(),
                 &initial_settings.overlay_hotkey,
-            )?;
+            ) {
+                tracing::warn!(error = %err, "Failed to register initial overlay hotkey; continuing without global shortcut");
+            }
 
             let shared = Arc::new(SharedState {
                 db: Mutex::new(conn),
@@ -461,6 +560,9 @@ pub fn run() {
                 overlay: overlay_ctrl,
                 loopback_client,
                 riot_web_client,
+                ai_client,
+                riot_limiter: Arc::new(RiotRateLimiter::with_default_pacing()),
+                install_path: Arc::new(RwLock::new(initial_settings.lol_install_path)),
             });
 
             app.manage(shared.clone());
@@ -475,6 +577,7 @@ pub fn run() {
             save_riot_api_key,
             sync_ddragon,
             fetch_summoner_profile,
+            get_lcu_profile,
             apply_runes_and_spells,
             sync_recent_matches,
             get_cached_matches,

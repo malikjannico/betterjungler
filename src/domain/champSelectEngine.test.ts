@@ -3,9 +3,11 @@ import {
   JUNGLE_CHAMPIONS,
   getChampionMeta,
   hydrateDdragonCatalog,
+  validateRunePage,
 } from '../data/jungleKnowledgePack';
 import {
   analyzeTeamComposition,
+  inferEnemyJunglerId,
   recommendJunglePicks,
   sanitizeChampSelectSession,
 } from './champSelectEngine';
@@ -75,5 +77,68 @@ describe('champSelectEngine', () => {
     const meta = getChampionMeta(9999);
     expect(meta.name).toBe('Test Mage');
     expect(meta.damageProfile).toBe('ap');
+  });
+
+  it('validates all 32 jungler rune pages contain zero removed Riot rune IDs and infers enemy jungler by Smite', () => {
+    for (const champ of JUNGLE_CHAMPIONS) {
+      const issues = validateRunePage(champ.recommendedRunes);
+      expect(issues, `${champ.name} rune issues: ${issues.join(', ')}`).toEqual([]);
+    }
+
+    const smiteInferred = inferEnemyJunglerId([
+      {
+        cellId: 5,
+        team: 'enemy',
+        displayName: 'Enemy 1',
+        championId: 86,
+        assignedPosition: 'unknown',
+        spell1Id: 4,
+        spell2Id: 12,
+        isLocalPlayer: false,
+        isPartyMember: false,
+        completed: true,
+      },
+      {
+        cellId: 6,
+        team: 'enemy',
+        displayName: 'Enemy 2',
+        championId: 64,
+        assignedPosition: 'unknown',
+        spell1Id: 11,
+        spell2Id: 4,
+        isLocalPlayer: false,
+        isPartyMember: false,
+        completed: true,
+      },
+    ]);
+    expect(smiteInferred).toBe(64);
+
+    const soloDuoHiddenInferred = inferEnemyJunglerId([
+      {
+        cellId: 5,
+        team: 'enemy',
+        displayName: 'Enemy 1',
+        championId: 86, // Garen (top, not in JUNGLE_CHAMPIONS)
+        assignedPosition: 'unknown',
+        spell1Id: 0,
+        spell2Id: 0,
+        isLocalPlayer: false,
+        isPartyMember: false,
+        completed: true,
+      },
+      {
+        cellId: 6,
+        team: 'enemy',
+        displayName: 'Enemy 2',
+        championId: 234, // Viego (sole jungle pool pick)
+        assignedPosition: 'unknown',
+        spell1Id: 0,
+        spell2Id: 0,
+        isLocalPlayer: false,
+        isPartyMember: false,
+        completed: true,
+      },
+    ]);
+    expect(soloDuoHiddenInferred).toBe(234);
   });
 });

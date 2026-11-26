@@ -47,6 +47,9 @@ export interface LiveScores {
 
 export interface LivePlayer {
   summonerName: string;
+  riotId?: string;
+  riotIdGameName?: string;
+  riotIdTagLine?: string;
   championName: string;
   team: 'ORDER' | 'CHAOS';
   position: string;
@@ -60,6 +63,9 @@ export interface LivePlayer {
 
 export interface LiveActivePlayer {
   summonerName: string;
+  riotId?: string;
+  riotIdGameName?: string;
+  riotIdTagLine?: string;
   level: number;
   currentGold: number;
   championStats: {
@@ -150,6 +156,7 @@ export interface MatchV5TimelineEvent {
 export interface MatchV5FramePoint {
   minute: number;
   position: MatchV5TimelinePosition;
+  enemyJunglerPosition?: MatchV5TimelinePosition | null;
   totalGold: number;
   xp: number;
   cs: number;

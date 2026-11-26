@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react';
 import {
   SUMMONER_SPELL_INFO,
   getChampionMeta,
+  validateRunePage,
 } from '../data/jungleKnowledgePack';
 import {
   analyzeTeamComposition,
+  inferEnemyJunglerId,
   recommendJunglePicks,
   sanitizeChampSelectSession,
 } from '../domain/champSelectEngine';
@@ -29,6 +31,7 @@ export function ChampSelectView({
 }: ChampSelectViewProps) {
   const [selectedChampionId, setSelectedChampionId] = useState<number | null>(null);
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   const sanitized = useMemo(
     () => (session ? sanitizeChampSelectSession(session) : null),
@@ -36,7 +39,11 @@ export function ChampSelectView({
   );
 
   const allyIds = useMemo(
-    () => sanitized?.myTeam.map((s) => s.championId).filter((id) => id > 0) ?? [],
+    () =>
+      sanitized?.myTeam
+        .filter((s) => !s.isLocalPlayer)
+        .map((s) => s.championId)
+        .filter((id) => id > 0) ?? [],
     [sanitized]
   );
   const enemyIds = useMemo(
@@ -48,7 +55,7 @@ export function ChampSelectView({
     [sanitized]
   );
   const enemyJunglerId = useMemo(
-    () => sanitized?.theirTeam.find((s) => s.assignedPosition === 'jungle')?.championId,
+    () => (sanitized ? inferEnemyJunglerId(sanitized.theirTeam) : undefined),
     [sanitized]
   );
 
@@ -74,12 +81,27 @@ export function ChampSelectView({
 
   async function handleApplyRunesAndSpells() {
     if (!activePick) return;
-    const res = await applyRunesAndSpells(
-      activePick.champion.recommendedRunes,
-      activePick.champion.recommendedSpells[0],
-      activePick.champion.recommendedSpells[1]
-    );
-    setApplyStatus(res.message);
+    setApplyStatus(null);
+    setApplyError(null);
+    const issues = validateRunePage(activePick.champion.recommendedRunes);
+    if (issues.length > 0) {
+      setApplyError(`Rune page check failed: ${issues.join(' ')}`);
+      return;
+    }
+    try {
+      const res = await applyRunesAndSpells(
+        activePick.champion.recommendedRunes,
+        activePick.champion.recommendedSpells[0],
+        activePick.champion.recommendedSpells[1]
+      );
+      setApplyStatus(res.message);
+    } catch (err) {
+      setApplyError(
+        err instanceof Error
+          ? err.message
+          : 'Could not apply runes & spells to League Client.'
+      );
+    }
   }
 
   const totalDamageWeight = Math.max(1, allyComp.adScore + allyComp.apScore);
@@ -348,6 +370,11 @@ export function ChampSelectView({
               {applyStatus && (
                 <p className="text-center text-[11px] font-medium text-emerald-300">
                   {applyStatus}
+                </p>
+              )}
+              {applyError && (
+                <p className="text-center text-[11px] font-medium text-rose-300">
+                  {applyError}
                 </p>
               )}
             </div>

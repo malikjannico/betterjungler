@@ -5,6 +5,7 @@ import {
   computeMacroGuidance,
   computeObjectiveWindows,
   formatClock,
+  resolveSelfPlayer,
 } from './liveCoachEngine';
 import {
   DEMO_IN_GAME_EARLY,
@@ -69,5 +70,75 @@ describe('liveCoachEngine', () => {
     );
     const cues = computeMacroGuidance(DEMO_IN_GAME_EARLY, winPlan, objs);
     expect(cues.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('resolves self by Riot ID, detects threats by itemID on non-English locales, and handles 2-2 Dragon splits', () => {
+    const localizedLive: typeof DEMO_IN_GAME_MID = {
+      ...DEMO_IN_GAME_MID,
+      activePlayer: {
+        ...DEMO_IN_GAME_MID.activePlayer,
+        summonerName: '',
+        riotId: 'MyJungler#EUW',
+      },
+      allPlayers: DEMO_IN_GAME_MID.allPlayers.map((p) => {
+        if (p.summonerName === DEMO_IN_GAME_MID.activePlayer.summonerName) {
+          return { ...p, summonerName: 'DifferentLegacyName', riotId: 'MyJungler#EUW' };
+        }
+        if (p.championName === 'Jinx') {
+          return {
+            ...p,
+            items: [
+              { itemID: 3031, displayName: 'Klinge der Unendlichkeit', count: 1, slot: 0, price: 3600 },
+              { itemID: 3046, displayName: 'Phantomtänzer', count: 1, slot: 1, price: 2650 },
+            ],
+          };
+        }
+        return p;
+      }),
+    };
+
+    const resolved = resolveSelfPlayer(localizedLive);
+    expect(resolved?.riotId).toBe('MyJungler#EUW');
+    expect(resolved?.team).toBe('ORDER');
+
+    // Never fall back to allPlayers[0] when self cannot be matched
+    expect(
+      resolveSelfPlayer({
+        ...localizedLive,
+        activePlayer: { ...localizedLive.activePlayer, summonerName: 'Missing', riotId: 'Missing#NA1' },
+      })
+    ).toBeNull();
+
+    // 2-2 Dragon split stays Elemental Dragon (not Elder Dragon)
+    const splitObjs = computeObjectiveWindows(
+      1490, // After 24:45 Herald despawn -> Baron + Dragon + Atakhan
+      [
+        { EventID: 1, EventName: 'DragonKill', EventTime: 340, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
+        { EventID: 2, EventName: 'DragonKill', EventTime: 650, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
+        { EventID: 3, EventName: 'DragonKill', EventTime: 960, KillerName: DEMO_IN_GAME_MID.allPlayers[5]!.summonerName },
+        { EventID: 4, EventName: 'DragonKill', EventTime: 1270, KillerName: DEMO_IN_GAME_MID.allPlayers[5]!.summonerName },
+      ],
+      DEMO_IN_GAME_MID.allPlayers
+    );
+    const dragon = splitObjs.find((o) => o.id === 'dragon');
+    expect(dragon?.name).toBe('Elemental Dragon');
+    expect(splitObjs.some((o) => o.id === 'herald')).toBe(false);
+    expect(splitObjs.some((o) => o.id === 'baron')).toBe(true);
+    expect(splitObjs.some((o) => o.id === 'atakhan')).toBe(true);
+
+    // 4-0 sweep claims Soul -> next Dragon is Elder with a 6:00 (360s) respawn timer
+    const soulSweep = computeObjectiveWindows(
+      1400,
+      [
+        { EventID: 1, EventName: 'DragonKill', EventTime: 320, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
+        { EventID: 2, EventName: 'DragonKill', EventTime: 630, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
+        { EventID: 3, EventName: 'DragonKill', EventTime: 940, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
+        { EventID: 4, EventName: 'DragonKill', EventTime: 1250, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
+      ],
+      DEMO_IN_GAME_MID.allPlayers
+    );
+    const elder = soulSweep.find((o) => o.id === 'dragon');
+    expect(elder?.name).toBe('Elder Dragon');
+    expect(elder?.secondsRemaining).toBe(210); // 1250 + 360 - 1400
   });
 });

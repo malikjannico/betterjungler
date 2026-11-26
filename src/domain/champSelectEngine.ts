@@ -122,6 +122,27 @@ export interface RecommendJungleInput {
   highEloMeta?: HighEloMetaSnapshot | null;
 }
 
+export function inferEnemyJunglerId(
+  slots: ChampSelectPlayerSlot[]
+): number | undefined {
+  const byPos = slots.find(
+    (s) => s.assignedPosition === 'jungle' && s.championId > 0
+  );
+  if (byPos) return byPos.championId;
+  const bySmite = slots.find(
+    (s) => (s.spell1Id === 11 || s.spell2Id === 11) && s.championId > 0
+  );
+  if (bySmite) return bySmite.championId;
+
+  // In Ranked Solo/Duo, Riot hides enemy roles and spells during Champ Select.
+  // If a single picked enemy champion belongs to our primary jungle pool, infer them.
+  const junglePoolIds = new Set(JUNGLE_CHAMPIONS.map((c) => c.championId));
+  const candidates = slots.filter(
+    (s) => s.championId > 0 && junglePoolIds.has(s.championId)
+  );
+  return candidates.length === 1 ? candidates[0]?.championId : undefined;
+}
+
 export function recommendJunglePicks(
   input: RecommendJungleInput
 ): ChampSelectRecommendation[] {
@@ -151,7 +172,7 @@ export function recommendJunglePicks(
     const warnings: string[] = [];
 
     // 1. Meta Tier baseline (0..35) + optional High-Elo Match-V5 sample blend (-5..+5)
-    let metaPoints = Math.round(((jungler.metaScore - 75) / 25) * 35);
+    let metaPoints = Math.max(0, Math.min(35, Math.round(((jungler.metaScore - 75) / 25) * 35)));
     const highEloStat = input.highEloMeta?.champions.find(
       (c) => c.championId === jungler.championId && c.games >= 2
     );

@@ -224,32 +224,59 @@ pub fn cache_match_record(
     conn.execute(
         "INSERT INTO match_details_cache (match_id, puuid, played_at, summary_json, detail_json)
          VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(match_id) DO UPDATE SET summary_json = excluded.summary_json, detail_json = excluded.detail_json",
+         ON CONFLICT(match_id) DO UPDATE SET puuid = excluded.puuid, summary_json = excluded.summary_json, detail_json = excluded.detail_json",
         params![match_id, puuid, played_at, summary_json, detail_json],
     )
     .map_err(|e| AppError::Storage(e.to_string()))?;
     Ok(())
 }
 
-pub fn list_cached_matches(conn: &Connection, limit: usize) -> AppResult<(Vec<Value>, Vec<Value>)> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT summary_json, detail_json FROM match_details_cache ORDER BY played_at DESC LIMIT ?1",
+pub fn list_cached_matches(
+    conn: &Connection,
+    puuid_filter: Option<&str>,
+    limit: usize,
+) -> AppResult<(Vec<Value>, Vec<Value>)> {
+    let filter_puuid = puuid_filter.map(str::trim).filter(|s| !s.is_empty());
+    let (sql, bound_puuid): (&str, Option<&str>) = if let Some(p) = filter_puuid {
+        (
+            "SELECT summary_json, detail_json FROM match_details_cache WHERE puuid = ?1 ORDER BY played_at DESC LIMIT ?2",
+            Some(p),
         )
+    } else {
+        (
+            "SELECT summary_json, detail_json FROM match_details_cache ORDER BY played_at DESC LIMIT ?1",
+            None,
+        )
+    };
+
+    let mut stmt = conn
+        .prepare(sql)
         .map_err(|e| AppError::Storage(e.to_string()))?;
 
-    let rows = stmt
-        .query_map(params![limit as i64], |row| {
-            let s: String = row.get(0)?;
-            let d: String = row.get(1)?;
-            Ok((s, d))
-        })
-        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut rows_out: Vec<(String, String)> = Vec::new();
+    if let Some(p) = bound_puuid {
+        let rows = stmt
+            .query_map(params![p, limit as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        for r in rows {
+            rows_out.push(r.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+    } else {
+        let rows = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        for r in rows {
+            rows_out.push(r.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+    }
 
     let mut summaries = Vec::new();
     let mut details = Vec::new();
-    for item in rows {
-        let (s, d) = item.map_err(|e| AppError::Storage(e.to_string()))?;
+    for (s, d) in rows_out {
         if let Ok(sv) = serde_json::from_str::<Value>(&s) {
             summaries.push(sv);
         }
@@ -260,12 +287,16 @@ pub fn list_cached_matches(conn: &Connection, limit: usize) -> AppResult<(Vec<Va
     Ok((summaries, details))
 }
 
-pub fn get_cached_match_detail(conn: &Connection, match_id: &str) -> AppResult<Option<Value>> {
+pub fn get_cached_match_detail(
+    conn: &Connection,
+    match_id: &str,
+    puuid: &str,
+) -> AppResult<Option<Value>> {
     let mut stmt = conn
-        .prepare("SELECT detail_json FROM match_details_cache WHERE match_id = ?1")
+        .prepare("SELECT detail_json FROM match_details_cache WHERE match_id = ?1 AND puuid = ?2")
         .map_err(|e| AppError::Storage(e.to_string()))?;
     let mut rows = stmt
-        .query(params![match_id])
+        .query(params![match_id, puuid])
         .map_err(|e| AppError::Storage(e.to_string()))?;
     if let Some(row) = rows.next().map_err(|e| AppError::Storage(e.to_string()))? {
         let json: String = row.get(0).map_err(|e| AppError::Storage(e.to_string()))?;
@@ -345,7 +376,12 @@ pub fn load_meta_snapshot(conn: &Connection) -> AppResult<Option<Value>> {
 }
 
 pub fn tier_rank_to_absolute_lp(tier: &str, rank: &str, lp: i32) -> i32 {
-    let tier_base = match tier.to_uppercase().as_str() {
+    let normalized = tier.trim().to_uppercase();
+    let is_apex = matches!(
+        normalized.as_str(),
+        "MASTER" | "GRANDMASTER" | "CHALLENGER"
+    );
+    let tier_base = match normalized.as_str() {
         "IRON" => 0,
         "BRONZE" => 400,
         "SILVER" => 800,
@@ -356,14 +392,44 @@ pub fn tier_rank_to_absolute_lp(tier: &str, rank: &str, lp: i32) -> i32 {
         "MASTER" | "GRANDMASTER" | "CHALLENGER" => 2800,
         _ => 1200,
     };
-    let div_offset = match rank.to_uppercase().as_str() {
-        "IV" => 0,
-        "III" => 100,
-        "II" => 200,
-        "I" => 300,
-        _ => 0,
+    let div_offset = if is_apex {
+        0
+    } else {
+        match rank.trim().to_uppercase().as_str() {
+            "IV" => 0,
+            "III" => 100,
+            "II" => 200,
+            "I" => 300,
+            _ => 0,
+        }
     };
     tier_base + div_offset + lp
+}
+
+pub fn get_latest_lp_snapshot(conn: &Connection) -> AppResult<Option<LpHistoryRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT timestamp, tier, rank, league_points, absolute_lp, win
+             FROM lp_history ORDER BY id DESC LIMIT 1",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut rows = stmt
+        .query_map([], |row| {
+            Ok(LpHistoryRecord {
+                timestamp: row.get(0)?,
+                tier: row.get(1)?,
+                rank: row.get(2)?,
+                league_points: row.get(3)?,
+                absolute_lp: row.get(4)?,
+                win: row.get::<_, i64>(5)? != 0,
+            })
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    if let Some(first) = rows.next() {
+        Ok(Some(first.map_err(|e| AppError::Storage(e.to_string()))?))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn append_lp_snapshot(conn: &Connection, rec: &LpHistoryRecord) -> AppResult<()> {
@@ -535,5 +601,14 @@ mod tests {
         append_lp_snapshot(&conn, &lp).expect("append lp");
         let hist = list_lp_history(&conn, 10).expect("list lp");
         assert_eq!(hist.len(), 1);
+        assert_eq!(tier_rank_to_absolute_lp("MASTER", "I", 180), 2980);
+        assert_eq!(tier_rank_to_absolute_lp("DIAMOND", "I", 99), 2799);
+    }
+
+    #[test]
+    #[ignore = "Requires Windows Credential Manager session"]
+    fn windows_keyring_roundtrip_persists_secret() {
+        save_riot_api_key("RGAPI-test-roundtrip").expect("store secret");
+        assert_eq!(load_riot_api_key().expect("load secret"), "RGAPI-test-roundtrip");
     }
 }

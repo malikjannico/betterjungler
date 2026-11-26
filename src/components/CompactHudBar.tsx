@@ -30,7 +30,7 @@ export function CompactHudBar({
       data-testid="compact-hud-bar"
       data-phase={phase}
       data-urgent={isUrgent ? 'true' : 'false'}
-      className="lg-shell w-[410px] !rounded-[22px] p-3.5 text-xs text-slate-100 select-none"
+      className="lg-shell w-full max-w-[404px] !rounded-[22px] p-3.5 text-xs text-slate-100 select-none"
     >
       <div className="flex items-center justify-between gap-2 pb-2.5">
         <div className="flex items-center gap-2">

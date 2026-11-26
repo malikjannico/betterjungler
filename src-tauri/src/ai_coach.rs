@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use reqwest::Client;
 use serde_json::{json, Value};
 use url::Url;
@@ -5,16 +7,48 @@ use url::Url;
 use crate::error::{AppError, AppResult};
 use crate::storage::AiCoachConfig;
 
+/// Dedicated HTTP client with 90s timeout for external AI APIs & local Ollama inference.
+pub fn build_ai_client() -> AppResult<Client> {
+    Client::builder()
+        .use_rustls_tls()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|e| AppError::AiCoach(e.to_string()))
+}
+
 pub fn validate_ollama_endpoint(endpoint: &str) -> AppResult<Url> {
     let parsed = Url::parse(endpoint.trim())
         .map_err(|e| AppError::SecurityPolicy(format!("Invalid Ollama endpoint URL: {e}")))?;
-    let host = parsed.host_str().unwrap_or("");
-    if host != "127.0.0.1" && host != "localhost" {
+    if parsed.scheme() != "http" {
         return Err(AppError::SecurityPolicy(
-            "Local Ollama endpoint must target 127.0.0.1 or localhost".to_string(),
+            "Local Ollama endpoint must use http:// loopback".to_string(),
+        ));
+    }
+    let host = parsed.host_str().unwrap_or("");
+    if host != "127.0.0.1" && host != "[::1]" && host != "::1" {
+        return Err(AppError::SecurityPolicy(
+            "Local Ollama endpoint must target 127.0.0.1 or [::1]".to_string(),
         ));
     }
     Ok(parsed)
+}
+
+fn validate_model_name(model: &str, default_model: &str) -> AppResult<String> {
+    let candidate = if model.trim().is_empty() {
+        default_model
+    } else {
+        model.trim()
+    };
+    if !candidate
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+    {
+        return Err(AppError::SecurityPolicy(
+            "AI model identifier contains unsupported characters".to_string(),
+        ));
+    }
+    Ok(candidate.to_string())
 }
 
 pub async fn generate_ai_debrief(
@@ -30,11 +64,7 @@ pub async fn generate_ai_debrief(
             let key = api_key.ok_or_else(|| {
                 AppError::Credential("Save your Gemini API key in Settings first.".to_string())
             })?;
-            let model = if config.model.trim().is_empty() {
-                "gemini-2.5-flash"
-            } else {
-                config.model.trim()
-            };
+            let model = validate_model_name(&config.model, "gemini-2.5-flash")?;
             let url = format!(
                 "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             );
@@ -47,10 +77,10 @@ pub async fn generate_ai_debrief(
                 }))
                 .send()
                 .await
-                .map_err(|e| AppError::RiotApi(format!("Gemini request failed: {e}")))?;
+                .map_err(|e| AppError::AiCoach(format!("Gemini request failed: {e}")))?;
 
             if !res.status().is_success() {
-                return Err(AppError::RiotApi(format!(
+                return Err(AppError::AiCoach(format!(
                     "Gemini API returned HTTP {}",
                     res.status()
                 )));
@@ -58,7 +88,7 @@ pub async fn generate_ai_debrief(
             let body: Value = res
                 .json()
                 .await
-                .map_err(|e| AppError::RiotApi(e.to_string()))?;
+                .map_err(|e| AppError::AiCoach(e.to_string()))?;
             let text = body["candidates"][0]["content"]["parts"][0]["text"]
                 .as_str()
                 .unwrap_or("No coaching response generated.")
@@ -69,11 +99,7 @@ pub async fn generate_ai_debrief(
             let key = api_key.ok_or_else(|| {
                 AppError::Credential("Save your OpenAI API key in Settings first.".to_string())
             })?;
-            let model = if config.model.trim().is_empty() {
-                "gpt-4o-mini"
-            } else {
-                config.model.trim()
-            };
+            let model = validate_model_name(&config.model, "gpt-4o-mini")?;
             let res = client
                 .post("https://api.openai.com/v1/chat/completions")
                 .bearer_auth(key)
@@ -87,10 +113,10 @@ pub async fn generate_ai_debrief(
                 }))
                 .send()
                 .await
-                .map_err(|e| AppError::RiotApi(format!("OpenAI request failed: {e}")))?;
+                .map_err(|e| AppError::AiCoach(format!("OpenAI request failed: {e}")))?;
 
             if !res.status().is_success() {
-                return Err(AppError::RiotApi(format!(
+                return Err(AppError::AiCoach(format!(
                     "OpenAI API returned HTTP {}",
                     res.status()
                 )));
@@ -98,7 +124,7 @@ pub async fn generate_ai_debrief(
             let body: Value = res
                 .json()
                 .await
-                .map_err(|e| AppError::RiotApi(e.to_string()))?;
+                .map_err(|e| AppError::AiCoach(e.to_string()))?;
             let text = body["choices"][0]["message"]["content"]
                 .as_str()
                 .unwrap_or("No coaching response generated.")
@@ -108,13 +134,9 @@ pub async fn generate_ai_debrief(
         "ollama" => {
             let base = validate_ollama_endpoint(&config.endpoint)?;
             let url = base
-                .join("/api/generate")
-                .map_err(|e| AppError::RiotApi(e.to_string()))?;
-            let model = if config.model.trim().is_empty() {
-                "llama3.1"
-            } else {
-                config.model.trim()
-            };
+                .join("api/generate")
+                .map_err(|e| AppError::AiCoach(e.to_string()))?;
+            let model = validate_model_name(&config.model, "llama3.1")?;
             let res = client
                 .post(url)
                 .json(&json!({
@@ -124,10 +146,10 @@ pub async fn generate_ai_debrief(
                 }))
                 .send()
                 .await
-                .map_err(|e| AppError::RiotApi(format!("Ollama request failed: {e}")))?;
+                .map_err(|e| AppError::AiCoach(format!("Ollama request failed: {e}")))?;
 
             if !res.status().is_success() {
-                return Err(AppError::RiotApi(format!(
+                return Err(AppError::AiCoach(format!(
                     "Ollama returned HTTP {}",
                     res.status()
                 )));
@@ -135,14 +157,14 @@ pub async fn generate_ai_debrief(
             let body: Value = res
                 .json()
                 .await
-                .map_err(|e| AppError::RiotApi(e.to_string()))?;
+                .map_err(|e| AppError::AiCoach(e.to_string()))?;
             let text = body["response"]
                 .as_str()
                 .unwrap_or("No coaching response generated.")
                 .to_string();
             Ok(text)
         }
-        _ => Err(AppError::RiotApi(
+        _ => Err(AppError::AiCoach(
             "AI Coach is currently set to Off in Settings.".to_string(),
         )),
     }
@@ -155,7 +177,8 @@ mod tests {
     #[test]
     fn validates_ollama_endpoint_is_loopback() {
         assert!(validate_ollama_endpoint("http://127.0.0.1:11434").is_ok());
-        assert!(validate_ollama_endpoint("http://localhost:11434").is_ok());
+        assert!(validate_ollama_endpoint("http://[::1]:11434").is_ok());
+        assert!(validate_ollama_endpoint("http://localhost:11434").is_err());
         assert!(validate_ollama_endpoint("https://evil.example.com:11434").is_err());
     }
 }

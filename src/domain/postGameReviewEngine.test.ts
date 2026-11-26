@@ -40,4 +40,23 @@ describe('postGameReviewEngine', () => {
     expect(report.improvements.length).toBeGreaterThanOrEqual(2);
     expect(report.markers.some((m) => m.kind === 'pre_obj_death')).toBe(true);
   });
+
+  it('handles Match-V5 WARD_PLACED events lacking position without crashing', () => {
+    const matchWithNullWardPos = {
+      ...DEMO_POST_GAME_MATCHES[0]!,
+      events: [
+        ...DEMO_POST_GAME_MATCHES[0]!.events,
+        {
+          type: 'WARD_PLACED' as const,
+          timestampSec: 410,
+          creatorId: DEMO_POST_GAME_MATCHES[0]!.playerParticipantId,
+          wardType: 'CONTROL_WARD',
+        },
+      ],
+    };
+
+    const report = analyzePostGameMatch(matchWithNullWardPos, 'PLATINUM IV');
+    expect(report.kpis.controlWardsBought).toBe(matchWithNullWardPos.controlWardsBought);
+    expect(report.markers.every((m) => Number.isFinite(m.x) && Number.isFinite(m.y))).toBe(true);
+  });
 });

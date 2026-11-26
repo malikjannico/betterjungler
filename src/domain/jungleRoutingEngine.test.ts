@@ -48,4 +48,19 @@ describe('jungleRoutingEngine', () => {
     const c4 = selectLiveActiveRoute(1440, [], routes);
     expect(c4.stage).toBe('late_baron');
   });
+
+  it('builds Red-side 3-camp Top route without backtracking to Bot Gromp', () => {
+    const redTopRoutes = buildMultiClearRoutes('red', 'top', 'three_camp_gank');
+    const threeCamp = redTopRoutes.find((r) => r.id === 'red-clear1-3camp');
+    expect(threeCamp).toBeDefined();
+    expect(threeCamp?.steps.map((s) => s.campName)).toEqual([
+      'Red Buff',
+      'Raptors',
+      'Krugs',
+      'Gank Top / Invade',
+    ]);
+
+    const midRoutes = buildMultiClearRoutes('blue', 'mid', 'full_clear');
+    expect(midRoutes[0]?.label).toContain('Mid Focus');
+  });
 });

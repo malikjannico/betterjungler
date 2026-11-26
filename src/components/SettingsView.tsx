@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { syncFullDdragonCatalog } from '../services/ddragonService';
 import {
   fetchSummonerProfile,
@@ -26,7 +26,25 @@ interface SettingsViewProps {
   onPatchSynced: (patch: string, counts?: { champions: number; items: number }) => void;
 }
 
-const REGIONS = ['EUW1', 'EUN1', 'NA1', 'KR', 'BR1', 'JP1', 'OC1', 'TR1', 'LA1', 'LA2'];
+const REGIONS = [
+  'EUW1',
+  'EUN1',
+  'NA1',
+  'KR',
+  'JP1',
+  'BR1',
+  'LA1',
+  'LA2',
+  'OC1',
+  'TR1',
+  'RU',
+  'PH2',
+  'SG2',
+  'TH2',
+  'TW2',
+  'VN2',
+  'ME1',
+];
 const DIVISIONS = [
   'SILVER IV',
   'GOLD IV',
@@ -57,27 +75,42 @@ export function SettingsView({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings]);
+
   async function handleSaveSettings() {
     setErrorMessage(null);
-    await saveSettings(draft);
-    await updateOverlayPreferences(draft.hudCorner, draft.overlayHotkey);
-    onSettingsChanged(draft);
-    setStatusMessage('Preferences & Overlay Ergonomics saved.');
+    setStatusMessage(null);
+    try {
+      await saveSettings(draft);
+      await updateOverlayPreferences(draft.hudCorner, draft.overlayHotkey);
+      onSettingsChanged(draft);
+      setStatusMessage('Preferences & Overlay Ergonomics saved.');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to save preferences.');
+    }
   }
 
   async function handleSaveApiKey() {
     setErrorMessage(null);
+    setStatusMessage(null);
     if (!apiKeyInput.trim()) {
       setErrorMessage('Enter a Riot Developer API key first.');
       return;
     }
-    const ok = await saveRiotApiKey(apiKeyInput.trim());
-    if (ok) {
-      const updated = { ...draft, hasApiKey: true };
-      setDraft(updated);
-      onSettingsChanged(updated);
-      setApiKeyInput('');
-      setStatusMessage('Riot API Key stored in Windows Credential Manager.');
+    try {
+      const ok = await saveRiotApiKey(apiKeyInput.trim());
+      if (ok) {
+        const updated = { ...draft, hasApiKey: true };
+        setDraft(updated);
+        await saveSettings(updated);
+        onSettingsChanged(updated);
+        setApiKeyInput('');
+        setStatusMessage('Riot API Key stored in Windows Credential Manager.');
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to store Riot API key.');
     }
   }
 
@@ -94,35 +127,46 @@ export function SettingsView({
   }
 
   async function handleSyncPatch() {
-    const patch = await syncDdragonPatch();
-    const catalog = await syncFullDdragonCatalog(patch);
-    const counts = {
-      champions: Object.keys(catalog.championsById).length,
-      items: Object.keys(catalog.itemsById).length,
-    };
-    onPatchSynced(catalog.patch, counts);
-    setStatusMessage(
-      `Data Dragon synced to patch ${catalog.patch} (${counts.champions} champions, ${counts.items} items).`
-    );
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const patch = await syncDdragonPatch();
+      const catalog = await syncFullDdragonCatalog(patch);
+      const counts = {
+        champions: Object.keys(catalog.championsById).length,
+        items: Object.keys(catalog.itemsById).length,
+      };
+      onPatchSynced(catalog.patch, counts);
+      setStatusMessage(
+        `Data Dragon synced to patch ${catalog.patch} (${counts.champions} champions, ${counts.items} items).`
+      );
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to sync Data Dragon catalog.');
+    }
   }
 
   async function handleSaveAiKey() {
     setErrorMessage(null);
+    setStatusMessage(null);
     if (!aiKeyInput.trim()) {
       setErrorMessage('Enter an AI provider API key first.');
       return;
     }
-    const ok = await saveAiApiKey(aiKeyInput.trim());
-    if (ok) {
-      const updated: UserSettings = {
-        ...draft,
-        aiCoach: { ...draft.aiCoach, hasApiKey: true },
-      };
-      setDraft(updated);
-      await saveSettings(updated);
-      onSettingsChanged(updated);
-      setAiKeyInput('');
-      setStatusMessage('AI Coach API key stored in Windows Credential Manager.');
+    try {
+      const ok = await saveAiApiKey(aiKeyInput.trim());
+      if (ok) {
+        const updated: UserSettings = {
+          ...draft,
+          aiCoach: { ...draft.aiCoach, hasApiKey: true },
+        };
+        setDraft(updated);
+        await saveSettings(updated);
+        onSettingsChanged(updated);
+        setAiKeyInput('');
+        setStatusMessage('AI Coach API key stored in Windows Credential Manager.');
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to store AI API key.');
     }
   }
 

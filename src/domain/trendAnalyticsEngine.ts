@@ -102,7 +102,7 @@ export function aggregateDeathHeatmap(
     const enemyObjs = match.events.filter(
       (e) =>
         e.type === 'ELITE_MONSTER_KILL' &&
-        e.killerTeamId !== undefined &&
+        typeof e.killerTeamId === 'number' &&
         e.killerTeamId !== myTeamId
     );
 
@@ -110,7 +110,9 @@ export function aggregateDeathHeatmap(
       if (
         ev.type !== 'CHAMPION_KILL' ||
         ev.victimId !== match.playerParticipantId ||
-        !ev.position
+        !ev.position ||
+        typeof ev.position.x !== 'number' ||
+        typeof ev.position.y !== 'number'
       ) {
         return;
       }

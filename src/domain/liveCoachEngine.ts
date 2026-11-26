@@ -22,6 +22,43 @@ const MR_ITEM_IDS = new Set([3111, 3155, 3156, 2504, 3001, 6664, 3102]);
 const ARMOR_ITEM_IDS = new Set([3047, 3068, 3075, 3143, 3110, 6333, 3157, 3026, 3742]);
 const PEN_ITEM_IDS = new Set([3071, 3153, 6694, 3036, 3135, 6653]);
 
+// Locale-independent enemy threat item ID sets (Riot official item IDs)
+const HEALING_THREAT_ITEM_IDS = new Set([3072, 6610, 6692, 4633, 6617, 3153, 3074, 6630]);
+const CRIT_THREAT_ITEM_IDS = new Set([3031, 6676, 3046, 3094, 3085, 3087, 3036, 3033, 6672]);
+const TANK_THREAT_ITEM_IDS = new Set([3068, 3084, 3075, 2504, 6665, 3110, 3143, 3742]);
+
+export function resolveSelfPlayer(liveData: LiveGameData): LivePlayer | null {
+  const activeRiotId = (
+    liveData.activePlayer.riotId ??
+    (liveData.activePlayer.riotIdGameName && liveData.activePlayer.riotIdTagLine
+      ? `${liveData.activePlayer.riotIdGameName}#${liveData.activePlayer.riotIdTagLine}`
+      : '')
+  )
+    .trim()
+    .toLowerCase();
+
+  if (activeRiotId) {
+    const byRiotId = liveData.allPlayers.find((p) => {
+      const pRiotId = (
+        p.riotId ??
+        (p.riotIdGameName && p.riotIdTagLine ? `${p.riotIdGameName}#${p.riotIdTagLine}` : '')
+      )
+        .trim()
+        .toLowerCase();
+      return pRiotId === activeRiotId;
+    });
+    if (byRiotId) return byRiotId;
+  }
+
+  const activeName = liveData.activePlayer.summonerName.trim();
+  if (activeName) {
+    const byName = liveData.allPlayers.find((p) => p.summonerName.trim() === activeName);
+    if (byName) return byName;
+  }
+
+  return null;
+}
+
 export function formatClock(totalSeconds: number): string {
   const clamped = Math.max(0, Math.floor(totalSeconds));
   const mins = Math.floor(clamped / 60);
@@ -29,13 +66,22 @@ export function formatClock(totalSeconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function findMetaByName(championName: string): ChampionMetaEntry | undefined {
-  const normalized = championName.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return Object.values(CHAMPION_META_TABLE).find(
-    (entry) =>
-      entry.name.toLowerCase().replace(/[^a-z0-9]/g, '') === normalized ||
-      entry.key.toLowerCase().replace(/[^a-z0-9]/g, '') === normalized
-  );
+function findMetaByName(championName: string, rawChampionName?: string): ChampionMetaEntry | undefined {
+  const candidates = [
+    championName,
+    rawChampionName?.replace(/^game_character_displayname_/i, ''),
+  ].filter((c): c is string => Boolean(c));
+
+  for (const candidate of candidates) {
+    const normalized = candidate.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const found = Object.values(CHAMPION_META_TABLE).find(
+      (entry) =>
+        entry.name.toLowerCase().replace(/[^a-z0-9]/g, '') === normalized ||
+        entry.key.toLowerCase().replace(/[^a-z0-9]/g, '') === normalized
+    );
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /**
@@ -44,7 +90,8 @@ function findMetaByName(championName: string): ChampionMetaEntry | undefined {
  */
 export function computeObjectiveWindows(
   gameTime: number,
-  events: LiveGameData['events']['Events']
+  events: LiveGameData['events']['Events'],
+  allPlayers?: LivePlayer[]
 ): ObjectiveWindow[] {
   const windows: ObjectiveWindow[] = [];
 
@@ -65,21 +112,52 @@ export function computeObjectiveWindows(
     });
   }
 
-  // 2. Dragon (first 5:00 = 300s, respawn 5:00 = 300s)
+  // 2. Dragon (first 5:00 = 300s, Elemental respawn 5:00 = 300s, Elder respawn 6:00 = 360s)
   const dragonKills = events.filter((e) => e.EventName === 'DragonKill');
-  const lastDragonTime =
-    dragonKills.length > 0 ? Math.max(...dragonKills.map((e) => e.EventTime)) : null;
-  const nextDragonSpawn = lastDragonTime !== null ? lastDragonTime + 300 : 300;
+  const lastDragonKill =
+    dragonKills.length > 0
+      ? dragonKills.reduce((latest, cur) => (cur.EventTime > latest.EventTime ? cur : latest))
+      : null;
+
+  let orderDragons = 0;
+  let chaosDragons = 0;
+  if (allPlayers && allPlayers.length > 0) {
+    const teamByKiller = new Map<string, 'ORDER' | 'CHAOS'>();
+    for (const p of allPlayers) {
+      if (p.summonerName) teamByKiller.set(p.summonerName, p.team);
+      if (p.riotIdGameName) teamByKiller.set(p.riotIdGameName, p.team);
+      if (p.riotId) teamByKiller.set(p.riotId, p.team);
+    }
+    for (const dk of dragonKills) {
+      const killerTeam = dk.KillerName ? teamByKiller.get(dk.KillerName) : undefined;
+      if (killerTeam === 'ORDER') orderDragons += 1;
+      else if (killerTeam === 'CHAOS') chaosDragons += 1;
+    }
+  }
+  const hasExplicitElderKill = dragonKills.some(
+    (d) => d.DragonType?.toLowerCase() === 'elder'
+  );
+  const maxTeamDragons = Math.max(orderDragons, chaosDragons);
+  const isElderCandidate =
+    hasExplicitElderKill ||
+    (maxTeamDragons > 0 ? maxTeamDragons >= 4 : dragonKills.length >= 7);
+  const isSoulPoint = !isElderCandidate && maxTeamDragons === 3;
+  const dragonRespawnSec =
+    lastDragonKill?.DragonType?.toLowerCase() === 'elder' || isElderCandidate ? 360 : 300;
+  const nextDragonSpawn = lastDragonKill !== null ? lastDragonKill.EventTime + dragonRespawnSec : 300;
   const dragonRem = Math.max(0, nextDragonSpawn - gameTime);
-  const isElderCandidate = dragonKills.length >= 4;
 
   windows.push({
     id: 'dragon',
-    name: isElderCandidate ? 'Elder / Soul Dragon' : 'Elemental Dragon',
+    name: isElderCandidate
+      ? 'Elder Dragon'
+      : isSoulPoint
+        ? 'Soul Point Dragon'
+        : 'Elemental Dragon',
     status: dragonRem === 0 ? 'live' : dragonRem <= 60 ? 'prep_vision' : 'upcoming',
     secondsRemaining: dragonRem,
     nextSpawnFormatted: formatClock(nextDragonSpawn),
-    priority: dragonRem <= 60 ? 'critical' : 'high',
+    priority: dragonRem <= 60 || isElderCandidate ? 'critical' : 'high',
     actionText:
       dragonRem === 0
         ? 'Dragon is UP — check bot/mid wave push before starting.'
@@ -88,14 +166,33 @@ export function computeObjectiveWindows(
           : 'Cycle camps toward bot side ahead of Dragon spawn.',
   });
 
-  // 3. Voidgrubs (6:00 = 360s) / Rift Herald (14:00 = 840s) / Baron (25:00 = 1500s)
+  // 2b. Atakhan (20:00 = 1200s until slain)
+  const atakhanKills = events.filter((e) => e.EventName === 'AtakhanKill');
+  if (gameTime >= 1020 && atakhanKills.length === 0) {
+    const atakhanRem = Math.max(0, 1200 - gameTime);
+    windows.push({
+      id: 'atakhan',
+      name: 'Atakhan',
+      status: atakhanRem === 0 ? 'live' : atakhanRem <= 60 ? 'prep_vision' : 'upcoming',
+      secondsRemaining: atakhanRem,
+      nextSpawnFormatted: formatClock(1200),
+      priority: atakhanRem <= 60 ? 'critical' : 'high',
+      actionText:
+        atakhanRem === 0
+          ? 'Atakhan is LIVE — clear side waves & secure river vision before starting.'
+          : 'Prepare side-river Control Ward ahead of 20:00 Atakhan spawn.',
+    });
+  }
+
+  // 3. Voidgrubs (6:00 = 360s) / Rift Herald (14:00–24:45 = 840..1485s) / Baron (25:00 = 1500s)
+  const voidgrubKills = events.filter((e) => e.EventName === 'HordeKill');
   const heraldKills = events.filter((e) => e.EventName === 'HeraldKill');
   const baronKills = events.filter((e) => e.EventName === 'BaronKill');
 
   if (gameTime < 840) {
     const grubsSpawn = 360;
     const grubRem = Math.max(0, grubsSpawn - gameTime);
-    if (gameTime < 660) {
+    if (gameTime < 660 && voidgrubKills.length < 3) {
       windows.push({
         id: 'voidgrubs',
         name: 'Voidgrubs',
@@ -120,7 +217,7 @@ export function computeObjectiveWindows(
         actionText: 'Prepare Top river vision for 14:00 Rift Herald spawn.',
       });
     }
-  } else if (gameTime < 1500 && heraldKills.length === 0) {
+  } else if (gameTime < 1485 && heraldKills.length === 0) {
     windows.push({
       id: 'herald',
       name: 'Rift Herald',
@@ -128,7 +225,7 @@ export function computeObjectiveWindows(
       secondsRemaining: 0,
       nextSpawnFormatted: formatClock(840),
       priority: 'high',
-      actionText: 'Rift Herald LIVE — use to crack Mid Tier-1 turret and open map.',
+      actionText: 'Rift Herald LIVE (despawns 24:45) — use to crack Mid Tier-1 turret.',
     });
   } else {
     const lastBaron =
@@ -167,17 +264,13 @@ export function assessLiveThreats(
   const reasons: string[] = [];
 
   for (const enemy of enemies) {
-    const meta = findMetaByName(enemy.championName);
+    const meta = findMetaByName(enemy.championName, enemy.rawChampionName);
     const kills = enemy.scores.kills;
-    const itemNames = enemy.items.map((i) => i.displayName.toLowerCase()).join(' ');
+    const itemIds = new Set(enemy.items.map((i) => i.itemID));
 
     if (
       meta?.hasHeavyHealing ||
-      itemNames.includes('bloodthirster') ||
-      itemNames.includes('riftmaker') ||
-      itemNames.includes('eclipse') ||
-      itemNames.includes('sundered') ||
-      itemNames.includes('moonstone')
+      [...itemIds].some((id) => HEALING_THREAT_ITEM_IDS.has(id))
     ) {
       healingSources += 1;
     }
@@ -189,9 +282,7 @@ export function assessLiveThreats(
     }
 
     if (
-      itemNames.includes('infinity edge') ||
-      itemNames.includes('collector') ||
-      itemNames.includes('phantom dancer') ||
+      [...itemIds].some((id) => CRIT_THREAT_ITEM_IDS.has(id)) ||
       meta?.championClass === 'marksman'
     ) {
       critUsers += kills >= 3 ? 2 : 1;
@@ -199,10 +290,7 @@ export function assessLiveThreats(
 
     if (
       meta?.championClass === 'tank' ||
-      itemNames.includes('sunfire') ||
-      itemNames.includes('heartsteel') ||
-      itemNames.includes('thornmail') ||
-      itemNames.includes('kaenic')
+      [...itemIds].some((id) => TANK_THREAT_ITEM_IDS.has(id))
     ) {
       tankCount += 1;
     }
@@ -267,14 +355,18 @@ export function computeAdaptiveBuild(
   liveData: LiveGameData,
   profileOverride?: JungleChampionProfile
 ): AdaptiveBuildPlan {
-  const activeName = liveData.activePlayer.summonerName;
-  const selfPlayer =
-    liveData.allPlayers.find((p) => p.summonerName === activeName) ??
-    liveData.allPlayers[0];
+  const selfPlayer = resolveSelfPlayer(liveData);
 
   const profile =
     profileOverride ??
-    (selfPlayer ? findJungleChampionByName(selfPlayer.championName) : undefined);
+    (selfPlayer
+      ? findJungleChampionByName(selfPlayer.championName) ??
+        (selfPlayer.rawChampionName
+          ? findJungleChampionByName(
+              selfPlayer.rawChampionName.replace(/^game_character_displayname_/i, '')
+            )
+          : undefined)
+      : undefined);
 
   const enemies = selfPlayer
     ? liveData.allPlayers.filter((p) => p.team !== selfPlayer.team)
@@ -494,8 +586,7 @@ export function computeMacroGuidance(
   objectives: ObjectiveWindow[]
 ): MacroCue[] {
   const gameTime = liveData.gameData.gameTime;
-  const activeName = liveData.activePlayer.summonerName;
-  const selfPlayer = liveData.allPlayers.find((p) => p.summonerName === activeName);
+  const selfPlayer = resolveSelfPlayer(liveData);
   const currentGold = Math.floor(liveData.activePlayer.currentGold);
   const cues: MacroCue[] = [];
 

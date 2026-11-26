@@ -50,7 +50,18 @@ const SETTINGS_STORAGE_KEY = 'betterjungler_settings';
 
 async function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<T>(cmd, args);
+  try {
+    return await invoke<T>(cmd, args);
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    const message =
+      typeof err === 'string'
+        ? err
+        : err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
+          ? err.message
+          : JSON.stringify(err);
+    throw new Error(message || `Tauri command failed: ${cmd}`);
+  }
 }
 
 export async function getAppState(): Promise<AppRuntimeState | null> {
@@ -78,8 +89,14 @@ export async function loadLpHistory(): Promise<LpHistoryPoint[]> {
   if (!isTauriEnvironment()) {
     return DEMO_LP_HISTORY;
   }
-  const rows = await invokeTauri<LpHistoryPoint[]>('get_lp_history');
-  return rows.length > 0 ? rows : DEMO_LP_HISTORY;
+  return invokeTauri<LpHistoryPoint[]>('get_lp_history');
+}
+
+export async function getLcuProfile(region: string): Promise<SummonerProfileSummary> {
+  if (!isTauriEnvironment()) {
+    throw new Error('LCU profile lookup requires running the Tauri desktop app.');
+  }
+  return invokeTauri<SummonerProfileSummary>('get_lcu_profile', { region });
 }
 
 export async function applyRunesAndSpells(
@@ -182,11 +199,13 @@ export async function syncRecentMatches(
   });
 }
 
-export async function getCachedMatches(): Promise<MatchV5Detail[]> {
+export async function getCachedMatches(puuid?: string): Promise<MatchV5Detail[]> {
   if (!isTauriEnvironment()) {
     return DEMO_POST_GAME_MATCHES;
   }
-  return invokeTauri<MatchV5Detail[]>('get_cached_matches');
+  return invokeTauri<MatchV5Detail[]>('get_cached_matches', {
+    puuid: puuid ?? null,
+  });
 }
 
 export async function loadClimbGoals(): Promise<ClimbGoal[]> {
@@ -233,7 +252,8 @@ export async function getCachedMetaSnapshot(): Promise<HighEloMetaSnapshot | nul
 
 export async function refreshHighEloMeta(
   region: string,
-  maxMatches = 10
+  maxMatches = 10,
+  patch?: string
 ): Promise<HighEloMetaSnapshot> {
   if (!isTauriEnvironment()) {
     return {
@@ -245,6 +265,7 @@ export async function refreshHighEloMeta(
   return invokeTauri<HighEloMetaSnapshot>('refresh_high_elo_meta', {
     region,
     maxMatches,
+    patch: patch ?? null,
   });
 }
 

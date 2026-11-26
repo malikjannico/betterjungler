@@ -30,6 +30,7 @@ export function PostGameReviewView({
     matches[0]?.matchId ?? ''
   );
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -44,8 +45,11 @@ export function PostGameReviewView({
 
   async function handleSync() {
     setSyncing(true);
+    setSyncError(null);
     try {
       await onSyncMatches();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Failed to sync Riot matches.');
     } finally {
       setSyncing(false);
     }
@@ -82,8 +86,25 @@ export function PostGameReviewView({
 
   if (!selectedMatch || !report) {
     return (
-      <GlassSurface className="p-8 text-center text-xs text-slate-300">
-        No ranked jungle matches loaded yet. Sync your recent games or select Demo Mode.
+      <GlassSurface className="space-y-3 p-8 text-center text-xs text-slate-300">
+        <p>
+          No ranked jungle matches loaded yet. Sync your recent games or select a Demo scenario.
+        </p>
+        <div>
+          <button
+            type="button"
+            disabled={!canSyncLive || syncing}
+            onClick={() => void handleSync()}
+            className="lg-btn-glass px-4 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {syncing ? 'Syncing...' : canSyncLive ? 'Sync Match-V5 Games' : 'Requires Riot API Key in Settings'}
+          </button>
+        </div>
+        {syncError && (
+          <p className="mx-auto max-w-md rounded-lg border border-rose-400/35 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">
+            {syncError}
+          </p>
+        )}
       </GlassSurface>
     );
   }
@@ -148,6 +169,12 @@ export function PostGameReviewView({
               : 'Refresh Demo Games'}
         </button>
       </div>
+
+      {syncError && (
+        <p className="rounded-lg border border-rose-400/35 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">
+          {syncError}
+        </p>
+      )}
 
       {/* Match Header + Grade + KPIs */}
       <GlassSurface className="p-5">
