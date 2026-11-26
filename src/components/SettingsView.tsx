@@ -16,6 +16,7 @@ import type {
   UserSettings,
 } from '../types/coaching';
 import type { SummonerProfileSummary } from '../types/riot';
+import { GlassSurface } from './GlassSurface';
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -127,11 +128,11 @@ export function SettingsView({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="hud-card space-y-3 rounded-xl p-3">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-            Riot Account &amp; Overlay Preferences
+    <div className="space-y-3.5">
+      <div className="grid gap-3.5 md:grid-cols-2">
+        <GlassSurface className="space-y-3 p-4">
+          <h2 className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-200">
+            Riot Account &amp; Climb Target
           </h2>
 
           <label className="block text-xs">
@@ -141,20 +142,20 @@ export function SettingsView({
               value={draft.riotId}
               onChange={(e) => setDraft({ ...draft, riotId: e.target.value })}
               placeholder="YourName#EUW"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-cyan-400"
+              className="lg-inset mt-1 w-full px-3 py-2 text-xs text-slate-100 outline-none focus:border-sky-400"
             />
           </label>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2.5">
             <label className="block text-xs">
               <span className="text-slate-400">Platform Region</span>
               <select
                 value={draft.region}
                 onChange={(e) => setDraft({ ...draft, region: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+                className="lg-inset mt-1 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
               >
                 {REGIONS.map((r) => (
-                  <option key={r} value={r}>
+                  <option key={r} value={r} className="bg-slate-900">
                     {r}
                   </option>
                 ))}
@@ -166,10 +167,10 @@ export function SettingsView({
               <select
                 value={draft.targetDivision}
                 onChange={(e) => setDraft({ ...draft, targetDivision: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+                className="lg-inset mt-1 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
               >
                 {DIVISIONS.map((d) => (
-                  <option key={d} value={d}>
+                  <option key={d} value={d} className="bg-slate-900">
                     {d}
                   </option>
                 ))}
@@ -183,7 +184,7 @@ export function SettingsView({
               type="text"
               value={draft.lolInstallPath}
               onChange={(e) => setDraft({ ...draft, lolInstallPath: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-cyan-400"
+              className="lg-inset mt-1 w-full px-3 py-2 text-xs text-slate-100 outline-none focus:border-sky-400"
             />
           </label>
 
@@ -191,7 +192,7 @@ export function SettingsView({
             <button
               type="button"
               onClick={handleSaveSettings}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-cyan-400"
+              className="lg-btn-primary inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold"
             >
               <Check className="h-3.5 w-3.5" />
               Save Preferences
@@ -199,23 +200,23 @@ export function SettingsView({
             <button
               type="button"
               onClick={handleLookupProfile}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+              className="lg-btn-glass inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-200"
             >
               Sync Riot Profile
             </button>
           </div>
-        </div>
+        </GlassSurface>
 
-        <div className="hud-card space-y-3 rounded-xl p-3">
+        <GlassSurface className="space-y-3 p-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-              Riot Developer API Key &amp; Data Dragon
+            <h2 className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-200">
+              Riot API Key &amp; Data Dragon
             </h2>
             <span
-              className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+              className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
                 draft.hasApiKey
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'bg-amber-500/15 text-amber-300'
+                  ? 'bg-emerald-400/15 text-emerald-200'
+                  : 'bg-amber-400/15 text-amber-200'
               }`}
             >
               {draft.hasApiKey ? 'Key Stored Securely' : 'No Key Saved'}
@@ -232,12 +233,12 @@ export function SettingsView({
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 placeholder="RGAPI-xxxxxxxx-xxxx-..."
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-cyan-400"
+                className="lg-inset flex-1 px-3 py-2 text-xs text-slate-100 outline-none focus:border-sky-400"
               />
               <button
                 type="button"
                 onClick={handleSaveApiKey}
-                className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25"
+                className="lg-btn-glass inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-sky-200"
               >
                 <KeyRound className="h-3.5 w-3.5" />
                 Save Key
@@ -245,7 +246,7 @@ export function SettingsView({
             </div>
           </label>
 
-          <div className="flex items-center justify-between rounded-lg bg-slate-900/70 px-3 py-2 text-xs">
+          <div className="lg-inset flex items-center justify-between px-3 py-2.5 text-xs">
             <div>
               <div className="font-semibold text-slate-200">Data Dragon Patch &amp; Catalog</div>
               <div className="text-[11px] text-slate-400">
@@ -256,16 +257,15 @@ export function SettingsView({
             <button
               type="button"
               onClick={handleSyncPatch}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-700"
+              className="lg-btn-glass inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-200"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Sync Patch
             </button>
           </div>
 
-          {/* Overlay Ergonomics */}
-          <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2.5">
-            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-cyan-300">
+          <div className="lg-inset p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.07em] text-sky-300">
               <Sliders className="h-3.5 w-3.5" />
               Overlay Ergonomics
             </div>
@@ -280,10 +280,10 @@ export function SettingsView({
                     setDraft(next);
                     onSettingsChanged(next);
                   }}
-                  className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-slate-100"
                 >
                   {HUD_CORNERS.map((c) => (
-                    <option key={c.value} value={c.value}>
+                    <option key={c.value} value={c.value} className="bg-slate-900">
                       {c.label}
                     </option>
                   ))}
@@ -300,10 +300,10 @@ export function SettingsView({
                     setDraft(next);
                     onSettingsChanged(next);
                   }}
-                  className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-slate-100"
                 >
                   {HOTKEY_PRESETS.map((k) => (
-                    <option key={k} value={k}>
+                    <option key={k} value={k} className="bg-slate-900">
                       {k}
                     </option>
                   ))}
@@ -323,13 +323,13 @@ export function SettingsView({
                     setDraft(next);
                     onSettingsChanged(next);
                   }}
-                  className="mt-2 w-full accent-cyan-400"
+                  className="mt-2 w-full accent-sky-400"
                 />
               </label>
             </div>
           </div>
 
-          <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2.5 text-[11px] text-slate-300">
+          <div className="lg-inset border-emerald-400/20 bg-emerald-400/[0.04] p-2.5 text-[11px] text-slate-300">
             <div className="flex items-center gap-1.5 font-semibold text-emerald-300">
               <ShieldCheck className="h-3.5 w-3.5" />
               Riot Developer Policy Compliance
@@ -340,14 +340,14 @@ export function SettingsView({
               ultimates, and enforces Solo/Duo Champ Select anonymity.
             </p>
           </div>
-        </div>
+        </GlassSurface>
       </div>
 
       {/* Optional BYOK AI Coach */}
-      <div className="hud-card space-y-3 rounded-xl p-3">
+      <GlassSurface className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-violet-300">
-            <Bot className="h-4 w-4" />
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.07em] text-violet-200">
+            <Bot className="h-4 w-4 text-violet-300" />
             Optional BYOK AI Coach (Natural-Language Debriefs)
           </div>
           <span className="text-[11px] text-slate-400">
@@ -355,7 +355,7 @@ export function SettingsView({
           </span>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2.5 sm:grid-cols-3">
           <label className="block text-xs">
             <span className="text-slate-400">AI Provider</span>
             <select
@@ -376,12 +376,20 @@ export function SettingsView({
                   aiCoach: { ...draft.aiCoach, provider, model: defaultModel },
                 });
               }}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+              className="lg-inset mt-1 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
             >
-              <option value="off">Off (Deterministic Only)</option>
-              <option value="gemini">Google Gemini (BYOK)</option>
-              <option value="openai">OpenAI (BYOK)</option>
-              <option value="ollama">Local Ollama (127.0.0.1)</option>
+              <option value="off" className="bg-slate-900">
+                Off (Deterministic Only)
+              </option>
+              <option value="gemini" className="bg-slate-900">
+                Google Gemini (BYOK)
+              </option>
+              <option value="openai" className="bg-slate-900">
+                OpenAI (BYOK)
+              </option>
+              <option value="ollama" className="bg-slate-900">
+                Local Ollama (127.0.0.1)
+              </option>
             </select>
           </label>
 
@@ -396,7 +404,7 @@ export function SettingsView({
                   aiCoach: { ...draft.aiCoach, model: e.target.value },
                 })
               }
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+              className="lg-inset mt-1 w-full px-3 py-2 text-xs text-slate-100 outline-none"
             />
           </label>
 
@@ -412,7 +420,7 @@ export function SettingsView({
                     aiCoach: { ...draft.aiCoach, endpoint: e.target.value },
                   })
                 }
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100"
+                className="lg-inset mt-1 w-full px-3 py-2 text-xs text-slate-100 outline-none"
               />
             </label>
           ) : (
@@ -426,12 +434,12 @@ export function SettingsView({
                   value={aiKeyInput}
                   onChange={(e) => setAiKeyInput(e.target.value)}
                   placeholder="Paste Gemini / OpenAI key"
-                  className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                  className="lg-inset flex-1 px-2.5 py-2 text-xs text-slate-100 outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleSaveAiKey}
-                  className="rounded-lg border border-violet-500/40 bg-violet-500/15 px-2.5 py-1.5 text-xs font-semibold text-violet-200 hover:bg-violet-500/25"
+                  className="lg-btn-glass px-3 py-2 text-xs font-semibold text-violet-200"
                 >
                   Save
                 </button>
@@ -439,15 +447,15 @@ export function SettingsView({
             </label>
           )}
         </div>
-      </div>
+      </GlassSurface>
 
       {statusMessage && (
-        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+        <div className="lg-inset border-emerald-400/35 bg-emerald-400/10 px-3.5 py-2 text-xs text-emerald-200">
           {statusMessage}
         </div>
       )}
       {errorMessage && (
-        <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+        <div className="lg-inset border-rose-400/35 bg-rose-400/10 px-3.5 py-2 text-xs text-rose-200">
           {errorMessage}
         </div>
       )}

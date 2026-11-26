@@ -12,6 +12,7 @@ import { analyzePostGameMatch } from '../domain/postGameReviewEngine';
 import { generateAiDebrief } from '../services/tauriBridge';
 import type { AiCoachConfig } from '../types/coaching';
 import type { MatchV5Detail } from '../types/riot';
+import { GlassSurface } from './GlassSurface';
 import { GoldXpDiffChart } from './GoldXpDiffChart';
 import { PostGameTimelineMap } from './PostGameTimelineMap';
 
@@ -86,25 +87,25 @@ export function PostGameReviewView({
 
   if (!selectedMatch || !report) {
     return (
-      <div className="hud-card rounded-xl p-6 text-center text-xs text-slate-300">
+      <GlassSurface className="p-8 text-center text-xs text-slate-300">
         No ranked jungle matches loaded yet. Sync your recent games or select Demo Mode.
-      </div>
+      </GlassSurface>
     );
   }
 
   const gradeColor =
     report.grade === 'S'
-      ? 'text-amber-300 border-amber-400/50 bg-amber-500/15'
+      ? 'text-amber-200 border-amber-300/45 bg-amber-400/15 shadow-[0_0_24px_rgba(251,191,36,0.2)]'
       : report.grade === 'A'
-        ? 'text-emerald-300 border-emerald-400/50 bg-emerald-500/15'
+        ? 'text-emerald-200 border-emerald-300/45 bg-emerald-400/15'
         : report.grade === 'B'
-          ? 'text-cyan-300 border-cyan-400/50 bg-cyan-500/15'
-          : 'text-rose-300 border-rose-400/50 bg-rose-500/15';
+          ? 'text-sky-200 border-sky-300/45 bg-sky-400/15'
+          : 'text-rose-200 border-rose-300/45 bg-rose-400/15';
 
   return (
-    <div className="space-y-3">
-      {/* Match Selector & Sync */}
-      <div className="hud-card flex flex-wrap items-center justify-between gap-2 rounded-xl p-3">
+    <div className="space-y-3.5">
+      {/* Match Selector Bar */}
+      <GlassSurface className="flex flex-wrap items-center justify-between gap-2.5 p-3.5">
         <div className="flex flex-wrap items-center gap-2">
           {matches.map((m) => {
             const active = m.matchId === selectedMatch.matchId;
@@ -117,18 +118,18 @@ export function PostGameReviewView({
                   setAiDebrief(null);
                   setAiError(null);
                 }}
-                className={`rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
+                className={`rounded-full border px-3 py-1.5 text-left text-xs transition ${
                   active
-                    ? 'border-cyan-400 bg-cyan-500/15 text-slate-100'
-                    : 'border-slate-700 bg-slate-900/70 text-slate-300 hover:border-slate-500'
+                    ? 'lg-segment-active'
+                    : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/20'
                 }`}
               >
                 <div className="flex items-center gap-1.5">
                   <span
-                    className={`rounded px-1 text-[10px] font-bold ${
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                       m.win
-                        ? 'bg-emerald-500/20 text-emerald-300'
-                        : 'bg-rose-500/20 text-rose-300'
+                        ? 'bg-emerald-400/20 text-emerald-200'
+                        : 'bg-rose-400/20 text-rose-200'
                     }`}
                   >
                     {m.win ? 'W' : 'L'}
@@ -147,26 +148,26 @@ export function PostGameReviewView({
           type="button"
           disabled={syncing}
           onClick={() => void handleSync()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50"
+          className="lg-btn-glass inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-sky-200 disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
           {canSyncLive ? 'Sync Match-V5 Games' : 'Refresh Demo Games'}
         </button>
-      </div>
+      </GlassSurface>
 
       {/* Match Header + Grade + KPIs */}
-      <div className="hud-card rounded-xl p-3">
+      <GlassSurface className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-slate-100">
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-sm font-bold text-slate-50">
                 {report.championName} vs {report.enemyJunglerName}
               </h2>
               <span
-                className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
                   report.win
-                    ? 'bg-emerald-500/20 text-emerald-300'
-                    : 'bg-rose-500/20 text-rose-300'
+                    ? 'bg-emerald-400/15 text-emerald-200'
+                    : 'bg-rose-400/15 text-rose-200'
                 }`}
               >
                 {report.win ? 'VICTORY' : 'DEFEAT'} • {formatClock(report.durationSeconds)}
@@ -178,14 +179,14 @@ export function PostGameReviewView({
           </div>
 
           <div
-            className={`flex h-11 w-11 items-center justify-center rounded-xl border text-lg font-extrabold ${gradeColor}`}
+            className={`flex h-12 w-12 items-center justify-center rounded-full border text-lg font-extrabold ${gradeColor}`}
             title="Overall Jungle Performance Grade"
           >
             {report.grade}
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
           {[
             { label: 'CS / Min', value: String(report.kpis.csPerMin) },
             {
@@ -197,15 +198,17 @@ export function PostGameReviewView({
             { label: 'Pre-Obj Deaths', value: String(report.kpis.preObjectiveDeaths) },
             { label: 'Control Wards', value: String(report.kpis.controlWardsBought) },
           ].map((kpi) => (
-            <div key={kpi.label} className="rounded-lg bg-slate-900/80 px-2.5 py-2">
-              <div className="text-[10px] uppercase text-slate-400">{kpi.label}</div>
-              <div className="tabular-nums mt-0.5 text-sm font-bold text-slate-100">
+            <div key={kpi.label} className="lg-inset px-3 py-2.5">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                {kpi.label}
+              </div>
+              <div className="tabular-nums mt-1 text-base font-bold text-slate-50">
                 {kpi.value}
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </GlassSurface>
 
       {/* Gold & XP Diff Curve */}
       <GoldXpDiffChart key={`chart-${selectedMatch.matchId}`} match={selectedMatch} />
@@ -219,31 +222,31 @@ export function PostGameReviewView({
       />
 
       {/* What You Did Good / Mistakes / Where to Improve */}
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="hud-card rounded-xl border-emerald-500/30 p-3">
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+      <div className="grid gap-3.5 md:grid-cols-3">
+        <GlassSurface interactive className="p-4">
+          <div className="mb-2.5 flex items-center gap-2 text-xs font-bold text-emerald-300">
             <CheckCircle2 className="h-4 w-4" />
             What You Did Good
           </div>
           <div className="space-y-2">
             {report.highlights.map((item) => (
-              <div key={item.id} className="rounded-lg bg-slate-900/70 p-2 text-[11px]">
+              <div key={item.id} className="lg-inset p-2.5 text-[11px]">
                 <div className="font-semibold text-emerald-200">{item.title}</div>
                 <p className="mt-0.5 text-slate-300">{item.detail}</p>
               </div>
             ))}
           </div>
-        </div>
+        </GlassSurface>
 
-        <div className="hud-card rounded-xl border-rose-500/30 p-3">
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-rose-300">
+        <GlassSurface interactive className="p-4">
+          <div className="mb-2.5 flex items-center gap-2 text-xs font-bold text-rose-300">
             <AlertCircle className="h-4 w-4" />
             Mistakes to Cut Out
           </div>
           <div className="space-y-2">
             {report.mistakes.length > 0 ? (
               report.mistakes.map((item) => (
-                <div key={item.id} className="rounded-lg bg-slate-900/70 p-2 text-[11px]">
+                <div key={item.id} className="lg-inset p-2.5 text-[11px]">
                   <div className="font-semibold text-rose-200">{item.title}</div>
                   <p className="mt-0.5 text-slate-300">{item.detail}</p>
                 </div>
@@ -254,29 +257,29 @@ export function PostGameReviewView({
               </p>
             )}
           </div>
-        </div>
+        </GlassSurface>
 
-        <div className="hud-card rounded-xl border-cyan-500/30 p-3">
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-cyan-300">
+        <GlassSurface interactive className="p-4">
+          <div className="mb-2.5 flex items-center gap-2 text-xs font-bold text-sky-300">
             <Lightbulb className="h-4 w-4" />
             Where &amp; How to Improve
           </div>
           <div className="space-y-2">
             {report.improvements.map((item) => (
-              <div key={item.id} className="rounded-lg bg-slate-900/70 p-2 text-[11px]">
-                <div className="font-semibold text-cyan-200">{item.title}</div>
+              <div key={item.id} className="lg-inset p-2.5 text-[11px]">
+                <div className="font-semibold text-sky-200">{item.title}</div>
                 <p className="mt-0.5 text-slate-300">{item.detail}</p>
               </div>
             ))}
           </div>
-        </div>
+        </GlassSurface>
       </div>
 
       {/* Optional BYOK AI Coach Debrief */}
-      <div className="hud-card rounded-xl p-3">
+      <GlassSurface className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-violet-300">
-            <Bot className="h-4 w-4" />
+          <div className="flex items-center gap-2 text-xs font-bold text-violet-200">
+            <Bot className="h-4 w-4 text-violet-300" />
             <span>
               Optional AI Coach Debrief (
               {aiConfig.provider === 'off'
@@ -289,19 +292,19 @@ export function PostGameReviewView({
             type="button"
             disabled={aiLoading}
             onClick={() => void handleGenerateAiDebrief()}
-            className="rounded-lg border border-violet-500/40 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200 hover:bg-violet-500/25 disabled:opacity-50"
+            className="lg-btn-glass px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-50"
           >
             {aiLoading ? 'Generating...' : 'Generate AI Coach Debrief'}
           </button>
         </div>
 
         {aiDebrief && (
-          <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-900/80 p-2.5 font-sans text-xs leading-relaxed text-slate-200">
+          <pre className="lg-inset mt-2.5 whitespace-pre-wrap p-3 font-sans text-xs leading-relaxed text-slate-200">
             {aiDebrief}
           </pre>
         )}
         {aiError && <p className="mt-2 text-xs text-rose-300">{aiError}</p>}
-      </div>
+      </GlassSurface>
     </div>
   );
 }

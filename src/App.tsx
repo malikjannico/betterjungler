@@ -3,7 +3,6 @@ import type { CSSProperties } from 'react';
 import {
   Activity,
   BarChart3,
-  Compass,
   Map as MapIcon,
   Minimize2,
   Settings as SettingsIcon,
@@ -114,6 +113,47 @@ function cornerAlignmentClasses(corner: HudCorner): string {
     default:
       return 'items-start justify-end';
   }
+}
+
+function BetterJunglerPrismMark() {
+  return (
+    <svg
+      width="30"
+      height="30"
+      viewBox="0 0 32 32"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <defs>
+        <linearGradient id="bjPrismBg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="rgba(125,211,252,0.28)" />
+          <stop offset="100%" stopColor="rgba(14,165,233,0.08)" />
+        </linearGradient>
+        <linearGradient id="bjPrismCore" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#bae6fd" />
+          <stop offset="100%" stopColor="#38bdf8" />
+        </linearGradient>
+      </defs>
+      <rect
+        x="1"
+        y="1"
+        width="30"
+        height="30"
+        rx="10"
+        fill="url(#bjPrismBg)"
+        stroke="rgba(186,230,253,0.35)"
+        strokeWidth="1"
+      />
+      <path
+        d="M16 6.5 L23.5 16 L16 25.5 L8.5 16 Z"
+        fill="none"
+        stroke="url(#bjPrismCore)"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle cx="16" cy="16" r="2.7" fill="#e0f2fe" />
+    </svg>
+  );
 }
 
 export function App() {
@@ -315,15 +355,20 @@ export function App() {
     setHighEloMeta(snap);
   }
 
+  const isTauri = isTauriEnvironment();
   const hudStyle = {
     '--hud-alpha': String(Math.max(0.5, Math.min(1, settings.hudOpacity / 100))),
   } as CSSProperties;
+
+  const hasUrgentObjective = objectives.some(
+    (o) => o.status === 'live' || o.status === 'prep_vision'
+  );
 
   if (overlayMode === 'compact') {
     return (
       <div
         style={hudStyle}
-        className={`flex min-h-full p-3 ${cornerAlignmentClasses(settings.hudCorner)}`}
+        className={`flex min-h-full p-4 ${isTauri ? '' : 'lg-canvas-browser'} ${cornerAlignmentClasses(settings.hudCorner)}`}
       >
         <CompactHudBar
           phase={runtimeState.phase}
@@ -338,34 +383,55 @@ export function App() {
     );
   }
 
-  const canSyncLive = isTauriEnvironment() && settings.hasApiKey;
+  const canSyncLive = isTauri && settings.hasApiKey;
 
   return (
-    <div style={hudStyle} className="flex min-h-full items-center justify-center p-3">
-      <div className="hud-panel flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl text-slate-100">
-        {/* Top Bar */}
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-400/40">
-              <Compass className="h-4 w-4" />
-            </div>
+    <div
+      style={hudStyle}
+      className={`flex min-h-full items-center justify-center p-4 ${isTauri ? '' : 'lg-canvas-browser'}`}
+    >
+      <div
+        data-phase={runtimeState.phase}
+        data-urgent={hasUrgentObjective ? 'true' : 'false'}
+        className="lg-shell flex max-h-[94vh] w-full max-w-[1060px] flex-col overflow-hidden text-slate-100"
+      >
+        {/* Top Liquid Glass Header */}
+        <header className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4 pb-3">
+          <div className="flex items-center gap-3">
+            <BetterJunglerPrismMark />
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm font-extrabold tracking-wide text-slate-100">
+                <h1 className="text-[13px] font-bold tracking-[0.1em] text-slate-50">
                   BETTERJUNGLER
                 </h1>
-                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300">
+                <span className="rounded-full border border-sky-300/25 bg-sky-400/10 px-2 py-0.5 text-[10px] font-semibold text-sky-200">
                   Patch {patchVersion}
                 </span>
-                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase text-slate-300">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-300">
                   {runtimeState.phase.replace('_', ' ')}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400">
-                LCU: {runtimeState.lcuConnected ? 'Connected' : 'Standby'} • Live API:{' '}
-                {runtimeState.liveClientConnected ? 'Active' : 'Standby'} • Press{' '}
-                {settings.overlayHotkey} for Compact HUD ({settings.hudCorner})
-              </p>
+              <div className="mt-0.5 flex items-center gap-3 text-[11px] text-slate-400">
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-slate-500'
+                    }`}
+                  />
+                  LCU {runtimeState.lcuConnected ? 'Connected' : 'Standby'}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-slate-500'
+                    }`}
+                  />
+                  Live API {runtimeState.liveClientConnected ? 'Active' : 'Standby'}
+                </span>
+                <span className="hidden sm:inline text-slate-500">
+                  • {settings.overlayHotkey} ({settings.hudCorner})
+                </span>
+              </div>
             </div>
           </div>
 
@@ -374,10 +440,10 @@ export function App() {
               aria-label="Simulation scenario"
               value={demoScenario}
               onChange={(e) => handleScenarioChange(e.target.value as DemoScenarioId)}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200 outline-none focus:border-cyan-400"
+              className="lg-btn-glass cursor-pointer px-3 py-1.5 text-xs font-medium text-slate-100 outline-none"
             >
               {DEMO_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>
+                <option key={opt.id} value={opt.id} className="bg-slate-900 text-slate-100">
                   {opt.label}
                 </option>
               ))}
@@ -386,114 +452,118 @@ export function App() {
             <button
               type="button"
               onClick={() => void toggleOverlayMode('compact')}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-medium text-slate-200 hover:border-cyan-400/50 hover:text-cyan-200"
+              className="lg-btn-glass inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-100"
             >
-              <Minimize2 className="h-3.5 w-3.5" />
+              <Minimize2 className="h-3.5 w-3.5 text-sky-300" />
               Compact HUD
             </button>
           </div>
         </header>
 
-        {/* Navigation Tabs */}
-        <nav className="flex flex-wrap gap-1 border-b border-slate-800/90 bg-slate-950/50 px-4 py-1.5">
-          {(
-            [
-              { id: 'champ_select', label: 'Champ Select', icon: Sparkles },
-              { id: 'win_plan', label: 'Win Plan & Map', icon: MapIcon },
-              { id: 'live_coach', label: 'Live Coach', icon: Activity },
-              { id: 'post_game', label: 'Post-Game Review', icon: BarChart3 },
-              { id: 'climb_goals', label: 'Climb & Goals', icon: TrendingUp },
-              { id: 'settings', label: 'Settings', icon: SettingsIcon },
-            ] as const
-          ).map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  active
-                    ? 'bg-cyan-500/20 text-cyan-200 ring-1 ring-cyan-400/40'
-                    : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </nav>
+        {/* Floating Liquid Glass Segmented Navigation Rail */}
+        <div className="px-5 pb-3">
+          <nav className="lg-segmented flex flex-wrap items-center gap-1">
+            {(
+              [
+                { id: 'champ_select', label: 'Champ Select', icon: Sparkles },
+                { id: 'win_plan', label: 'Win Plan & Map', icon: MapIcon },
+                { id: 'live_coach', label: 'Live Coach', icon: Activity },
+                { id: 'post_game', label: 'Post-Game Review', icon: BarChart3 },
+                { id: 'climb_goals', label: 'Climb & Goals', icon: TrendingUp },
+                { id: 'settings', label: 'Settings', icon: SettingsIcon },
+              ] as const
+            ).map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ${
+                    active
+                      ? 'lg-segment-active'
+                      : 'border border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-100'
+                  }`}
+                >
+                  <Icon className={`h-3.5 w-3.5 ${active ? 'text-sky-300' : ''}`} />
+                  <span className="whitespace-nowrap">{tab.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
 
-        {/* Scrollable Content */}
-        <main className="hud-scroll flex-1 overflow-y-auto p-4">
-          {activeTab === 'champ_select' && (
-            <ChampSelectView
-              session={runtimeState.champSelect ?? DEMO_CHAMP_SELECT}
-              patchVersion={patchVersion}
-              summonerProfile={effectiveProfile}
-              highEloMeta={highEloMeta}
-            />
-          )}
-          {activeTab === 'win_plan' && (
-            <WinConditionView
-              plan={winPlan}
-              mapSide={effectiveChampSelect.mapSide}
-              championName={playerChampionName}
-              aiConfig={settings.aiCoach}
-            />
-          )}
-          {activeTab === 'live_coach' && (
-            <LiveCoachView
-              liveData={runtimeState.liveGame}
-              objectives={objectives}
-              buildPlan={buildPlan}
-              macroCues={macroCues}
-              patchVersion={patchVersion}
-            />
-          )}
-          {activeTab === 'post_game' && (
-            <PostGameReviewView
-              matches={matches}
-              targetDivision={settings.targetDivision}
-              aiConfig={settings.aiCoach}
-              canSyncLive={canSyncLive}
-              onSyncMatches={handleSyncMatches}
-            />
-          )}
-          {activeTab === 'climb_goals' && (
-            <ClimbLadderView
-              summonerProfile={effectiveProfile}
-              targetDivision={settings.targetDivision}
-              summaries={rollingSummaries}
-              matches={matches}
-              lpHistory={lpHistory}
-              goals={climbGoals}
-              highEloMeta={highEloMeta}
-              canSyncLive={canSyncLive}
-              onUpsertGoal={handleUpsertGoal}
-              onDeleteGoal={handleDeleteGoal}
-              onRefreshHighElo={handleRefreshHighElo}
-            />
-          )}
-          {activeTab === 'settings' && (
-            <SettingsView
-              settings={settings}
-              patchVersion={patchVersion}
-              catalogCounts={catalogCounts}
-              onSettingsChanged={setSettings}
-              onProfileLoaded={setSummonerProfile}
-              onPatchSynced={(patch, counts) => {
-                setPatchVersion(patch);
-                if (counts) setCatalogCounts(counts);
-              }}
-            />
-          )}
+        {/* Scrollable Content with Spring Entrance */}
+        <main className="hud-scroll flex-1 overflow-y-auto px-5 pb-4">
+          <div key={activeTab} className="lg-view-enter">
+            {activeTab === 'champ_select' && (
+              <ChampSelectView
+                session={runtimeState.champSelect ?? DEMO_CHAMP_SELECT}
+                patchVersion={patchVersion}
+                summonerProfile={effectiveProfile}
+                highEloMeta={highEloMeta}
+              />
+            )}
+            {activeTab === 'win_plan' && (
+              <WinConditionView
+                plan={winPlan}
+                mapSide={effectiveChampSelect.mapSide}
+                championName={playerChampionName}
+                aiConfig={settings.aiCoach}
+              />
+            )}
+            {activeTab === 'live_coach' && (
+              <LiveCoachView
+                liveData={runtimeState.liveGame}
+                objectives={objectives}
+                buildPlan={buildPlan}
+                macroCues={macroCues}
+                patchVersion={patchVersion}
+              />
+            )}
+            {activeTab === 'post_game' && (
+              <PostGameReviewView
+                matches={matches}
+                targetDivision={settings.targetDivision}
+                aiConfig={settings.aiCoach}
+                canSyncLive={canSyncLive}
+                onSyncMatches={handleSyncMatches}
+              />
+            )}
+            {activeTab === 'climb_goals' && (
+              <ClimbLadderView
+                summonerProfile={effectiveProfile}
+                targetDivision={settings.targetDivision}
+                summaries={rollingSummaries}
+                matches={matches}
+                lpHistory={lpHistory}
+                goals={climbGoals}
+                highEloMeta={highEloMeta}
+                canSyncLive={canSyncLive}
+                onUpsertGoal={handleUpsertGoal}
+                onDeleteGoal={handleDeleteGoal}
+                onRefreshHighElo={handleRefreshHighElo}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <SettingsView
+                settings={settings}
+                patchVersion={patchVersion}
+                catalogCounts={catalogCounts}
+                onSettingsChanged={setSettings}
+                onProfileLoaded={setSummonerProfile}
+                onPatchSynced={(patch, counts) => {
+                  setPatchVersion(patch);
+                  if (counts) setCatalogCounts(counts);
+                }}
+              />
+            )}
+          </div>
         </main>
 
-        {/* Mandatory Riot Games Legal Disclaimer Footer */}
-        <footer className="border-t border-slate-800/90 bg-slate-950/80 px-4 py-2 text-[10px] text-slate-400">
+        {/* Mandatory Riot Games Legal Disclaimer */}
+        <footer className="border-t border-white/[0.06] bg-black/25 px-5 py-2 text-[10px] leading-relaxed text-slate-400">
           BetterJungler isn&apos;t endorsed by Riot Games and doesn&apos;t reflect the views or
           opinions of Riot Games or anyone officially involved in producing or managing Riot Games
           properties. Riot Games, and all associated properties are trademarks or registered

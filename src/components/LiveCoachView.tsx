@@ -1,4 +1,12 @@
-import { AlertTriangle, Coins, Compass, Eye, Flame, ShieldCheck, ShoppingBag } from 'lucide-react';
+import {
+  AlertTriangle,
+  Coins,
+  Compass,
+  Eye,
+  Flame,
+  ShieldCheck,
+  ShoppingBag,
+} from 'lucide-react';
 import { formatClock } from '../domain/liveCoachEngine';
 import { getItemIconUrl } from '../services/ddragonService';
 import type {
@@ -7,6 +15,7 @@ import type {
   ObjectiveWindow,
 } from '../types/coaching';
 import type { LiveGameData } from '../types/riot';
+import { GlassSurface } from './GlassSurface';
 
 interface LiveCoachViewProps {
   liveData: LiveGameData | null;
@@ -25,71 +34,73 @@ export function LiveCoachView({
 }: LiveCoachViewProps) {
   if (!liveData || !buildPlan) {
     return (
-      <div className="hud-card rounded-xl p-6 text-center">
-        <h2 className="text-sm font-bold text-slate-200">Live In-Game Coach</h2>
-        <p className="mt-1 text-xs text-slate-400">
+      <GlassSurface className="p-8 text-center">
+        <h2 className="text-sm font-bold text-slate-100">Live In-Game Coach</h2>
+        <p className="mt-1.5 text-xs text-slate-400">
           Connects automatically to League&apos;s Live Client Data API (127.0.0.1:2999) when a
           match begins, or select an In-Game Demo scenario in the header.
         </p>
-      </div>
+      </GlassSurface>
     );
   }
 
   const gold = Math.floor(liveData.activePlayer.currentGold);
 
   return (
-    <div className="space-y-3">
-      {/* Match Clock & Objective Cadence */}
-      <div className="grid gap-3 md:grid-cols-[240px_1fr]">
-        <div className="hud-card rounded-xl p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            Live Telemetry
+    <div className="space-y-3.5">
+      {/* Telemetry & Objective Cadence */}
+      <div className="grid gap-3.5 md:grid-cols-[245px_1fr]">
+        <GlassSurface className="flex flex-col justify-between p-4">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+              Live Telemetry
+            </div>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="tabular-nums text-3xl font-extrabold tracking-tight text-slate-50">
+                {formatClock(liveData.gameData.gameTime)}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/30 bg-amber-400/12 px-2.5 py-0.5 text-xs font-bold text-amber-200">
+                <Coins className="h-3.5 w-3.5" />
+                <span className="tabular-nums">{gold}g</span>
+              </span>
+            </div>
           </div>
-          <div className="mt-1 flex items-baseline justify-between">
-            <span className="tabular-nums text-2xl font-extrabold text-cyan-300">
-              {formatClock(liveData.gameData.gameTime)}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-xs font-bold text-amber-300">
-              <Coins className="h-3.5 w-3.5" />
-              <span className="tabular-nums">{gold}g</span>
-            </span>
-          </div>
-          <div className="mt-2 text-[11px] text-slate-300">
+          <div className="lg-inset mt-3 px-2.5 py-1.5 text-[11px] font-medium text-slate-300">
             Level {liveData.activePlayer.level} •{' '}
             {liveData.gameData.gameTime < 840
-              ? 'Early Clear & Skirmish Phase'
+              ? 'Early Clear & Skirmish'
               : liveData.gameData.gameTime < 1500
                 ? 'Mid-Game Objective Control'
                 : 'Late-Game Baron / Elder'}
           </div>
-        </div>
+        </GlassSurface>
 
-        <div className="hud-card rounded-xl p-3">
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-200">
-            <Flame className="h-4 w-4 text-amber-400" />
+        <GlassSurface className="p-4">
+          <div className="mb-2.5 flex items-center gap-2 text-xs font-bold text-slate-100">
+            <Flame className="h-4 w-4 text-amber-300" />
             Objective Windows &amp; Vision Prep
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2.5 sm:grid-cols-2">
             {objectives.map((obj) => (
               <div
                 key={obj.id}
-                className={`rounded-lg border p-2 text-xs ${
+                className={`lg-inset p-3 text-xs ${
                   obj.status === 'live'
-                    ? 'border-emerald-500/50 bg-emerald-500/10'
+                    ? 'border-emerald-400/40 bg-emerald-400/10'
                     : obj.status === 'prep_vision'
-                      ? 'border-amber-500/50 bg-amber-500/10'
-                      : 'border-slate-700/70 bg-slate-900/60'
+                      ? 'border-amber-400/40 bg-amber-400/10'
+                      : ''
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-100">{obj.name}</span>
                   <span
-                    className={`tabular-nums text-xs font-bold ${
+                    className={`tabular-nums rounded-full px-2 py-0.5 text-[10px] font-bold ${
                       obj.status === 'live'
-                        ? 'text-emerald-300'
+                        ? 'bg-emerald-400/20 text-emerald-200'
                         : obj.status === 'prep_vision'
-                          ? 'text-amber-300'
-                          : 'text-slate-300'
+                          ? 'bg-amber-400/20 text-amber-200'
+                          : 'bg-white/5 text-slate-300'
                     }`}
                   >
                     {obj.status === 'live'
@@ -97,66 +108,65 @@ export function LiveCoachView({
                       : `in ${formatClock(obj.secondsRemaining)}`}
                   </span>
                 </div>
-                <p className="mt-0.5 text-[11px] text-slate-300">{obj.actionText}</p>
+                <p className="mt-1 text-[11px] text-slate-300">{obj.actionText}</p>
               </div>
             ))}
           </div>
-        </div>
+        </GlassSurface>
       </div>
 
-      {/* Adaptive Itemization + Trinket & Consumables */}
-      <div className="grid gap-3 lg:grid-cols-[1.3fr_1fr]">
-        <div className="hud-card rounded-xl p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-100">
-              <ShoppingBag className="h-4 w-4 text-cyan-400" />
+      {/* Adaptive Itemization & Macro Cues */}
+      <div className="grid gap-3.5 lg:grid-cols-[1.3fr_1fr]">
+        <GlassSurface interactive className="p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-100">
+              <ShoppingBag className="h-4 w-4 text-sky-300" />
               Adaptive Item Build
             </div>
             {buildPlan.isFullBuild && (
-              <span className="rounded bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-200">
+              <span className="rounded-full border border-violet-300/35 bg-violet-400/15 px-2.5 py-0.5 text-[10px] font-bold text-violet-200">
                 FULL BUILD OPTIMIZER ACTIVE
               </span>
             )}
           </div>
 
-          {/* Live Threat Badges */}
-          <div className="mb-2.5 flex flex-wrap gap-1.5">
+          <div className="mb-3 flex flex-wrap gap-1.5">
             {buildPlan.threats.reasons.map((reason) => (
               <span
                 key={reason}
-                className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900/80 px-2 py-0.5 text-[10px] text-slate-200"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[10px] text-slate-200"
               >
-                <AlertTriangle className="h-3 w-3 text-amber-400" />
+                <AlertTriangle className="h-3 w-3 text-amber-300" />
                 {reason}
               </span>
             ))}
           </div>
 
           {buildPlan.nextItem && (
-            <div className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5">
+            <div className="lg-inset border-sky-300/30 bg-sky-400/[0.08] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
                   <img
                     src={getItemIconUrl(buildPlan.nextItem.item.id, patchVersion)}
                     alt={buildPlan.nextItem.item.name}
-                    className="h-9 w-9 rounded border border-cyan-500/40 bg-slate-900"
+                    className="h-10 w-10 rounded-[10px] border border-sky-300/35 bg-slate-950"
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                     }}
                   />
                   <div>
-                    <div className="text-xs font-bold text-cyan-200">
+                    <div className="text-xs font-bold text-sky-100">
                       Next Priority: {buildPlan.nextItem.item.name}
                     </div>
-                    <div className="text-[11px] text-slate-200">
+                    <div className="mt-0.5 text-[11px] text-slate-300">
                       {buildPlan.nextItem.reason}
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="shrink-0 text-right">
                   <div
                     className={`tabular-nums text-xs font-bold ${
-                      buildPlan.nextItem.affordableNow ? 'text-emerald-300' : 'text-amber-300'
+                      buildPlan.nextItem.affordableNow ? 'text-emerald-300' : 'text-amber-200'
                     }`}
                   >
                     {buildPlan.nextItem.affordableNow
@@ -171,9 +181,9 @@ export function LiveCoachView({
 
               {!buildPlan.nextItem.affordableNow &&
                 buildPlan.nextItem.affordableComponents.length > 0 && (
-                  <div className="mt-2 border-t border-cyan-500/20 pt-1.5 text-[11px] text-slate-300">
+                  <div className="mt-2 border-t border-white/10 pt-2 text-[11px] text-slate-300">
                     Buy components now:{' '}
-                    <span className="font-semibold text-cyan-200">
+                    <span className="font-semibold text-sky-200">
                       {buildPlan.nextItem.affordableComponents
                         .map((c) => `${c.name} (${c.cost}g)`)
                         .join(', ')}
@@ -184,17 +194,17 @@ export function LiveCoachView({
           )}
 
           {buildPlan.upcomingQueue.length > 0 && (
-            <div className="mt-2 space-y-1.5">
+            <div className="mt-2.5 space-y-1.5">
               {buildPlan.upcomingQueue.map((rec) => (
                 <div
                   key={rec.item.id}
-                  className="flex items-center justify-between rounded-lg bg-slate-900/70 px-2.5 py-1.5 text-xs"
+                  className="lg-inset flex items-center justify-between px-3 py-2 text-xs"
                 >
                   <div>
-                    <span className="font-semibold text-slate-200">{rec.item.name}</span>
+                    <span className="font-semibold text-slate-100">{rec.item.name}</span>
                     <span className="ml-2 text-[11px] text-slate-400">{rec.reason}</span>
                   </div>
-                  <span className="tabular-nums text-[11px] text-slate-400">
+                  <span className="tabular-nums text-[11px] font-medium text-slate-400">
                     {rec.item.cost}g
                   </span>
                 </div>
@@ -202,16 +212,15 @@ export function LiveCoachView({
             </div>
           )}
 
-          {/* Full Build Alternative Swaps */}
           {buildPlan.fullBuildAlternatives.length > 0 && (
-            <div className="mt-3 rounded-lg border border-violet-500/40 bg-violet-500/10 p-2.5">
+            <div className="lg-inset mt-3 border-violet-300/35 bg-violet-400/[0.08] p-3">
               <div className="text-[11px] font-bold text-violet-200">
                 Full-Build Replacement Alternatives
               </div>
               <div className="mt-1.5 space-y-1.5">
                 {buildPlan.fullBuildAlternatives.map((alt) => (
                   <div key={alt.recommendedItem.id} className="text-[11px] text-slate-200">
-                    <span className="font-semibold text-violet-300">
+                    <span className="font-semibold text-violet-200">
                       Swap {alt.replaceTarget} → {alt.recommendedItem.name}
                     </span>
                     <span className="block text-slate-400">{alt.reason}</span>
@@ -220,16 +229,15 @@ export function LiveCoachView({
               </div>
             </div>
           )}
-        </div>
+        </GlassSurface>
 
-        {/* Trinket, Potions & Macro Cues */}
-        <div className="space-y-3">
-          <div className="hud-card rounded-xl p-3">
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-100">
-              <Eye className="h-4 w-4 text-amber-400" />
+        <div className="space-y-3.5">
+          <GlassSurface className="p-4">
+            <div className="mb-2.5 flex items-center gap-2 text-xs font-bold text-slate-100">
+              <Eye className="h-4 w-4 text-amber-300" />
               Trinket &amp; Consumables
             </div>
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+            <div className="lg-inset border-amber-300/25 bg-amber-400/[0.07] p-2.5 text-xs">
               <div className="font-semibold text-amber-200">
                 Trinket: {buildPlan.trinketAdvice.item.name}
               </div>
@@ -239,37 +247,34 @@ export function LiveCoachView({
             </div>
             <div className="mt-2 space-y-1.5">
               {buildPlan.consumableAdvice.map((cons) => (
-                <div
-                  key={cons.item.id}
-                  className="rounded-lg bg-slate-900/70 px-2.5 py-1.5 text-[11px]"
-                >
-                  <div className="font-semibold text-slate-200">
+                <div key={cons.item.id} className="lg-inset px-3 py-2 text-[11px]">
+                  <div className="font-semibold text-slate-100">
                     {cons.item.name} ({cons.item.cost}g)
                   </div>
                   <div className="text-slate-400">{cons.reason}</div>
                 </div>
               ))}
             </div>
-          </div>
+          </GlassSurface>
 
-          <div className="hud-card rounded-xl p-3">
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-100">
-              <Compass className="h-4 w-4 text-cyan-400" />
+          <GlassSurface className="p-4">
+            <div className="mb-2.5 flex items-center gap-2 text-xs font-bold text-slate-100">
+              <Compass className="h-4 w-4 text-sky-300" />
               Macro Action Cues
             </div>
             <div className="space-y-1.5">
               {macroCues.map((cue) => (
                 <div
                   key={cue.id}
-                  className={`rounded-lg border p-2 text-[11px] ${
+                  className={`lg-inset p-2.5 text-[11px] ${
                     cue.priority === 'urgent'
-                      ? 'border-amber-500/50 bg-amber-500/10'
-                      : 'border-slate-700/70 bg-slate-900/60'
+                      ? 'border-amber-300/35 bg-amber-400/[0.08]'
+                      : ''
                   }`}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-slate-100">{cue.title}</span>
-                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[9px] uppercase text-slate-300">
+                    <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[9px] font-semibold uppercase text-slate-300">
                       {cue.category}
                     </span>
                   </div>
@@ -277,11 +282,11 @@ export function LiveCoachView({
                 </div>
               ))}
             </div>
-            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-emerald-300/90">
+            <div className="mt-2.5 flex items-center gap-1.5 text-[10px] text-emerald-300/90">
               <ShieldCheck className="h-3.5 w-3.5" />
               100% Riot-compliant: no enemy cooldown tracking or hidden data.
             </div>
-          </div>
+          </GlassSurface>
         </div>
       </div>
     </div>

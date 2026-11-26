@@ -13,6 +13,7 @@ import { getChampionIconUrl } from '../services/ddragonService';
 import { applyRunesAndSpells } from '../services/tauriBridge';
 import type { HighEloMetaSnapshot } from '../types/coaching';
 import type { LcuChampSelectSession, SummonerProfileSummary } from '../types/riot';
+import { GlassSurface } from './GlassSurface';
 
 interface ChampSelectViewProps {
   session: LcuChampSelectSession | null;
@@ -82,74 +83,98 @@ export function ChampSelectView({
     setApplyStatus(res.message);
   }
 
+  const totalDamageWeight = Math.max(1, allyComp.adScore + allyComp.apScore);
+  const adPct = Math.round((allyComp.adScore / totalDamageWeight) * 100);
+
   return (
-    <div className="space-y-3">
-      {/* Draft Header & Anonymity Badge */}
-      <div className="hud-card flex flex-wrap items-center justify-between gap-2 rounded-xl p-3">
+    <div className="space-y-3.5">
+      {/* Header Bar */}
+      <GlassSurface className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div>
-          <h2 className="text-sm font-bold text-slate-100">Champion Select Draft Coach</h2>
-          <p className="text-[11px] text-slate-400">
+          <h2 className="text-sm font-bold tracking-tight text-slate-50">
+            Champion Select Draft Coach
+          </h2>
+          <p className="mt-0.5 text-[11px] text-slate-400">
             {sanitized
-              ? `${sanitized.mapSide.toUpperCase()} Side • Patch ${patchVersion} • Picks weighted by meta${highEloMeta ? ` (+${highEloMeta.sampleMatches} High-Elo games)` : ''}, team gaps & matchup`
+              ? `${sanitized.mapSide.toUpperCase()} Side • Patch ${patchVersion} • Weighted by meta${highEloMeta ? ` (+${highEloMeta.sampleMatches} High-Elo games)` : ''}, comp gaps & matchup`
               : 'Waiting for League Client Champ Select (or switch to Demo: Champ Select above)'}
           </p>
         </div>
+
         {sanitized?.isRankedSoloDuo && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold text-emerald-200">
             <Lock className="h-3 w-3" />
             Solo/Duo Anonymity Enforced
           </span>
         )}
-      </div>
+      </GlassSurface>
 
-      {/* Team Draft Summary & Gaps */}
+      {/* Draft Board */}
       {sanitized && (
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="hud-card rounded-xl p-3">
-            <div className="mb-2 flex items-center justify-between text-xs font-semibold text-cyan-300">
-              <span>Your Team ({allyComp.archetype})</span>
-              <span className="text-[11px] text-slate-400">
+        <div className="grid gap-3.5 md:grid-cols-2">
+          <GlassSurface className="p-4">
+            <div className="mb-2.5 flex items-center justify-between">
+              <span className="text-xs font-bold text-sky-200">
+                Your Team • {allyComp.archetype}
+              </span>
+              <span className="tabular-nums text-[11px] font-medium text-slate-400">
                 AD {allyComp.adScore} / AP {allyComp.apScore}
               </span>
             </div>
+
+            {/* Damage Balance Track */}
+            <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-amber-300 to-sky-400 transition-all duration-300"
+                style={{ width: `${adPct}%` }}
+              />
+            </div>
+
             <div className="space-y-1.5">
               {sanitized.myTeam.map((slot) => {
                 const meta = slot.championId > 0 ? getChampionMeta(slot.championId) : null;
                 return (
                   <div
                     key={slot.cellId}
-                    className="flex items-center justify-between rounded-lg bg-slate-900/70 px-2.5 py-1.5 text-xs"
+                    className={`lg-inset flex items-center justify-between px-3 py-2 text-xs ${
+                      slot.isLocalPlayer ? 'border-sky-300/30 bg-sky-400/10' : ''
+                    }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="w-12 text-[10px] uppercase text-slate-400">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-12 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                         {slot.assignedPosition}
                       </span>
                       <span className="font-medium text-slate-200">{slot.displayName}</span>
                     </div>
-                    <span className="font-semibold text-cyan-200">
+                    <span
+                      className={`font-semibold ${
+                        meta ? 'text-sky-200' : 'text-amber-300'
+                      }`}
+                    >
                       {meta ? meta.name : slot.isLocalPlayer ? 'Picking Now...' : 'Pending'}
                     </span>
                   </div>
                 );
               })}
             </div>
+
             {allyComp.gaps.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
                 {allyComp.gaps.map((gap) => (
                   <span
                     key={gap}
-                    className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200"
+                    className="rounded-full border border-amber-300/30 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-200"
                   >
                     {gap}
                   </span>
                 ))}
               </div>
             )}
-          </div>
+          </GlassSurface>
 
-          <div className="hud-card rounded-xl p-3">
-            <div className="mb-2 flex items-center justify-between text-xs font-semibold text-rose-300">
-              <span>Enemy Team</span>
+          <GlassSurface className="p-4">
+            <div className="mb-2.5 flex items-center justify-between">
+              <span className="text-xs font-bold text-rose-200">Enemy Team</span>
               <span className="text-[11px] text-slate-400">
                 Bans: {bannedIds.filter((id) => id > 0).length}
               </span>
@@ -160,10 +185,10 @@ export function ChampSelectView({
                 return (
                   <div
                     key={slot.cellId}
-                    className="flex items-center justify-between rounded-lg bg-slate-900/70 px-2.5 py-1.5 text-xs"
+                    className="lg-inset flex items-center justify-between px-3 py-2 text-xs"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="w-12 text-[10px] uppercase text-slate-400">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-12 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                         {slot.assignedPosition}
                       </span>
                       <span className="font-medium text-slate-300">{slot.displayName}</span>
@@ -175,17 +200,18 @@ export function ChampSelectView({
                 );
               })}
             </div>
-          </div>
+          </GlassSurface>
         </div>
       )}
 
-      {/* Top 5 Recommendations + Runes/Spells 1-Click Apply */}
-      <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
-        <div className="hud-card rounded-xl p-3">
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-            <Sparkles className="h-4 w-4 text-cyan-400" />
+      {/* Top 5 Picks + Setup Card */}
+      <div className="grid gap-3.5 lg:grid-cols-[1.25fr_1fr]">
+        <GlassSurface className="p-4">
+          <div className="mb-3 flex items-center gap-2 text-xs font-bold text-slate-100">
+            <Sparkles className="h-4 w-4 text-sky-300" />
             Top 5 Jungle Picks for This Draft
           </div>
+
           <div className="space-y-2">
             {recommendations.map((rec, idx) => {
               const isSelected = activePick?.champion.championId === rec.champion.championId;
@@ -197,79 +223,84 @@ export function ChampSelectView({
                     setSelectedChampionId(rec.champion.championId);
                     setApplyStatus(null);
                   }}
-                  className={`w-full rounded-lg border p-2.5 text-left transition ${
+                  className={`w-full rounded-[14px] border p-3 text-left transition-all duration-200 active:scale-[0.99] ${
                     isSelected
-                      ? 'border-cyan-400/70 bg-cyan-500/10'
-                      : 'border-slate-700/70 bg-slate-900/60 hover:border-slate-500'
+                      ? 'border-sky-300/45 bg-sky-400/12 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]'
+                      : 'border-white/[0.06] bg-black/30 hover:border-white/15 hover:bg-white/[0.04]'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <span className="tabular-nums text-xs font-bold text-slate-400">
                         #{idx + 1}
                       </span>
                       <img
                         src={getChampionIconUrl(rec.champion.key, patchVersion)}
                         alt={rec.champion.name}
-                        className="h-8 w-8 rounded-md border border-slate-700 bg-slate-800 object-cover"
+                        className="h-9 w-9 shrink-0 rounded-[10px] border border-white/15 bg-slate-900 object-cover"
                         onError={(e) => {
                           e.currentTarget.style.display = 'none';
                         }}
                       />
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-100">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-50">
                             {rec.champion.name}
                           </span>
-                          <span className="rounded bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">
+                          <span className="rounded-full bg-sky-400/15 px-2 py-0.5 text-[10px] font-bold text-sky-200">
                             {rec.champion.metaTier}
                           </span>
-                          <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase text-slate-300">
+                          <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] uppercase text-slate-300">
                             {rec.champion.damageProfile}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-[11px] text-slate-300">{rec.reasons[0]}</p>
+                        <p className="mt-0.5 truncate text-[11px] text-slate-300">
+                          {rec.reasons[0]}
+                        </p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="tabular-nums text-sm font-extrabold text-cyan-300">
+
+                    <div className="shrink-0 text-right">
+                      <div className="tabular-nums text-base font-extrabold text-sky-300">
                         {rec.totalScore}
                       </div>
-                      <div className="text-[10px] text-slate-400">Fit Score</div>
+                      <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+                        Fit Score
+                      </div>
                     </div>
                   </div>
                 </button>
               );
             })}
           </div>
-        </div>
+        </GlassSurface>
 
         {activePick && (
-          <div className="hud-card flex flex-col justify-between rounded-xl p-3">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
+          <GlassSurface interactive className="flex flex-col justify-between p-4">
+            <div className="space-y-3.5">
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="text-xs font-bold text-slate-100">
+                  <div className="text-sm font-bold text-slate-50">
                     {activePick.champion.name} — Optimal Setup
                   </div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="mt-0.5 text-[11px] text-slate-400">
                     {activePick.champion.recommendedRunes.name}
                   </div>
                 </div>
-                <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] uppercase text-slate-300">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[10px] font-medium uppercase text-slate-300">
                   {activePick.champion.powerSpike} spike
                 </span>
               </div>
 
               <div>
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                   Summoner Spells
                 </div>
                 <div className="flex gap-2">
                   {activePick.champion.recommendedSpells.map((spellId) => (
                     <div
                       key={spellId}
-                      className="rounded-lg border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-cyan-200"
+                      className="lg-inset px-3 py-1.5 text-xs font-semibold text-sky-200"
                     >
                       {SUMMONER_SPELL_INFO[spellId]?.name ?? `Spell ${spellId}`}
                     </div>
@@ -278,17 +309,17 @@ export function ChampSelectView({
               </div>
 
               <div>
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                   Recommended Runes
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {activePick.champion.recommendedRunes.summaryLabels.map((label, idx) => (
                     <span
                       key={label}
-                      className={`rounded px-2 py-0.5 text-[11px] ${
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] ${
                         idx === 0
-                          ? 'border border-amber-400/40 bg-amber-500/15 font-semibold text-amber-200'
-                          : 'bg-slate-800/90 text-slate-200'
+                          ? 'border border-amber-300/35 bg-amber-400/15 font-semibold text-amber-200'
+                          : 'border border-white/[0.08] bg-white/[0.04] text-slate-200'
                       }`}
                     >
                       {label}
@@ -297,19 +328,19 @@ export function ChampSelectView({
                 </div>
               </div>
 
-              <div>
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="lg-inset p-3">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                   Draft Reasoning
                 </div>
-                <ul className="space-y-1 text-[11px] text-slate-300">
+                <ul className="space-y-1.5 text-[11px] text-slate-300">
                   {activePick.reasons.map((reason) => (
-                    <li key={reason} className="flex items-start gap-1.5">
-                      <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" />
+                    <li key={reason} className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
                       <span>{reason}</span>
                     </li>
                   ))}
                   {activePick.warnings.map((w) => (
-                    <li key={w} className="text-amber-300">
+                    <li key={w} className="text-amber-200">
                       • Caution: {w}
                     </li>
                   ))}
@@ -317,20 +348,22 @@ export function ChampSelectView({
               </div>
             </div>
 
-            <div className="mt-4 space-y-2 border-t border-slate-800 pt-3">
+            <div className="mt-4 space-y-2 border-t border-white/[0.07] pt-3">
               <button
                 type="button"
                 onClick={handleApplyRunesAndSpells}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-400"
+                className="lg-btn-primary flex w-full items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold"
               >
                 <Wand2 className="h-4 w-4" />
                 Apply Runes &amp; Spells to LoL Client
               </button>
               {applyStatus && (
-                <p className="text-center text-[11px] text-emerald-300">{applyStatus}</p>
+                <p className="text-center text-[11px] font-medium text-emerald-300">
+                  {applyStatus}
+                </p>
               )}
             </div>
-          </div>
+          </GlassSurface>
         )}
       </div>
     </div>
