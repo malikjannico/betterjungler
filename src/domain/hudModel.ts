@@ -1,9 +1,13 @@
 import { formatClock } from './liveCoachEngine';
+import type { SkillOrderAdvice } from './skillOrderEngine';
+import type { AdcWinConditionPlan } from './adc/types';
 import type {
   AdaptiveBuildPlan,
   JungleRoute,
   MacroCue,
   ObjectiveWindow,
+  SmiteTierStatus,
+  WinConditionPlan,
 } from '../types/coaching';
 import type { GamePhase } from '../types/riot';
 
@@ -61,11 +65,31 @@ export interface HudCueCard {
   urgent: boolean;
 }
 
+export interface HudCsCard {
+  currentCs: number;
+  csPerMin: number;
+  targetCsPerMin: number;
+  deltaPerMin: number;
+  status: 'ahead' | 'on_track' | 'behind';
+  targetLabel: string;
+}
+
+export interface HudGamePlanCard {
+  phaseTitle: string;
+  phaseWindow: string;
+  planSummary: string;
+  powerSpikeLabel: string;
+  smiteBadge?: string;
+}
+
 export interface HudCardModel {
   statusChip: HudStatusChip;
   routeCard: HudRouteCard | null;
   objectiveCard: HudObjectiveCard | null;
   buyCard: HudBuyCard | null;
+  csCard: HudCsCard | null;
+  skillOrderCard: SkillOrderAdvice | null;
+  gamePlanCard: HudGamePlanCard | null;
   cueCard: HudCueCard | null;
   isUrgent: boolean;
 }
@@ -80,6 +104,13 @@ export interface DeriveHudCardsInput {
   hotkey: string;
   isOffRole?: boolean;
   activeRole?: 'jungle' | 'bottom' | 'off_role';
+  creepScore?: number;
+  targetCsPerMin?: number;
+  targetDivisionLabel?: string;
+  skillOrder?: SkillOrderAdvice | null;
+  winPlan?: WinConditionPlan | null;
+  adcWinPlan?: AdcWinConditionPlan | null;
+  smiteStatus?: SmiteTierStatus | null;
 }
 
 function inferObjectiveBadgeKind(obj: ObjectiveWindow): ObjectiveBadgeKind {
@@ -123,8 +154,70 @@ function computeUrgencyPct(obj: ObjectiveWindow): number {
   return Math.round(((maxWindow - clamped) / maxWindow) * 100);
 }
 
+function buildGamePlanCard(
+  role: 'jungle' | 'bottom',
+  gameTime: number,
+  adcWinPlan: AdcWinConditionPlan | null | undefined,
+  winPlan: WinConditionPlan | null | undefined,
+  openingRoute: JungleRoute | null,
+  smiteStatus: SmiteTierStatus | null | undefined
+): HudGamePlanCard | null {
+  if (role === 'bottom' && adcWinPlan) {
+    const activePhase =
+      adcWinPlan.macroPhases.find(
+        (p) => gameTime >= p.startSec && (p.endSec === null || gameTime < p.endSec)
+      ) ?? adcWinPlan.macroPhases[0];
+    const nextSpike =
+      gameTime < 900
+        ? adcWinPlan.powerSpikes[0]
+        : gameTime < 1500
+          ? (adcWinPlan.powerSpikes[1] ?? adcWinPlan.powerSpikes[0])
+          : (adcWinPlan.powerSpikes[2] ?? adcWinPlan.powerSpikes[1] ?? adcWinPlan.powerSpikes[0]);
+
+    const isLv2Window = gameTime < 240;
+    return {
+      phaseTitle: isLv2Window ? 'Level-2 Plan' : (activePhase?.label ?? 'Macro Phase'),
+      phaseWindow: isLv2Window ? '0:30–4:00' : (activePhase?.timeWindow ?? ''),
+      planSummary: isLv2Window
+        ? adcWinPlan.wavePlan.level2Rule
+        : (activePhase?.actions[0] ?? activePhase?.focus ?? adcWinPlan.laneGamePlan),
+      powerSpikeLabel: nextSpike ? `${nextSpike.label}: ${nextSpike.note}` : '1-Item Spike',
+    };
+  }
+
+  if (role === 'jungle' && (winPlan || openingRoute)) {
+    const smiteBadge = smiteStatus ? `Smite ${smiteStatus.damage}` : undefined;
+    if (gameTime < 120 && openingRoute) {
+      return {
+        phaseTitle: 'Lv2 / Opening Clear',
+        phaseWindow: openingRoute.timeWindow,
+        planSummary: `${openingRoute.descriptor} — Strong ${winPlan?.strongSide.toUpperCase() ?? 'Side'}`,
+        powerSpikeLabel: winPlan?.phasePlaybook.early ?? openingRoute.summary,
+        smiteBadge,
+      };
+    }
+    if (winPlan) {
+      const isLate = gameTime >= 1200;
+      const isMid = gameTime >= 840 && !isLate;
+      return {
+        phaseTitle: isLate ? 'Late · Baron / Soul' : isMid ? 'Mid · Objectives' : 'Early · Clear & Gank',
+        phaseWindow: isLate ? '20:00+' : isMid ? '14:00–20:00' : '1:55–14:00',
+        planSummary: isLate
+          ? winPlan.phasePlaybook.late
+          : isMid
+            ? winPlan.phasePlaybook.mid
+            : winPlan.phasePlaybook.early,
+        powerSpikeLabel: `Strong ${winPlan.strongSide.toUpperCase()} · Deny: ${winPlan.enemyWinConditionToDeny}`,
+        smiteBadge,
+      };
+    }
+  }
+
+  return null;
+}
+
 /**
- * Pure transformer driving the broadcast-inspired translucent Compact HUD.
+ * Pure transformer driving the modular transparent In-Game HUD widgets.
  */
 export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
   const primaryObj = input.objectives[0] ?? null;
@@ -220,6 +313,47 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
         }
       : null;
 
+  const hasCsInput = typeof input.creepScore === 'number' && input.phase === 'in_game';
+  const targetCsPerMin =
+    input.targetCsPerMin ?? (effectiveRole === 'bottom' ? 7.2 : 6.2);
+  let csCard: HudCsCard | null = null;
+  if (!isOffRole && hasCsInput) {
+    const minutes = input.gameTime / 60;
+    const csPerMin = minutes >= 0.5 ? Math.round(((input.creepScore ?? 0) / minutes) * 10) / 10 : 0;
+    const deltaPerMin = Math.round((csPerMin - targetCsPerMin) * 10) / 10;
+    const status: HudCsCard['status'] =
+      minutes < 1.5
+        ? 'on_track'
+        : deltaPerMin >= 0.3
+          ? 'ahead'
+          : deltaPerMin <= -0.6
+            ? 'behind'
+            : 'on_track';
+    csCard = {
+      currentCs: input.creepScore ?? 0,
+      csPerMin,
+      targetCsPerMin,
+      deltaPerMin,
+      status,
+      targetLabel: input.targetDivisionLabel ?? 'Target',
+    };
+  }
+
+  const skillOrderCard: SkillOrderAdvice | null =
+    !isOffRole && input.phase === 'in_game' ? (input.skillOrder ?? null) : null;
+
+  const gamePlanCard: HudGamePlanCard | null =
+    !isOffRole && (input.phase === 'in_game' || input.phase === 'loading')
+      ? buildGamePlanCard(
+          effectiveRole === 'bottom' ? 'bottom' : 'jungle',
+          input.gameTime,
+          input.adcWinPlan,
+          input.winPlan,
+          input.openingRoute,
+          input.smiteStatus
+        )
+      : null;
+
   const cueCard: HudCueCard | null =
     !isOffRole &&
     input.phase === 'in_game' &&
@@ -237,6 +371,9 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
     routeCard,
     objectiveCard,
     buyCard,
+    csCard,
+    skillOrderCard,
+    gamePlanCard,
     cueCard,
     isUrgent,
   };

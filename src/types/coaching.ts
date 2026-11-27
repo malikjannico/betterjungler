@@ -378,6 +378,22 @@ export type OverlayHotkeyPreset = 'Alt+J' | 'Alt+B' | 'Ctrl+Shift+J' | 'F8';
 export type HudScalePercent = 100 | 125 | 150;
 export type HudMonitorTarget = 'primary' | 'active';
 export type MinimapSide = 'right' | 'left';
+
+export type HudWidgetId =
+  | 'objectives'
+  | 'build'
+  | 'cs'
+  | 'skillOrder'
+  | 'gamePlan'
+  | 'cue';
+
+export interface HudWidgetLayout {
+  enabled: boolean;
+  xPct: number;
+  yPct: number;
+}
+
+export type HudWidgetMap = Record<HudWidgetId, HudWidgetLayout>;
 export type UpdateMode = 'manual' | 'install_on_quit';
 export type RecordingPreset = '720p30' | '1080p60' | 'clips_only';
 
@@ -497,6 +513,7 @@ export interface UserSettings {
   hudX?: number | null;
   hudY?: number | null;
   hudLocked?: boolean;
+  hudWidgets?: HudWidgetMap;
   primaryRole?: CoachedRole;
   secondaryRole?: CoachedRole;
   autoDetectRole?: boolean;

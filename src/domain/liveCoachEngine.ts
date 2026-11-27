@@ -4,6 +4,7 @@ import {
   findJungleChampionByName,
   resolveItemMetadata,
 } from '../data/jungleKnowledgePack';
+import { findOwnedBootItem, getNonTrinketItems, hasCompletedBoots, isBootItem } from './itemDetection';
 import type {
   AdaptiveBuildPlan,
   ChampionMetaEntry,
@@ -452,9 +453,8 @@ export function computeAdaptiveBuild(
     : [];
   const threats = assessLiveThreats(enemies);
 
-  const ownedIds = new Set(
-    (selfPlayer?.items ?? []).filter((i) => i.slot < 6).map((i) => i.itemID)
-  );
+  const nonTrinketItems = getNonTrinketItems(selfPlayer?.items);
+  const ownedIds = new Set(nonTrinketItems.map((i) => i.itemID));
   const ownedTrinketId = (selfPlayer?.items ?? []).find((i) => i.slot === 6)?.itemID;
   const currentGold = Math.floor(liveData.activePlayer.currentGold);
   const gameTime = liveData.gameData.gameTime;
@@ -463,16 +463,21 @@ export function computeAdaptiveBuild(
   const isTank = profile?.damageProfile === 'tank';
 
   // Count completed non-boot, non-consumable items (~>= 2400g)
-  const completedMajorItems = (selfPlayer?.items ?? []).filter(
+  const completedMajorItems = nonTrinketItems.filter(
     (item) =>
-      item.slot < 6 &&
       item.price >= 2400 &&
+      !isBootItem(item) &&
       !ITEM_CATALOG[item.itemID]?.tags.includes('boots')
   ).length;
-  const ownedBoots = (selfPlayer?.items ?? []).find(
-    (item) => item.slot < 6 && ITEM_CATALOG[item.itemID]?.tags.includes('boots')
-  );
-  const occupiedSlots = (selfPlayer?.items ?? []).filter((i) => i.slot < 6).length;
+  const ownedBoots =
+    findOwnedBootItem(selfPlayer?.items) ??
+    nonTrinketItems.find((item) => ITEM_CATALOG[item.itemID]?.tags.includes('boots'));
+  const ownsCompletedBoots =
+    hasCompletedBoots(selfPlayer?.items) ||
+    nonTrinketItems.some(
+      (item) => ITEM_CATALOG[item.itemID]?.tags.includes('boots') && item.itemID !== 1001 && item.itemID !== 2422
+    );
+  const occupiedSlots = nonTrinketItems.length;
   const isFullBuild =
     completedMajorItems >= 5 && (occupiedSlots >= 6 || Boolean(ownedBoots));
 
@@ -491,7 +496,7 @@ export function computeAdaptiveBuild(
     }
 
     // Boot choice reacts to threats
-    if (!ownedBoots) {
+    if (!ownsCompletedBoots) {
       let bootId = profile.bootItemId;
       let bootReason = 'Recommended mobility & spike boots';
       if (threats.ccThreat || threats.apThreat) {

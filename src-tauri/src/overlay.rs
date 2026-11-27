@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -8,9 +9,13 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 use crate::error::{AppError, AppResult};
+use crate::storage::{default_hud_widgets, sanitize_hud_widgets, HudWidgetLayout};
 
+#[cfg(test)]
 const BASE_HUD_WIDTH: f64 = 424.0;
+#[cfg(test)]
 const BASE_HUD_HEIGHT: f64 = 184.0;
+#[cfg(test)]
 const MARGIN: f64 = 16.0;
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,6 +30,7 @@ pub struct HudPreferencesPayload {
     pub hud_x: Option<i32>,
     pub hud_y: Option<i32>,
     pub hud_locked: bool,
+    pub hud_widgets: HashMap<String, HudWidgetLayout>,
 }
 
 #[derive(Clone)]
@@ -48,6 +54,7 @@ impl Default for OverlayController {
                 hud_x: None,
                 hud_y: None,
                 hud_locked: true,
+                hud_widgets: default_hud_widgets(),
             })),
             current_hotkey: Arc::new(Mutex::new(None)),
         }
@@ -71,6 +78,7 @@ pub fn normalize_hud_scale(raw: u16) -> u16 {
     }
 }
 
+#[cfg(test)]
 pub fn scaled_hud_dimensions(scale_pct: u16) -> (f64, f64) {
     let factor = f64::from(normalize_hud_scale(scale_pct)) / 100.0;
     (
@@ -79,6 +87,7 @@ pub fn scaled_hud_dimensions(scale_pct: u16) -> (f64, f64) {
     )
 }
 
+#[cfg(test)]
 pub fn compute_hud_offset(
     corner: &str,
     minimap_side: &str,
@@ -108,6 +117,7 @@ pub fn compute_hud_offset(
 }
 
 /// Computes target `(phys_w, phys_h, phys_x, phys_y)` on the destination monitor using its DPI.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn compute_physical_hud_rect(
     corner: &str,
@@ -198,8 +208,9 @@ impl OverlayController {
             .prefs
             .lock()
             .ok()
-            .map(|g| (g.hud_x, g.hud_y, g.hud_locked));
-        let (hud_x, hud_y, hud_locked) = prev.unwrap_or((None, None, true));
+            .map(|g| (g.hud_x, g.hud_y, g.hud_locked, g.hud_widgets.clone()));
+        let (hud_x, hud_y, hud_locked, hud_widgets) =
+            prev.unwrap_or_else(|| (None, None, true, default_hud_widgets()));
         let next = HudPreferencesPayload {
             hud_corner: corner.to_string(),
             overlay_hotkey: hotkey.to_string(),
@@ -218,14 +229,34 @@ impl OverlayController {
             hud_x,
             hud_y,
             hud_locked,
+            hud_widgets,
         };
         if let Ok(mut guard) = self.prefs.lock() {
             *guard = next.clone();
         }
         if let Some(handle) = app {
             if let Some(hud_window) = handle.get_webview_window("hud") {
-                self.position_hud_window(handle, &hud_window, &next);
+                self.position_hud_window(handle, &hud_window);
             }
+            if let Err(err) = handle.emit("hud-preferences-changed", next) {
+                tracing::warn!(error = %err, "Failed to emit hud-preferences-changed");
+            }
+        }
+    }
+
+    pub fn set_hud_widgets(
+        &self,
+        app: Option<&AppHandle>,
+        widgets: HashMap<String, HudWidgetLayout>,
+    ) {
+        let sanitized = sanitize_hud_widgets(widgets);
+        let next = if let Ok(mut guard) = self.prefs.lock() {
+            guard.hud_widgets = sanitized;
+            guard.clone()
+        } else {
+            return;
+        };
+        if let Some(handle) = app {
             if let Err(err) = handle.emit("hud-preferences-changed", next) {
                 tracing::warn!(error = %err, "Failed to emit hud-preferences-changed");
             }
@@ -249,7 +280,7 @@ impl OverlayController {
         if let Some(handle) = app {
             if reposition {
                 if let Some(hud_window) = handle.get_webview_window("hud") {
-                    self.position_hud_window(handle, &hud_window, &next);
+                    self.position_hud_window(handle, &hud_window);
                 }
             }
             let _ = handle.emit("hud-preferences-changed", next);
@@ -269,7 +300,7 @@ impl OverlayController {
         };
 
         if !locked {
-            self.position_hud_window(app, &hud_window, &prefs);
+            self.position_hud_window(app, &hud_window);
             hud_window
                 .set_ignore_cursor_events(false)
                 .map_err(|e| AppError::Overlay(e.to_string()))?;
@@ -312,10 +343,11 @@ impl OverlayController {
                     hud_x: None,
                     hud_y: None,
                     hud_locked: true,
+                    hud_widgets: default_hud_widgets(),
                 });
 
         if show_hud {
-            self.position_hud_window(app, &hud_window, &prefs);
+            self.position_hud_window(app, &hud_window);
             hud_window
                 .set_ignore_cursor_events(prefs.hud_locked)
                 .map_err(|e| AppError::Overlay(e.to_string()))?;
@@ -347,13 +379,16 @@ impl OverlayController {
         Ok(())
     }
 
-    fn position_hud_window(
-        &self,
-        app: &AppHandle,
-        hud_window: &tauri::WebviewWindow,
-        prefs: &HudPreferencesPayload,
-    ) {
-        let monitor_opt = if prefs.hud_monitor == "active" {
+    /// Sizes the single transparent `hud` window to the target monitor bounds so individual
+    /// modular widgets can be positioned and dragged freely anywhere across the screen.
+    fn position_hud_window(&self, app: &AppHandle, hud_window: &tauri::WebviewWindow) {
+        let target_monitor = self
+            .prefs
+            .lock()
+            .ok()
+            .map(|g| g.hud_monitor.clone())
+            .unwrap_or_else(|| "primary".to_string());
+        let monitor_opt = if target_monitor == "active" {
             app.get_webview_window("main")
                 .and_then(|w| w.current_monitor().ok().flatten())
                 .or_else(|| app.primary_monitor().ok().flatten())
@@ -365,40 +400,13 @@ impl OverlayController {
         };
 
         if let Some(monitor) = monitor_opt {
-            let scale = monitor.scale_factor();
             let size = monitor.size();
             let pos = monitor.position();
-            let (pw, ph, default_px, default_py) = compute_physical_hud_rect(
-                &prefs.hud_corner,
-                &prefs.minimap_side,
-                prefs.hud_scale,
-                pos.x,
-                pos.y,
-                size.width,
-                size.height,
-                scale,
-            );
-            let (px, py) = if let (Some(cx), Some(cy)) = (prefs.hud_x, prefs.hud_y) {
-                let monitors_rects: Vec<(i32, i32, u32, u32)> = app
-                    .available_monitors()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|m| {
-                        let mp = m.position();
-                        let ms = m.size();
-                        (mp.x, mp.y, ms.width, ms.height)
-                    })
-                    .collect();
-                clamp_custom_hud_pos(cx, cy, pw, ph, &monitors_rects)
-                    .unwrap_or((default_px, default_py))
-            } else {
-                (default_px, default_py)
-            };
-            if let Err(err) = hud_window.set_size(PhysicalSize::new(pw, ph)) {
-                tracing::warn!(error = %err, "Failed to size HUD window");
+            if let Err(err) = hud_window.set_size(PhysicalSize::new(size.width, size.height)) {
+                tracing::warn!(error = %err, "Failed to size full-monitor HUD canvas window");
             }
-            if let Err(err) = hud_window.set_position(PhysicalPosition::new(px, py)) {
-                tracing::warn!(error = %err, "Failed to position HUD window");
+            if let Err(err) = hud_window.set_position(PhysicalPosition::new(pos.x, pos.y)) {
+                tracing::warn!(error = %err, "Failed to position full-monitor HUD canvas window");
             }
         }
     }

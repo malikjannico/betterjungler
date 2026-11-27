@@ -4,6 +4,8 @@ import {
   aggregateDeathHeatmap,
   buildGoldXpSeries,
   computeLpDeltaSummary,
+  computeLpTargetProgress,
+  divisionLabelToAbsoluteLp,
 } from './trendAnalyticsEngine';
 
 describe('trendAnalyticsEngine', () => {
@@ -31,5 +33,18 @@ describe('trendAnalyticsEngine', () => {
     expect(summary.netLpChange).toBe(122);
     expect(summary.streakText).toBe('3W streak');
     expect(summary.currentLabel).toContain('GOLD II');
+  });
+
+  it('maps division labels and computes remaining LP distance accurately', () => {
+    expect(divisionLabelToAbsoluteLp('PLATINUM III')).toBe(1700);
+    expect(divisionLabelToAbsoluteLp('EMERALD IV')).toBe(2000);
+    expect(divisionLabelToAbsoluteLp('MASTER')).toBe(2800);
+
+    const progress = computeLpTargetProgress(1791, 'EMERALD IV');
+    expect(progress.currentLabel).toBe('Platinum III · 91 LP');
+    expect(progress.targetLabel).toBe('Emerald IV');
+    expect(progress.lpRemaining).toBe(209);
+    expect(progress.divisionsRemaining).toBe(3);
+    expect(progress.goalReached).toBe(false);
   });
 });

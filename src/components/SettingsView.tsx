@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import {
+  DEFAULT_HUD_WIDGETS,
   DEFAULT_RECORDING_SETTINGS,
   checkRiotApiKeyHealth,
   inspectReplayConfig,
@@ -21,6 +22,8 @@ import {
   listRecordings,
   probeHardwareEncoder,
   resetHudPosition,
+  resetHudWidgets,
+  saveHudWidgets,
   saveSettings,
   setHudLocked,
   subscribeHudPreferences,
@@ -32,6 +35,7 @@ import type {
   AppMetaInfo,
   GameCfgReplayStatus,
   HardwareEncoderStatus,
+  HudWidgetMap,
   RecordingRecord,
   RecordingSettings,
   UpdateCheckResult,
@@ -318,6 +322,10 @@ export function SettingsView({
       } else if (prefs.hudX === null && prefs.hudY === null) {
         setCustomHudCoords(null);
       }
+      if (prefs.hudWidgets) {
+        const nextWidgets = prefs.hudWidgets;
+        setDraft((prev) => ({ ...prev, hudWidgets: nextWidgets }));
+      }
     });
     return () => {
       active = false;
@@ -554,6 +562,24 @@ export function SettingsView({
       });
   }
 
+  function handleSaveHudWidgets(nextWidgets: HudWidgetMap) {
+    setDraft((prev) => ({ ...prev, hudWidgets: nextWidgets }));
+    onSettingsChanged({ ...settings, hudWidgets: nextWidgets });
+    void saveHudWidgets(nextWidgets).catch((err) => {
+      notify.error(err instanceof Error ? err.message : 'Unable to save HUD widgets.');
+    });
+  }
+
+  function handleResetHudWidgets() {
+    setDraft((prev) => ({ ...prev, hudWidgets: DEFAULT_HUD_WIDGETS }));
+    onSettingsChanged({ ...settings, hudWidgets: DEFAULT_HUD_WIDGETS });
+    void resetHudWidgets()
+      .then(() => notify.status('Modular HUD widgets reset to defaults.'))
+      .catch((err) => {
+        notify.error(err instanceof Error ? err.message : 'Unable to reset HUD widgets.');
+      });
+  }
+
   /* ---------- Live status badges for the category list ---------- */
   function categoryStatus(id: SettingsSectionId): { label: string; tone: M3ChipTone } {
     switch (id) {
@@ -749,7 +775,7 @@ export function SettingsView({
 
   return (
     <div key={activeSection} className="m3-view-enter max-w-[920px] space-y-3">
-      <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-2 bg-[var(--md-sys-color-surface)] px-1 pb-3 pt-1">
+      <div className="sticky top-0 z-30 -mx-2 -mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] px-2 pb-3 pt-3">
         <M3Button
           variant="tonal"
           icon={<ArrowLeft aria-hidden className="h-5 w-5" />}
@@ -835,6 +861,8 @@ export function SettingsView({
           onOverlayPatch={handleImmediateOverlayPatch}
           onToggleHudLock={handleToggleHudLock}
           onResetHudPosition={handleResetHudPosition}
+          onSaveHudWidgets={handleSaveHudWidgets}
+          onResetHudWidgets={handleResetHudWidgets}
         />
       )}
 

@@ -1,27 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { CompactHudBar } from './components/CompactHudBar';
+import { HudOverlayCanvas } from './components/hud/HudOverlayCanvas';
 import { findChampionIdByName, findJungleChampionByName } from './data/jungleKnowledgePack';
 import { findAdcChampionByName } from './data/adcKnowledgePack';
+import { resolveAdcBenchmark } from './domain/adc/adcBenchmarks';
 import { computeAdcAdaptiveBuild, computeAdcMacroGuidance } from './domain/adc/adcLiveEngine';
 import { generateAdcGamePlan } from './domain/adc/adcGamePlanEngine';
+import { DIVISION_BENCHMARKS, parseTargetTier } from './domain/climbLadderEngine';
 import { detectLivePlayedRole } from './domain/sessionContext';
+import { computeSkillOrderAdvice } from './domain/skillOrderEngine';
 import {
   computeAdaptiveBuild,
   computeMacroGuidance,
   computeObjectiveWindows,
+  computeSmiteProgression,
   resolveSelfPlayer,
 } from './domain/liveCoachEngine';
 import { computePersonalLearningSnapshot } from './domain/personalLearningEngine';
 import { generateWinConditionPlan } from './domain/winConditionEngine';
 import { useInterpolatedGameTime } from './hooks/useInterpolatedGameTime';
 import {
+  DEFAULT_HUD_WIDGETS,
   getActivePatchPack,
   getAppState,
   getCachedMatches,
   getPersonalLearningSnapshot,
   loadSettings,
-  saveHudPosition,
+  resetHudWidgets,
+  saveHudWidgets,
   setHudLocked,
   setOverlayMode,
   subscribeGameState,
@@ -31,6 +37,7 @@ import {
 import type {
   ActivePatchPackStatus,
   HudScalePercent,
+  HudWidgetMap,
   SqlPersonalLearningSummary,
 } from './types/coaching';
 import type { AppRuntimeState, LaneRole, LiveGameData, MatchV5Detail } from './types/riot';
@@ -94,6 +101,7 @@ export function HudApp() {
   const [scalePercent, setScalePercent] = useState<HudScalePercent>(100);
   const [hotkey, setHotkey] = useState('Alt+J');
   const [hudLocked, setHudLockedState] = useState(true);
+  const [hudWidgets, setHudWidgets] = useState<HudWidgetMap>(DEFAULT_HUD_WIDGETS);
   const [targetDivision, setTargetDivision] = useState('PLATINUM IV');
   const [patchPackStatus, setPatchPackStatus] = useState<ActivePatchPackStatus | null>(null);
   const [cachedMatches, setCachedMatches] = useState<MatchV5Detail[]>([]);
@@ -130,6 +138,7 @@ export function HudApp() {
         setScalePercent((s.hudScale ?? 100) as HudScalePercent);
         setHotkey(s.overlayHotkey);
         setTargetDivision(s.targetDivision);
+        if (s.hudWidgets) setHudWidgets(s.hudWidgets);
       })
       .catch((err) => {
         console.warn('HUD settings fallback:', err);
@@ -170,6 +179,9 @@ export function HudApp() {
       setHotkey(prefs.overlayHotkey);
       if (typeof prefs.hudLocked === 'boolean') {
         setHudLockedState(prefs.hudLocked);
+      }
+      if (prefs.hudWidgets) {
+        setHudWidgets(prefs.hudWidgets);
       }
     });
     const unsubPatchPack = subscribePatchPackUpdated((pack) => {
@@ -302,6 +314,10 @@ export function HudApp() {
   }, [livePlayedRole, runtimeState.champSelect, runtimeState.liveGame, runtimeState.phase]);
 
   const isJungleLive = livePlayedRole === 'jungle';
+  const selfLivePlayer = useMemo(
+    () => (runtimeState.liveGame ? resolveSelfPlayer(runtimeState.liveGame) : null),
+    [runtimeState.liveGame]
+  );
 
   const buildPlan = useMemo(() => {
     if (!runtimeState.liveGame) return null;
@@ -328,23 +344,37 @@ export function HudApp() {
     return [];
   }, [liveGameSynced, winPlan, adcWinPlan, objectives, personalLearning, livePlayedRole]);
 
+  const targetTier = parseTargetTier(targetDivision);
+  const targetCsPerMin =
+    livePlayedRole === 'bottom'
+      ? resolveAdcBenchmark(targetDivision, patchPackStatus?.payload.roleBenchmarks?.bottom).benchmark
+          .csPerMin
+      : DIVISION_BENCHMARKS[targetTier].csPerMin;
+
+  const skillOrder = useMemo(() => {
+    if (!runtimeState.liveGame || !selfLivePlayer || livePlayedRole === 'off_role') return null;
+    return computeSkillOrderAdvice(
+      selfLivePlayer.championName,
+      runtimeState.liveGame.activePlayer.level,
+      runtimeState.liveGame.activePlayer.abilities
+    );
+  }, [runtimeState.liveGame, selfLivePlayer, livePlayedRole]);
+
+  const smiteStatus = useMemo(() => {
+    if (!runtimeState.liveGame || !isJungleLive) return null;
+    return computeSmiteProgression(
+      runtimeState.liveGame,
+      patchPackStatus?.payload.smiteThresholds
+    );
+  }, [runtimeState.liveGame, isJungleLive, patchPackStatus]);
+
   const hudStyle = {
     '--hud-alpha': String(Math.max(0.7, Math.min(1, opacity / 100))),
   } as CSSProperties;
 
-  async function handleStartDragHud() {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().startDragging();
-      await saveHudPosition();
-    } catch {
-      // Non-Tauri environment or interrupted drag
-    }
-  }
-
   return (
     <div style={hudStyle} className="h-screen w-screen bg-transparent p-0">
-      <CompactHudBar
+      <HudOverlayCanvas
         phase={runtimeState.phase}
         gameTime={interpolatedTime}
         objectives={objectives}
@@ -354,11 +384,27 @@ export function HudApp() {
         patchVersion={runtimeState.patchVersion}
         hotkey={hotkey}
         scalePercent={scalePercent}
+        opacity={opacity}
         clickThrough={hudLocked}
         hudLocked={hudLocked}
+        hudWidgets={hudWidgets}
         activeRole={livePlayedRole}
         isOffRole={livePlayedRole === 'off_role'}
-        onStartDrag={() => void handleStartDragHud()}
+        creepScore={selfLivePlayer?.scores.creepScore}
+        targetCsPerMin={targetCsPerMin}
+        targetDivisionLabel={targetTier}
+        skillOrder={skillOrder}
+        winPlan={winPlan}
+        adcWinPlan={adcWinPlan}
+        smiteStatus={smiteStatus}
+        onSaveWidgets={(next) => {
+          setHudWidgets(next);
+          void saveHudWidgets(next);
+        }}
+        onResetWidgets={() => {
+          setHudWidgets(DEFAULT_HUD_WIDGETS);
+          void resetHudWidgets();
+        }}
         onLockHud={() => {
           setHudLockedState(true);
           void setHudLocked(true);

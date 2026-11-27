@@ -11,8 +11,6 @@ interface EmptyStateProps {
     onClick: () => void;
     disabled?: boolean;
   };
-  onPreviewSample?: () => void;
-  sampleLabel?: string;
   children?: ReactNode;
 }
 
@@ -24,8 +22,6 @@ export function EmptyState({
   title,
   description,
   action,
-  onPreviewSample,
-  sampleLabel = 'Preview with sample data',
   children,
 }: EmptyStateProps) {
   return (
@@ -38,27 +34,16 @@ export function EmptyState({
           <h2 className="t-title text-white/[0.92]">{title}</h2>
           <p className="t-body max-w-xl text-white/[0.62]">{description}</p>
           {children}
-          {(action || onPreviewSample) && (
+          {action && (
             <div className="flex flex-wrap items-center gap-3 pt-2">
-              {action && (
-                <button
-                  type="button"
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                  className="lg-btn-primary px-3.5 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  {action.label}
-                </button>
-              )}
-              {onPreviewSample && (
-                <button
-                  type="button"
-                  onClick={onPreviewSample}
-                  className="t-caption font-medium text-white/[0.62] transition hover:text-white/[0.92]"
-                >
-                  {sampleLabel} →
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={action.disabled}
+                onClick={action.onClick}
+                className="lg-btn-primary px-3.5 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {action.label}
+              </button>
             </div>
           )}
         </div>

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use keyring::Entry;
@@ -155,6 +155,106 @@ pub fn normalize_coached_role(raw: &str, fallback: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HudWidgetLayout {
+    pub enabled: bool,
+    pub x_pct: f64,
+    pub y_pct: f64,
+}
+
+impl Default for HudWidgetLayout {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            x_pct: 70.0,
+            y_pct: 80.0,
+        }
+    }
+}
+
+pub fn default_hud_widgets() -> HashMap<String, HudWidgetLayout> {
+    let mut map = HashMap::new();
+    map.insert(
+        "objectives".to_string(),
+        HudWidgetLayout {
+            enabled: true,
+            x_pct: 69.0,
+            y_pct: 79.0,
+        },
+    );
+    map.insert(
+        "build".to_string(),
+        HudWidgetLayout {
+            enabled: true,
+            x_pct: 69.0,
+            y_pct: 89.0,
+        },
+    );
+    map.insert(
+        "cs".to_string(),
+        HudWidgetLayout {
+            enabled: true,
+            x_pct: 82.0,
+            y_pct: 2.5,
+        },
+    );
+    map.insert(
+        "skillOrder".to_string(),
+        HudWidgetLayout {
+            enabled: true,
+            x_pct: 42.5,
+            y_pct: 75.5,
+        },
+    );
+    map.insert(
+        "gamePlan".to_string(),
+        HudWidgetLayout {
+            enabled: true,
+            x_pct: 1.5,
+            y_pct: 14.0,
+        },
+    );
+    map.insert(
+        "cue".to_string(),
+        HudWidgetLayout {
+            enabled: true,
+            x_pct: 35.0,
+            y_pct: 4.5,
+        },
+    );
+    map
+}
+
+pub fn sanitize_hud_widgets(
+    raw: HashMap<String, HudWidgetLayout>,
+) -> HashMap<String, HudWidgetLayout> {
+    let mut merged = default_hud_widgets();
+    for (key, layout) in raw {
+        if merged.contains_key(&key) {
+            let safe_x = if layout.x_pct.is_finite() {
+                layout.x_pct.clamp(0.0, 95.0)
+            } else {
+                merged[&key].x_pct
+            };
+            let safe_y = if layout.y_pct.is_finite() {
+                layout.y_pct.clamp(0.0, 95.0)
+            } else {
+                merged[&key].y_pct
+            };
+            merged.insert(
+                key,
+                HudWidgetLayout {
+                    enabled: layout.enabled,
+                    x_pct: (safe_x * 100.0).round() / 100.0,
+                    y_pct: (safe_y * 100.0).round() / 100.0,
+                },
+            );
+        }
+    }
+    merged
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UserSettings {
@@ -171,6 +271,8 @@ pub struct UserSettings {
     pub hud_y: Option<i32>,
     #[serde(default = "default_true")]
     pub hud_locked: bool,
+    #[serde(default = "default_hud_widgets")]
+    pub hud_widgets: HashMap<String, HudWidgetLayout>,
     #[serde(default = "default_jungle_role")]
     pub primary_role: String,
     #[serde(default = "default_bottom_role")]
@@ -204,6 +306,7 @@ impl Default for UserSettings {
             hud_x: None,
             hud_y: None,
             hud_locked: true,
+            hud_widgets: default_hud_widgets(),
             primary_role: "jungle".to_string(),
             secondary_role: "bottom".to_string(),
             auto_detect_role: true,
@@ -3188,6 +3291,31 @@ mod tests {
             .expect("get stuck")
             .expect("stuck row");
         assert_eq!(loaded_stuck.status, "interrupted");
+    }
+
+    #[test]
+    fn hud_widgets_backward_compatible_and_clamped() {
+        let legacy: UserSettings =
+            serde_json::from_str(r#"{"riotId":"Old#EUW","hudOpacity":90}"#).expect("legacy json");
+        assert_eq!(legacy.hud_widgets.len(), 6);
+        assert!(legacy.hud_widgets["objectives"].enabled);
+        assert!(legacy.hud_widgets["cs"].enabled);
+        assert!(legacy.hud_widgets["skillOrder"].enabled);
+        assert!(legacy.hud_widgets["gamePlan"].enabled);
+
+        let mut custom = HashMap::new();
+        custom.insert(
+            "cs".to_string(),
+            HudWidgetLayout {
+                enabled: false,
+                x_pct: 140.0,
+                y_pct: -25.0,
+            },
+        );
+        let sanitized = sanitize_hud_widgets(custom);
+        assert!(!sanitized["cs"].enabled);
+        assert_eq!(sanitized["cs"].x_pct, 95.0);
+        assert_eq!(sanitized["cs"].y_pct, 0.0);
     }
 
     #[test]

@@ -55,56 +55,104 @@ const clamp = (value: number, min: number, max: number): number =>
 // ---------------------------------------------------------------------------
 
 /**
- * Bot-lane ward spots in official Summoner's Rift (`map11.png`) SVG space [0..1000]
- * (top-left origin, Blue base bottom-left) — same coordinate system as `RIFT_NODES`.
- * Red-side spots are the point-mirror (1000 - x, 1000 - y) of the Blue-side bush.
+ * Calibrated Bot-lane ward spots in official Summoner's Rift (`map11.png`) SVG space [0..1000]
+ * (top-left origin, Blue base bottom-left [~100,900], Red base top-right [~900,100]).
  */
 export function buildAdcWardSpots(side: MapSide): WardSpot[] {
   const isBlue = side === 'blue';
+  if (isBlue) {
+    return [
+      {
+        id: 'adc-river-brush',
+        label: 'Bot River Entrance Brush',
+        kind: 'stealth',
+        phase: 'early',
+        x: 742,
+        y: 762,
+        timing: '2:15 – 2:30 (pre-Level 3 gank)',
+        reason:
+          'Spots river ganks and early jungler flanks before the 2:30–2:55 Scuttle window without overextending.',
+      },
+      {
+        id: 'adc-tri-brush',
+        label: 'Blue Bot Tri-Brush (Dive Flank)',
+        kind: 'control',
+        phase: 'objective',
+        x: 702,
+        y: 822,
+        timing: 'First reset (~4:30) with Control Ward',
+        reason:
+          'Secures your tower flank against 3-man dives through your bot jungle when pushing or freezing.',
+      },
+      {
+        id: 'adc-dragon-pixel',
+        label: 'Dragon River Pixel Brush',
+        kind: 'stealth',
+        phase: 'objective',
+        x: 622,
+        y: 658,
+        timing: '4:15 (45s before 5:00 Dragon)',
+        reason:
+          'Tracks mid roams and enemy jungler rotations ahead of first Dragon setup; let Support ward deeper if uncontested.',
+      },
+      {
+        id: 'adc-mid-swap-pink',
+        label: 'Bot-Mid River Side Brush (Mid Swap)',
+        kind: 'control',
+        phase: 'mid_late',
+        x: 445,
+        y: 562,
+        timing: '14:00+ after Bot → Mid swap',
+        reason:
+          'Anchors one side of mid lane so you can clear waves safely and shadow jungle hovers after swapping Mid.',
+      },
+    ];
+  }
+
   return [
     {
-      id: 'adc-tri-bush',
-      label: isBlue ? 'Blue Bot Tri-Brush (defensive)' : 'Red Bot Tri-Brush (defensive)',
+      id: 'adc-tri-brush',
+      label: 'Red Bot Tri-Brush (Mandatory Flank)',
       kind: 'stealth',
       phase: 'early',
-      x: isBlue ? 703 : 872,
-      y: isBlue ? 796 : 698,
-      timing: '2:15 — before the 2:15–2:55 early gank window',
+      x: 822,
+      y: 668,
+      timing: '2:15 – 2:30 (pre-Level 3 gank)',
       reason:
-        'Covers the lane-side jungle entrance the enemy jungler uses for a Level-3 flank gank before 2:55 Scuttle.',
+        'Mandatory Red-side ward: covers blast-cone and tri-brush dives behind your turret before Scuttle.',
     },
     {
-      id: 'adc-river-pixel',
-      label: 'Bot River / Dragon Pixel Brush',
+      id: 'adc-river-brush',
+      label: 'Bot River Entrance Brush',
       kind: 'stealth',
       phase: 'early',
       x: 742,
-      y: 724,
-      timing: '2:45+ and again 45s before 5:00 Dragon',
+      y: 762,
+      timing: '2:45+ when pushing wave',
       reason:
-        'Spots river ganks after Scuttle and Dragon rotations; place it only while your wave is pushing, never face-check.',
+        'Covers river approach when your duo holds wave priority past the midpoint of bot lane.',
     },
     {
-      id: 'adc-lane-push-control',
-      label: 'Bot Lane Brush Control Ward',
+      id: 'adc-dragon-pixel',
+      label: 'Dragon Pit / Pixel Brush',
       kind: 'control',
       phase: 'objective',
-      x: isBlue ? 812 : 905,
-      y: isBlue ? 905 : 812,
-      timing: 'First reset (~4:30–6:00) with a Control Ward',
+      x: 622,
+      y: 658,
+      timing: '4:15 (45s before 5:00 Dragon)',
       reason:
-        'Owns lane-brush vision so you can push for plates and deny enemy support brush-control trades.',
+        'Denies pit vision before first Dragon contest and spots mid-lane river rotations early.',
     },
     {
       id: 'adc-mid-swap-pink',
-      label: 'Mid River Brush Control Ward (Mid-swap)',
+      label: 'Top-Mid River Side Brush (Mid Swap)',
       kind: 'control',
       phase: 'mid_late',
-      x: isBlue ? 430 : 570,
-      y: isBlue ? 590 : 410,
-      timing: 'Once Bot Tier-1 falls (~14:00+) before swapping Mid',
+      x: 555,
+      y: 438,
+      timing: '14:00+ after Bot → Mid swap',
       reason:
-        'Secures the mid-lane flank so you can farm the Mid wave safely after the Bot → Mid swap.',
+        'Covers the top-mid river flank toward Herald/Baron while farming mid waves safely.',
     },
   ];
 }

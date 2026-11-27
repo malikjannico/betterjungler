@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: BetterJungler.BetterJungler
-PackageVersion: 2.1.0
+PackageVersion: 2.2.0
 Platform:
   - Windows.Desktop
 MinimumOSVersion: 10.0.19041.0
@@ -13,7 +13,7 @@ InstallModes:
 UpgradeBehavior: install
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/malikjannico/betterjungler/releases/download/v2.1.0/BetterJungler_2.1.0_x64-setup.exe
+    InstallerUrl: https://github.com/malikjannico/betterjungler/releases/download/v2.2.0/BetterJungler_2.2.0_x64-setup.exe
     InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
 ManifestType: installer
 ManifestVersion: 1.6.0

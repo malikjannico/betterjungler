@@ -11,6 +11,9 @@ import type {
   HudCorner,
   HudMonitorTarget,
   HudScalePercent,
+  HudWidgetId,
+  HudWidgetLayout,
+  HudWidgetMap,
   LpHistoryPoint,
   MatchRecordingBundle,
   MinimapSide,
@@ -50,6 +53,43 @@ export const DEFAULT_RECORDING_SETTINGS: RecordingSettings = {
   replayApiEnabled: false,
 };
 
+export const DEFAULT_HUD_WIDGETS: HudWidgetMap = {
+  objectives: { enabled: true, xPct: 69, yPct: 79 },
+  build: { enabled: true, xPct: 69, yPct: 89 },
+  cs: { enabled: true, xPct: 82, yPct: 2.5 },
+  skillOrder: { enabled: true, xPct: 42.5, yPct: 75.5 },
+  gamePlan: { enabled: true, xPct: 1.5, yPct: 14 },
+  cue: { enabled: true, xPct: 35, yPct: 4.5 },
+};
+
+export function sanitizeHudWidgetsClient(raw?: Partial<Record<HudWidgetId, Partial<HudWidgetLayout>>> | null): HudWidgetMap {
+  const next: HudWidgetMap = {
+    objectives: { ...DEFAULT_HUD_WIDGETS.objectives },
+    build: { ...DEFAULT_HUD_WIDGETS.build },
+    cs: { ...DEFAULT_HUD_WIDGETS.cs },
+    skillOrder: { ...DEFAULT_HUD_WIDGETS.skillOrder },
+    gamePlan: { ...DEFAULT_HUD_WIDGETS.gamePlan },
+    cue: { ...DEFAULT_HUD_WIDGETS.cue },
+  };
+  if (!raw) return next;
+  for (const id of Object.keys(DEFAULT_HUD_WIDGETS) as HudWidgetId[]) {
+    const entry = raw[id];
+    if (!entry) continue;
+    next[id] = {
+      enabled: typeof entry.enabled === 'boolean' ? entry.enabled : DEFAULT_HUD_WIDGETS[id].enabled,
+      xPct:
+        typeof entry.xPct === 'number' && Number.isFinite(entry.xPct)
+          ? Math.max(0, Math.min(95, Math.round(entry.xPct * 100) / 100))
+          : DEFAULT_HUD_WIDGETS[id].xPct,
+      yPct:
+        typeof entry.yPct === 'number' && Number.isFinite(entry.yPct)
+          ? Math.max(0, Math.min(95, Math.round(entry.yPct * 100) / 100))
+          : DEFAULT_HUD_WIDGETS[id].yPct,
+    };
+  }
+  return next;
+}
+
 const DEFAULT_SETTINGS: UserSettings = {
   riotId: '',
   region: 'EUW1',
@@ -63,6 +103,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   hudX: null,
   hudY: null,
   hudLocked: true,
+  hudWidgets: DEFAULT_HUD_WIDGETS,
   primaryRole: 'jungle',
   secondaryRole: 'bottom',
   autoDetectRole: true,
@@ -139,6 +180,7 @@ export interface HudPreferencesEvent {
   hudX?: number | null;
   hudY?: number | null;
   hudLocked?: boolean;
+  hudWidgets?: HudWidgetMap;
 }
 
 export async function setHudLocked(locked: boolean): Promise<void> {
@@ -154,6 +196,28 @@ export async function saveHudPosition(): Promise<[number, number] | null> {
 export async function resetHudPosition(): Promise<void> {
   if (!isTauriEnvironment()) return;
   await invokeTauri<void>('reset_hud_position');
+}
+
+export async function saveHudWidgets(widgets: HudWidgetMap): Promise<HudWidgetMap> {
+  const clean = sanitizeHudWidgetsClient(widgets);
+  if (!isTauriEnvironment()) {
+    const existing = await loadSettings();
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ ...existing, hudWidgets: clean }));
+    return clean;
+  }
+  return invokeTauri<HudWidgetMap>('save_hud_widgets', { widgets: clean });
+}
+
+export async function resetHudWidgets(): Promise<HudWidgetMap> {
+  if (!isTauriEnvironment()) {
+    const existing = await loadSettings();
+    localStorage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ ...existing, hudWidgets: DEFAULT_HUD_WIDGETS })
+    );
+    return DEFAULT_HUD_WIDGETS;
+  }
+  return invokeTauri<HudWidgetMap>('reset_hud_widgets');
 }
 
 export async function subscribeHudPreferences(
@@ -223,6 +287,7 @@ export async function loadSettings(): Promise<UserSettings> {
         return {
           ...DEFAULT_SETTINGS,
           ...parsed,
+          hudWidgets: sanitizeHudWidgetsClient(parsed.hudWidgets),
           aiCoach: {
             ...DEFAULT_SETTINGS.aiCoach,
             ...(parsed.aiCoach ?? {}),

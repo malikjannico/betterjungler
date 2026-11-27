@@ -36,7 +36,6 @@ import type { EmptyReason, RoleResolutionSource } from '../domain/sessionContext
 import type {
   AdcKpiKey,
   ClimbGoal,
-  DemoScenarioId,
   DivisionBenchmarkComparison,
   HighEloMetaSnapshot,
   JungleKpiKey,
@@ -80,7 +79,6 @@ interface ClimbLadderViewProps {
   onSyncMatches?: () => Promise<void>;
   onOpenSettings?: () => void;
   onTestHud?: () => void;
-  onPreviewSample?: (scenario: DemoScenarioId) => void;
   /** Coached role whose benchmarks/goals are shown. Defaults to Jungle. */
   activeRole?: CoachedRole;
   roleSource?: RoleResolutionSource;
@@ -225,7 +223,6 @@ export function ClimbLadderView({
   onSyncMatches,
   onOpenSettings,
   onTestHud,
-  onPreviewSample,
   activeRole,
   roleSource,
   onSelectRole,
@@ -241,6 +238,8 @@ export function ClimbLadderView({
   const [customMetric, setCustomMetric] = useState<JungleKpiKey | AdcKpiKey>('csPerMin');
   const [customTarget, setCustomTarget] = useState<string>('6.8');
   const [customTitle, setCustomTitle] = useState<string>('');
+  const [showCustomGoalForm, setShowCustomGoalForm] = useState(false);
+  const [showHighEloMeta, setShowHighEloMeta] = useState(false);
   const [refreshingMeta, setRefreshingMeta] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [syncingMatches, setSyncingMatches] = useState(false);
@@ -594,8 +593,6 @@ export function ClimbLadderView({
                   }
                 : undefined
           }
-          onPreviewSample={onPreviewSample ? () => onPreviewSample('in_game_mid') : undefined}
-          sampleLabel="Preview sample climb data"
         >
           {!accountReady && (
             <div className="mt-4 grid gap-2.5 border-t border-[var(--md-sys-color-outline-variant)] pt-4 sm:grid-cols-3">
@@ -845,7 +842,13 @@ export function ClimbLadderView({
       </div>
 
       {/* LP Trend & Velocity · Death heatmap */}
-      <ClimbTrendCharts matches={roleMatches} lpHistory={lpHistory} patchVersion={patchVersion} />
+      <ClimbTrendCharts
+        matches={roleMatches}
+        lpHistory={lpHistory}
+        patchVersion={patchVersion}
+        targetDivision={targetDivision}
+        summonerProfile={summonerProfile}
+      />
 
       {/* Benchmarks KPI Matrix */}
       <M3Card variant="hero" as="section" aria-label="KPI benchmark matrix" className="space-y-3">
@@ -994,50 +997,59 @@ export function ClimbLadderView({
             </p>
           )}
 
-          <form
-            onSubmit={(e) => void handleAddCustomGoal(e)}
-            className="space-y-2 border-t border-[var(--md-sys-color-outline-variant)] pt-3"
-            aria-label="Add custom improvement goal"
-          >
-            <div className="m3-label-l text-[var(--md-sys-color-on-surface-variant)]">
-              Add custom {isAdc ? 'ADC' : 'Jungle'} improvement goal
-            </div>
-            <div className="grid grid-cols-[1fr_96px] gap-2">
-              <select
-                aria-label="Custom goal metric"
-                value={effectiveMetric}
-                onChange={(e) => setCustomMetric(e.target.value as JungleKpiKey | AdcKpiKey)}
-                className="m3-body-m rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-[var(--md-sys-color-on-surface)] outline-none focus:border-[var(--md-sys-color-primary)]"
+          <div className="border-t border-[var(--md-sys-color-outline-variant)] pt-3">
+            <M3Button
+              size="sm"
+              variant="text"
+              onClick={() => setShowCustomGoalForm((v) => !v)}
+              aria-expanded={showCustomGoalForm}
+            >
+              {showCustomGoalForm ? 'Hide Custom Goal Form' : '+ Add Custom Improvement Goal'}
+            </M3Button>
+            {showCustomGoalForm && (
+              <form
+                onSubmit={(e) => void handleAddCustomGoal(e)}
+                className="mt-2.5 space-y-2"
+                aria-label="Add custom improvement goal"
               >
-                {metricOptions.map((o) => (
-                  <option key={o.key} value={o.key} className="bg-zinc-900">
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                step="0.1"
-                aria-label="Custom goal target"
-                value={customTarget}
-                onChange={(e) => setCustomTarget(e.target.value)}
-                className="m3-body-m num rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-[var(--md-sys-color-on-surface)] outline-none focus:border-[var(--md-sys-color-primary)]"
-              />
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                aria-label="Custom goal title"
-                placeholder="Optional custom goal title..."
-                value={customTitle}
-                onChange={(e) => setCustomTitle(e.target.value)}
-                className="m3-body-m min-w-0 flex-1 rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-[var(--md-sys-color-on-surface)] outline-none placeholder:text-[var(--md-sys-color-outline)] focus:border-[var(--md-sys-color-primary)]"
-              />
-              <M3Button type="submit" variant="filled">
-                Add
-              </M3Button>
-            </div>
-          </form>
+                <div className="grid grid-cols-[1fr_96px] gap-2">
+                  <select
+                    aria-label="Custom goal metric"
+                    value={effectiveMetric}
+                    onChange={(e) => setCustomMetric(e.target.value as JungleKpiKey | AdcKpiKey)}
+                    className="m3-body-m rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-[var(--md-sys-color-on-surface)] outline-none focus:border-[var(--md-sys-color-primary)]"
+                  >
+                    {metricOptions.map((o) => (
+                      <option key={o.key} value={o.key} className="bg-zinc-900">
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="0.1"
+                    aria-label="Custom goal target"
+                    value={customTarget}
+                    onChange={(e) => setCustomTarget(e.target.value)}
+                    className="m3-body-m num rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-[var(--md-sys-color-on-surface)] outline-none focus:border-[var(--md-sys-color-primary)]"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    aria-label="Custom goal title"
+                    placeholder="Optional custom goal title..."
+                    value={customTitle}
+                    onChange={(e) => setCustomTitle(e.target.value)}
+                    className="m3-body-m min-w-0 flex-1 rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-[var(--md-sys-color-on-surface)] outline-none placeholder:text-[var(--md-sys-color-outline)] focus:border-[var(--md-sys-color-primary)]"
+                  />
+                  <M3Button type="submit" variant="filled">
+                    Add
+                  </M3Button>
+                </div>
+              </form>
+            )}
+          </div>
         </M3Card>
 
         <div className="space-y-3">
@@ -1135,13 +1147,26 @@ export function ClimbLadderView({
           </M3Card>
 
           <M3Card variant="hero" as="section" aria-label="High-Elo meta snapshot">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="m3-title-m text-[var(--md-sys-color-on-surface)]">High-Elo Meta Snapshot</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                aria-expanded={showHighEloMeta}
+                onClick={() => setShowHighEloMeta((v) => !v)}
+                className="m3-focus-ring flex items-center gap-2 rounded-md text-left"
+              >
+                <h3 className="m3-title-m text-[var(--md-sys-color-on-surface)]">High-Elo Meta Snapshot</h3>
+                <M3Chip size="sm" tone="plain">
+                  {showHighEloMeta ? 'Hide' : 'Show'}
+                </M3Chip>
+              </button>
               <M3Button
                 size="sm"
                 variant="tonal"
                 disabled={refreshingMeta}
-                onClick={() => void handleRefreshMeta()}
+                onClick={() => {
+                  setShowHighEloMeta(true);
+                  void handleRefreshMeta();
+                }}
                 icon={<RefreshCw className={`h-4 w-4 ${refreshingMeta ? 'animate-spin' : ''}`} />}
               >
                 {refreshingMeta
@@ -1159,29 +1184,31 @@ export function ClimbLadderView({
                 {metaError}
               </p>
             )}
-            {highEloMeta ? (
-              <div className="mt-2.5 space-y-2">
-                <div className="m3-body-s text-[var(--md-sys-color-on-surface-variant)]">
-                  Patch {highEloMeta.patch} ({highEloMeta.region}) ·{' '}
-                  {highEloMeta.sampleMatches} sampled high-elo matches blended into Champ Select
+            {showHighEloMeta && (
+              highEloMeta ? (
+                <div className="mt-2.5 space-y-2">
+                  <div className="m3-body-s text-[var(--md-sys-color-on-surface-variant)]">
+                    Patch {highEloMeta.patch} ({highEloMeta.region}) ·{' '}
+                    {highEloMeta.sampleMatches} sampled high-elo matches blended into Champ Select
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {highEloMeta.champions.slice(0, 5).map((stat) => {
+                      const champ = findJungleChampionById(stat.championId);
+                      const champLabel =
+                        champ?.name ?? formatChampionName(undefined, stat.championId);
+                      return (
+                        <M3Chip key={stat.championId} tone="plain" className="num text-[var(--md-sys-color-on-surface)]">
+                          {champLabel}: <span className="font-bold">{stat.winRate}%</span> ({stat.games}g)
+                        </M3Chip>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {highEloMeta.champions.slice(0, 5).map((stat) => {
-                    const champ = findJungleChampionById(stat.championId);
-                    const champLabel =
-                      champ?.name ?? formatChampionName(undefined, stat.championId);
-                    return (
-                      <M3Chip key={stat.championId} tone="plain" className="num text-[var(--md-sys-color-on-surface)]">
-                        {champLabel}: <span className="font-bold">{stat.winRate}%</span> ({stat.games}g)
-                      </M3Chip>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <p className="m3-body-m mt-1 text-[var(--md-sys-color-on-surface-variant)]">
-                No high-elo meta snapshot cached yet.
-              </p>
+              ) : (
+                <p className="m3-body-m mt-2 text-[var(--md-sys-color-on-surface-variant)]">
+                  No high-elo meta snapshot cached yet.
+                </p>
+              )
             )}
           </M3Card>
         </div>

@@ -1,9 +1,12 @@
 import { useId } from 'react';
 import { CircleCheck, Lock, LockOpen, RotateCcw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { DEFAULT_HUD_WIDGETS, sanitizeHudWidgetsClient } from '../../services/tauriBridge';
 import type {
   HudCorner,
   HudMonitorTarget,
   HudScalePercent,
+  HudWidgetId,
+  HudWidgetMap,
   MinimapSide,
   OverlayHotkeyPreset,
   UserSettings,
@@ -65,6 +68,15 @@ const RECOMMENDED_LOL_HUD: Array<{ setting: string; value: string; why: string }
   },
 ];
 
+const HUD_WIDGET_TOGGLES: ReadonlyArray<{ id: HudWidgetId; name: string; detail: string }> = [
+  { id: 'objectives', name: 'Objective Timers', detail: 'Dragon, Voidgrubs, Herald & Baron timers.' },
+  { id: 'build', name: 'Next Item & Gold', detail: 'Recommended next item & gold needed.' },
+  { id: 'cs', name: 'CS / min vs Target', detail: 'Live CS/min pace compared to division target.' },
+  { id: 'skillOrder', name: 'Skill Order', detail: 'Highlights which ability (Q/W/E/R) to level next.' },
+  { id: 'gamePlan', name: 'Lv2 Plan & Spikes', detail: 'Early Lv2 wave/route plan, macro phase & spikes.' },
+  { id: 'cue', name: 'Tactical Macro Cues', detail: 'Urgent objective setup & wave alerts.' },
+];
+
 export interface OverlaySettingsSectionProps {
   draft: UserSettings;
   isTauri: boolean;
@@ -73,6 +85,8 @@ export interface OverlaySettingsSectionProps {
   onOverlayPatch: (patch: OverlayPatch, persistNow?: boolean) => void;
   onToggleHudLock: () => void;
   onResetHudPosition: () => void;
+  onSaveHudWidgets?: (widgets: HudWidgetMap) => void;
+  onResetHudWidgets?: () => void;
 }
 
 export function OverlaySettingsSection({
@@ -83,6 +97,8 @@ export function OverlaySettingsSection({
   onOverlayPatch,
   onToggleHudLock,
   onResetHudPosition,
+  onSaveHudWidgets,
+  onResetHudWidgets,
 }: OverlaySettingsSectionProps) {
   const ids = useId();
   const cornerId = `${ids}-corner`;
@@ -92,6 +108,18 @@ export function OverlaySettingsSection({
   const cornerLabel = HUD_CORNERS.find((c) => c.value === draft.hudCorner)?.label ?? draft.hudCorner;
   const opacity = Math.max(70, draft.hudOpacity);
   const opacityPct = ((opacity - 70) / 30) * 100;
+  const activeWidgets = sanitizeHudWidgetsClient(draft.hudWidgets ?? DEFAULT_HUD_WIDGETS);
+
+  function toggleWidget(id: HudWidgetId) {
+    const next: HudWidgetMap = {
+      ...activeWidgets,
+      [id]: {
+        ...activeWidgets[id],
+        enabled: !activeWidgets[id].enabled,
+      },
+    };
+    onSaveHudWidgets?.(next);
+  }
 
   return (
     <div className="space-y-3">
@@ -291,6 +319,59 @@ export function OverlaySettingsSection({
       </SettingsGroup>
 
       <SettingsGroup
+        title="Modular HUD Widgets"
+        description="Toggle individual widgets ON/OFF and click Unlock HUD for Dragging above to reposition each component independently."
+        aside={
+          onResetHudWidgets && (
+            <M3Button
+              size="sm"
+              variant="text"
+              icon={<RotateCcw aria-hidden className="h-4 w-4" />}
+              onClick={onResetHudWidgets}
+            >
+              Reset Widget Layout
+            </M3Button>
+          )
+        }
+      >
+        <div className="grid gap-2 px-4 py-3 sm:grid-cols-2">
+          {HUD_WIDGET_TOGGLES.map((widget) => {
+            const layout = activeWidgets[widget.id];
+            return (
+              <button
+                key={widget.id}
+                type="button"
+                role="switch"
+                aria-checked={layout.enabled}
+                onClick={() => toggleWidget(widget.id)}
+                className={cx(
+                  'm3-focus-ring flex items-center justify-between gap-3 rounded-[14px] border px-3.5 py-2.5 text-left transition',
+                  layout.enabled
+                    ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)]'
+                    : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface-variant)] opacity-80'
+                )}
+              >
+                <div className="min-w-0">
+                  <div className="m3-title-s truncate">{widget.name}</div>
+                  <div className="m3-body-s m3-muted truncate">{widget.detail}</div>
+                </div>
+                <span
+                  className={cx(
+                    'shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold',
+                    layout.enabled
+                      ? 'bg-[var(--md-ext-success-container)] text-[var(--md-ext-on-success-container)]'
+                      : 'bg-[var(--md-sys-color-surface-container-highest)] text-[var(--md-sys-color-on-surface-variant)]'
+                  )}
+                >
+                  {layout.enabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup
         title="Recommended In-Game League HUD Settings"
         description="Set these in the League client so the Compact HUD stays visible and click-through."
       >
@@ -314,7 +395,7 @@ export function OverlaySettingsSection({
             </li>
           ))}
         </ul>
-        <div className="px-2 pb-1">
+        <div className="px-4 py-3">
           <SettingsNotice tone="info">
             <span className="inline-flex items-center gap-1.5 font-semibold">
               <ShieldCheck aria-hidden className="h-4 w-4 text-[var(--md-ext-success)]" />

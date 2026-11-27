@@ -138,7 +138,7 @@ export interface SessionContext {
 }
 
 export interface DeriveSessionContextInput {
-  demoScenario: DemoScenarioId;
+  demoScenario?: DemoScenarioId;
   liveState: AppRuntimeState | null;
   manualRole?: CoachedRole | null;
   settings: Pick<UserSettings, 'hasApiKey' | 'riotApiProxyUrl' | 'riotId' | 'targetDivision'> &
@@ -280,13 +280,14 @@ function isChampSelectCompleted(session: LcuChampSelectSession): boolean {
  * installations never display fake default champions, plans, or match history.
  */
 export function deriveSessionContext(input: DeriveSessionContextInput): SessionContext {
-  const isSimulated = input.demoScenario !== 'idle';
+  const demoScenario = input.demoScenario ?? 'idle';
+  const isSimulated = demoScenario !== 'idle';
   const source: DataSourceKind = isSimulated ? 'simulated' : 'live';
   const simulationLabel =
-    input.demoScenario === 'idle' ? null : SIMULATION_LABELS[input.demoScenario];
+    demoScenario === 'idle' ? null : SIMULATION_LABELS[demoScenario];
 
   const runtimeState: AppRuntimeState = isSimulated
-    ? getDemoRuntimeState(input.demoScenario)
+    ? getDemoRuntimeState(demoScenario)
     : (input.liveState ?? getDemoRuntimeState('idle'));
 
   const cs = runtimeState.champSelect;

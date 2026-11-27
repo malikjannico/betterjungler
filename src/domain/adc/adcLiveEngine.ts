@@ -13,6 +13,7 @@ import {
   type AdcChampionProfile,
 } from '../../data/adcKnowledgePack';
 import { CHAMPION_META_TABLE, resolveItemMetadata } from '../../data/jungleKnowledgePack';
+import { getNonTrinketItems, hasCompletedBoots, isBootItem } from '../itemDetection';
 import { assessLiveThreats, formatClock, resolveSelfPlayer } from '../liveCoachEngine';
 import type {
   AdaptiveBuildPlan,
@@ -88,7 +89,6 @@ export const ADC_FORBIDDEN_ITEM_IDS: ReadonlySet<number> = new Set([
 
 const LAST_WHISPER_IDS = new Set<number>([3033, 3036, 6694]);
 const LIFELINE_IDS = new Set<number>([6673]);
-const BOOT_IDS = new Set<number>([3006, 3009, 3158, 1001]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -182,7 +182,7 @@ export function computeAdcAdaptiveBuild(
   const enemies = self ? liveData.allPlayers.filter((p) => p.team !== self.team) : [];
   const threats = assessAdcThreats(enemies);
 
-  const inventory = (self?.items ?? []).filter((i) => i.slot < 6);
+  const inventory = getNonTrinketItems(self?.items);
   const ownedIds = new Set(inventory.map((i) => i.itemID));
   const ownedTrinketId = (self?.items ?? []).find((i) => i.slot === 6)?.itemID;
   const currentGold = Math.floor(liveData.activePlayer.currentGold);
@@ -190,11 +190,11 @@ export function computeAdcAdaptiveBuild(
   const level = liveData.activePlayer.level;
 
   const majorItems = inventory.filter(
-    (i) => i.price >= 2400 && !BOOT_IDS.has(i.itemID) && !ADC_ITEM_CATALOG[i.itemID]?.tags.includes('boots')
+    (i) => i.price >= 2400 && !isBootItem(i) && !ADC_ITEM_CATALOG[i.itemID]?.tags.includes('boots')
   ).length;
-  const ownsBoots = inventory.some(
-    (i) => BOOT_IDS.has(i.itemID) || ADC_ITEM_CATALOG[i.itemID]?.tags.includes('boots')
-  );
+  const ownsBoots =
+    hasCompletedBoots(self?.items) ||
+    inventory.some((i) => isBootItem(i) || ADC_ITEM_CATALOG[i.itemID]?.tags.includes('boots'));
   const isFullBuild = majorItems >= 5 && (inventory.length >= 6 || ownsBoots);
 
   // --- Reactive pivots (priority order) ---

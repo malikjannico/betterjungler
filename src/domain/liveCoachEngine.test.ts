@@ -325,4 +325,31 @@ describe('liveCoachEngine', () => {
     // @ts-expect-error enemyCooldowns is statically banned by PersonalLiveGuardrailContext
     expect(computePersonalizedLiveGuardrails(forbiddenInput).length).toBeLessThanOrEqual(2);
   });
+
+  it('recognizes bought boots including Tier-3 upgrades and slot > 6 without re-recommending boots', () => {
+    const viego = findJungleChampionByName('Viego');
+    const selfName = DEMO_IN_GAME_MID.activePlayer.summonerName;
+    const withTier3Boots = {
+      ...DEMO_IN_GAME_MID,
+      allPlayers: DEMO_IN_GAME_MID.allPlayers.map((p) =>
+        p.summonerName === selfName
+          ? {
+              ...p,
+              items: [
+                ...p.items.filter((i) => i.itemID !== 3111 && i.itemID !== 3047 && i.itemID !== 3006),
+                { itemID: 3173, displayName: 'Chainlaced Crushers', count: 1, slot: 7, price: 1850 },
+              ],
+            }
+          : p
+      ),
+    };
+    const build = computeAdaptiveBuild(withTier3Boots, viego);
+    const recommendedIds = [
+      ...(build.nextItem ? [build.nextItem.item.id] : []),
+      ...build.upcomingQueue.map((q) => q.item.id),
+    ];
+    expect(recommendedIds).not.toContain(3047);
+    expect(recommendedIds).not.toContain(3111);
+    expect(recommendedIds).not.toContain(3006);
+  });
 });

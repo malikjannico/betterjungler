@@ -88,13 +88,13 @@ function allRecommendedIds(build: { nextItem: ItemRecommendation | null; upcomin
 // ---------------------------------------------------------------------------
 
 describe('adcGamePlanEngine', () => {
-  it('builds 4 bot-lane ward spots in [0..1000] map space, mirrored for Red side', () => {
+  it('builds 4 calibrated bot-lane ward spots in [0..1000] map space for Blue & Red side', () => {
     const blue = buildAdcWardSpots('blue');
     const red = buildAdcWardSpots('red');
     expect(blue.map((w) => w.id)).toEqual([
-      'adc-tri-bush',
-      'adc-river-pixel',
-      'adc-lane-push-control',
+      'adc-river-brush',
+      'adc-tri-brush',
+      'adc-dragon-pixel',
       'adc-mid-swap-pink',
     ]);
     for (const w of [...blue, ...red]) {
@@ -106,6 +106,7 @@ describe('adcGamePlanEngine', () => {
     expect(blue[0]!.timing).toContain('2:15');
     expect(red[0]!.x).not.toBe(blue[0]!.x);
     expect(blue.filter((w) => w.kind === 'control')).toHaveLength(2);
+    expect(red.filter((w) => w.kind === 'control')).toHaveLength(2);
   });
 
   it('plans a Lv2 all-in and flags a 2:15–2:55 gank window vs an early 3-camp jungler', () => {
@@ -246,6 +247,44 @@ describe('computeAdcAdaptiveBuild', () => {
     const late = computeAdcAdaptiveBuild(liveGame({ enemies: [], level: 9, gameTime: 700 }), jinx);
     expect(late.trinketAdvice.item.id).toBe(ADC_ITEM_IDS.farsightAlteration);
     expect(late.trinketAdvice.reason).toMatch(/face-check/);
+  });
+
+  it('recognizes bought boots in Season 2026 Bot Quest 7th slot (slot 7) and Tier-3 upgrades', () => {
+    const slot7Boots = computeAdcAdaptiveBuild(
+      liveGame({
+        selfItems: [
+          ...JINX_FIRST_ITEM,
+          { itemID: 3006, displayName: "Berserker's Greaves", count: 1, slot: 7, price: 1100 },
+        ],
+        enemies: [player('Garen', 'CHAOS')],
+      }),
+      jinx
+    );
+    expect(allRecommendedIds(slot7Boots)).not.toContain(ADC_ITEM_IDS.berserkersGreaves);
+
+    const steelcapsOwned = computeAdcAdaptiveBuild(
+      liveGame({
+        selfItems: [
+          ...JINX_FIRST_ITEM,
+          { itemID: 3047, displayName: 'Plated Steelcaps', count: 1, slot: 7, price: 1200 },
+        ],
+        enemies: [player('Zed', 'CHAOS')],
+      }),
+      jinx
+    );
+    expect(allRecommendedIds(steelcapsOwned)).not.toContain(ADC_ITEM_IDS.berserkersGreaves);
+
+    const tier3Owned = computeAdcAdaptiveBuild(
+      liveGame({
+        selfItems: [
+          ...JINX_FIRST_ITEM,
+          { itemID: 3172, displayName: 'Gunmetal Greaves', count: 1, slot: 7, price: 1850 },
+        ],
+        enemies: [player('Garen', 'CHAOS')],
+      }),
+      jinx
+    );
+    expect(allRecommendedIds(tier3Owned)).not.toContain(ADC_ITEM_IDS.berserkersGreaves);
   });
 });
 

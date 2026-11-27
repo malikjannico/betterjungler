@@ -236,7 +236,7 @@ export function AiCoachSettingsSection({
         )}
 
         {activePreset && (
-          <div className="px-2 pb-2">
+          <div className="px-4 py-3">
             <M3Card
               variant="module"
               className={cx(

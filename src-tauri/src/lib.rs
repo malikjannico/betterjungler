@@ -168,6 +168,7 @@ fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings)
         settings.hud_x = existing.hud_x;
         settings.hud_y = existing.hud_y;
         settings.hud_locked = existing.hud_locked;
+        settings.hud_widgets = existing.hud_widgets;
     }
     storage::save_settings(&conn, &settings)?;
     if let Ok(mut path_guard) = state.install_path.write() {
@@ -833,6 +834,45 @@ fn reset_hud_position(app: AppHandle, state: State<'_, Arc<SharedState>>) -> App
         .overlay
         .set_custom_position(Some(&app), None, None, true);
     Ok(())
+}
+
+#[tauri::command]
+fn save_hud_widgets(
+    app: AppHandle,
+    state: State<'_, Arc<SharedState>>,
+    widgets: std::collections::HashMap<String, storage::HudWidgetLayout>,
+) -> AppResult<std::collections::HashMap<String, storage::HudWidgetLayout>> {
+    let clean = storage::sanitize_hud_widgets(widgets);
+    {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut settings = storage::load_settings(&conn).unwrap_or_default();
+        settings.hud_widgets = clean.clone();
+        storage::save_settings(&conn, &settings)?;
+    }
+    state.overlay.set_hud_widgets(Some(&app), clean.clone());
+    Ok(clean)
+}
+
+#[tauri::command]
+fn reset_hud_widgets(
+    app: AppHandle,
+    state: State<'_, Arc<SharedState>>,
+) -> AppResult<std::collections::HashMap<String, storage::HudWidgetLayout>> {
+    let defaults = storage::default_hud_widgets();
+    {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut settings = storage::load_settings(&conn).unwrap_or_default();
+        settings.hud_widgets = defaults.clone();
+        storage::save_settings(&conn, &settings)?;
+    }
+    state.overlay.set_hud_widgets(Some(&app), defaults.clone());
+    Ok(defaults)
 }
 
 #[tauri::command]
@@ -1776,6 +1816,7 @@ pub fn run() {
                 initial_settings.hud_y,
                 false,
             );
+            overlay_ctrl.set_hud_widgets(None, initial_settings.hud_widgets.clone());
 
             if let Some(main_win) = app.get_webview_window("main") {
                 if let Some(icon) = app.default_window_icon().cloned() {
@@ -1907,6 +1948,8 @@ pub fn run() {
             set_hud_locked,
             save_hud_position,
             reset_hud_position,
+            save_hud_widgets,
+            reset_hud_widgets,
             get_lp_history,
             check_riot_api_key_health,
             get_app_meta,

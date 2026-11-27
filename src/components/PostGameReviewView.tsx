@@ -25,7 +25,6 @@ import { generateAiDebrief } from '../services/tauriBridge';
 import type {
   AiCoachConfig,
   ClimbGoal,
-  DemoScenarioId,
   PostGameReviewReport,
   ReviewFinding,
   TimelineMapMarker,
@@ -56,7 +55,6 @@ interface PostGameReviewViewProps {
   roleBenchmarks?: AdcBenchmarkOverrides;
   onSyncMatches: () => Promise<void>;
   onOpenSettings?: (section?: 'account' | 'recording') => void;
-  onPreviewSample?: (scenario: DemoScenarioId) => void;
 }
 
 interface FocusVerdict {
@@ -199,7 +197,6 @@ export function PostGameReviewView({
   roleBenchmarks,
   onSyncMatches,
   onOpenSettings,
-  onPreviewSample,
 }: PostGameReviewViewProps) {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [filter, setFilter] = useState<MatchFilter>('all');
@@ -668,8 +665,6 @@ export function PostGameReviewView({
                 ? { label: 'Open Settings', onClick: () => onOpenSettings('account') }
                 : undefined
           }
-          onPreviewSample={onPreviewSample ? () => onPreviewSample('in_game_mid') : undefined}
-          sampleLabel="Preview sample review"
         >
           {syncError && (
             <p className="m3-body-s mt-3 rounded-[var(--md-sys-shape-corner-medium)] bg-[color:var(--md-sys-color-error-container)] px-3 py-2 text-[color:var(--md-sys-color-on-error-container)]">
@@ -718,11 +713,11 @@ export function PostGameReviewView({
 
     return (
       <div className="m3-view-enter space-y-4">
-        {/* Sticky sub-header */}
+        {/* Sticky sub-header flush to scroll top */}
         <div
           ref={detailTopRef}
           tabIndex={-1}
-          className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-2.5 bg-[color:var(--md-sys-color-surface)] px-1 py-2 outline-none"
+          className="sticky top-0 z-30 -mx-2 -mt-2 flex flex-wrap items-center justify-between gap-2.5 border-b border-[var(--md-sys-color-outline-variant)] bg-[color:var(--md-sys-color-surface)] px-2 pb-2.5 pt-3 outline-none"
         >
           <M3Button
             variant="tonal"
@@ -868,6 +863,7 @@ export function PostGameReviewView({
                 <RiftMap
                   key={`map-${selectedMatch.matchId}`}
                   mode="replay"
+                  roleLabel="jungle"
                   durationSeconds={selectedMatch.durationSeconds}
                   patchVersion={patchVersion}
                   pathPoints={report.pathPoints}
@@ -885,12 +881,15 @@ export function PostGameReviewView({
         {selectedKind === 'adc' && adcReport && (
           <>
             <M3Card variant="hero" as="section" aria-label="Match summary">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={cx('m3-label-m', MUTED)}>
-                      ADC evaluation benchmarked against {targetDivision}
-                    </span>
+                    <h3 className="m3-title-m text-[color:var(--md-sys-color-on-surface)]">
+                      ADC Performance Benchmarks
+                    </h3>
+                    <M3Chip size="sm" tone="plain" className={ON_SURFACE}>
+                      Target: {targetDivision}
+                    </M3Chip>
                     {adcReport.isProvisional && (
                       <M3Chip size="sm" tone="warning">
                         Provisional Benchmark
@@ -961,6 +960,7 @@ export function PostGameReviewView({
                 <RiftMap
                   key={`map-${selectedMatch.matchId}`}
                   mode="replay"
+                  roleLabel="bottom"
                   durationSeconds={selectedMatch.durationSeconds}
                   patchVersion={patchVersion}
                   pathPoints={adcReport.pathPoints}
@@ -1285,14 +1285,14 @@ function MatchSummaryCard({
       onClick={onOpen}
       aria-label={ariaLabel}
       className={cx(
-        'm3-card m3-card--interactive m3-state group grid w-full grid-cols-[6px_48px_minmax(0,1fr)_auto] items-center gap-x-4 overflow-hidden rounded-[var(--md-sys-shape-corner-large-increased)] bg-[color:var(--md-sys-color-surface-container)] py-3 pr-4 text-left hover:rounded-[var(--md-sys-shape-corner-extra-large)] hover:bg-[color:var(--md-sys-color-surface-container-high)]',
+        'm3-card m3-card--interactive m3-state group relative grid w-full grid-cols-[48px_minmax(0,1fr)_auto] items-center gap-x-4 overflow-hidden rounded-[var(--md-sys-shape-corner-large-increased)] bg-[color:var(--md-sys-color-surface-container)] py-3 pl-5 pr-4 text-left hover:rounded-[var(--md-sys-shape-corner-extra-large)] hover:bg-[color:var(--md-sys-color-surface-container-high)]',
         isNew && 'shadow-[inset_0_0_0_1px_var(--md-sys-color-tertiary)]'
       )}
     >
       <span
         aria-hidden
         className={cx(
-          'self-stretch',
+          'absolute inset-y-0 left-0 w-1.5',
           match.win ? 'bg-[color:var(--md-ext-success)]' : 'bg-[color:var(--md-sys-color-error)]'
         )}
       />

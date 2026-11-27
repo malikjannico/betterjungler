@@ -20,4 +20,4 @@ npx wrangler secret put RIOT_API_KEY
 npx wrangler deploy
 ```
 
-Then paste the deployed origin-only `https://<worker>.workers.dev` URL (no path suffix) into **BetterJungler → Settings → Riot API Proxy URL (HTTPS)**.
+Then paste the deployed origin-only `https://<worker>.workers.dev` URL (no path suffix) into **BetterJungler → Settings → Account & Riot API → Riot API Proxy URL (HTTPS)**.

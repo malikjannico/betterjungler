@@ -2,6 +2,23 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [2.2.0] - 2026-11-28
+
+### Added
+- **Modular 6-Widget Draggable In-Game HUD (`HudOverlayCanvas`)**: Split the single Compact HUD plate into 6 independent, toggleable, and freely movable transparent widgets — **Objective Timers**, **Next Item & Gold**, **CS/min vs Target**, **Skill Order (What to Skill Next)**, **Level-2 Plan / Macro Phase / Power Spikes**, and **Tactical Macro Cues** — each toggleable in **Settings → Overlay & HUD** and repositionable by unlocking and left-click-dragging directly on your monitor while maintaining 100% click-through behavior when locked (`hud_widgets` persisted in SQLite).
+- **Riot-Safe In-App Champion Picker & Pre-Queue Planner**: Pick or search any Jungle or ADC champion directly inside **Champ Select** (both in live draft and out of lobby) to preview matchups, synergies, and one-click apply runes/spells to the League Client — without any automated LCU picks, hovers, or queue actions.
+- **LP Climb Progression Division Lines & Target Distance**: Plot horizontal rank division boundaries (`Iron IV`–`Master`) and highlight your target division directly inside the LP Climb Progression chart alongside remaining LP distance and estimated net wins.
+- **Crash-Resistant `AppErrorBoundary`**: Added top-level React Error Boundaries and dark `#111318` fallback roots for both main and HUD windows so transient errors recover cleanly instead of flashing white screens.
+
+### Changed
+- **Unified Draft Card & De-Cluttered Coaching Views**: Combined Ally and Enemy draft rosters into a single 2-column card with clean damage-split percentages, moved **Climb & Goals** first in navigation above **Champ Select**, collapsed secondary breakdowns/forms across views, and removed the Simulator mode and `"Match Focus"` header chip.
+- **Post-Game Timeline Paths & ADC Benchmark Summary**: Smoothed Post-Game Replay paths with Bezier curves that break on fountain recalls/teleports (fixing cross-map straight lines), added role-aware replay titles (`Bot Lane Path & Timeline Replay` / `Enemy ADC Ghost`), extended the Win/Loss stripe full height on match cards, and redesigned the ADC Performance Benchmarks summary.
+- **Calibrated Bot Lane & Season 2026 Vision Map**: Fixed Macro Phase selector layout on narrow widths, removed the duplicate squeezed Bot Vision panel, calibrated `map11.png` Bot Lane & Jungle brush ward coordinates/timings, and synced numbered Stealth/Control markers with the clickable ward list.
+
+### Fixed
+- **Season 2026 Boots Recognition (`Bot Quest` 7th Slot & Tier-3 Upgrades)**: Stopped inspecting only `slot < 6` (`itemDetection.ts`), recognizing bought boots across all non-trinket slots (`slot !== 6`), defensive boots (`Plated Steelcaps`, `Mercury's Treads`), and Season 2026 Feats of Strength Tier-3 upgrades (`3170`–`3176`).
+- **UI & Shell Polish**: Removed navigation rail spring overshoot (`240ms cubic-bezier(0.2, 0, 0, 1)`), aligned collapsed Client/Match indicator dots horizontally, made sticky subpage top bars flush with isolated map pins (`isolate z-0`), fixed Settings divider spacing around callout cards, removed stale `"No Atakhan"` badges, and displayed the full Riot Games legal disclaimer at all times.
+
 ## [2.1.0] - 2026-11-27
 
 ### Added

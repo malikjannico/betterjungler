@@ -1,5 +1,5 @@
-import type { ReactNode, Ref } from 'react';
-import { Copy, Minus, SlidersHorizontal, Square, X } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Copy, Minus, Square, X } from 'lucide-react';
 import { formatClock } from '../../domain/liveCoachEngine';
 import type { MapSide } from '../../types/riot';
 import { M3Chip } from './M3Chip';
@@ -17,16 +17,6 @@ export interface M3TopAppBarProps {
 
   /** Elapsed recording seconds; `null`/`undefined` hides the REC pill. */
   recordingElapsedSec?: number | null;
-
-  /** Active simulation scenario label; hides the pill when empty. */
-  simulationLabel?: string | null;
-  onExitSimulation?: () => void;
-
-  /** Simulator popover trigger. Omit `onToggleSimulator` to hide the pill. */
-  onToggleSimulator?: () => void;
-  simulatorOpen?: boolean;
-  simulatorActive?: boolean;
-  simulatorButtonRef?: Ref<HTMLButtonElement>;
 
   /** Compact HUD toggle. Omit `onToggleHud` to hide the pill. */
   onToggleHud?: () => void;
@@ -65,12 +55,6 @@ export function M3TopAppBar({
   roleLabel,
   mapSide,
   recordingElapsedSec,
-  simulationLabel,
-  onExitSimulation,
-  onToggleSimulator,
-  simulatorOpen = false,
-  simulatorActive = false,
-  simulatorButtonRef,
   onToggleHud,
   hudVisible = false,
   hudHotkey,
@@ -124,34 +108,6 @@ export function M3TopAppBar({
             className="num"
           >
             REC {formatClock(recordingElapsedSec)}
-          </TopBarPill>
-        )}
-
-        {simulationLabel && (
-          <TopBarPill tone="warning" title={`Simulation · ${simulationLabel}`}>
-            <span className="max-w-[180px] truncate">Simulation · {simulationLabel}</span>
-            {onExitSimulation && (
-              <button
-                type="button"
-                onClick={onExitSimulation}
-                className="m3-focus-ring -mr-1 rounded-full px-1.5 font-bold underline-offset-2 hover:underline"
-              >
-                Exit
-              </button>
-            )}
-          </TopBarPill>
-        )}
-
-        {onToggleSimulator && (
-          <TopBarPill
-            ref={simulatorButtonRef}
-            tone={simulatorOpen ? 'selected' : simulatorActive ? 'warning' : 'neutral'}
-            leading={<SlidersHorizontal className="h-3.5 w-3.5" />}
-            onClick={onToggleSimulator}
-            ariaExpanded={simulatorOpen}
-            title="Preview simulated match scenarios (Ctrl+K)"
-          >
-            Simulator
           </TopBarPill>
         )}
 

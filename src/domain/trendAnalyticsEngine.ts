@@ -219,3 +219,105 @@ export function computeLpDeltaSummary(history: LpHistoryPoint[]): LpDeltaSummary
         : `${streak}${streakOutcome ? 'W' : 'L'} streak`,
   };
 }
+
+const ORDERED_DIVISIONS: ReadonlyArray<{ tier: string; rank: string; baseLp: number; shortLabel: string }> = [
+  { tier: 'IRON', rank: 'IV', baseLp: 0, shortLabel: 'Iron IV' },
+  { tier: 'IRON', rank: 'III', baseLp: 100, shortLabel: 'Iron III' },
+  { tier: 'IRON', rank: 'II', baseLp: 200, shortLabel: 'Iron II' },
+  { tier: 'IRON', rank: 'I', baseLp: 300, shortLabel: 'Iron I' },
+  { tier: 'BRONZE', rank: 'IV', baseLp: 400, shortLabel: 'Bronze IV' },
+  { tier: 'BRONZE', rank: 'III', baseLp: 500, shortLabel: 'Bronze III' },
+  { tier: 'BRONZE', rank: 'II', baseLp: 600, shortLabel: 'Bronze II' },
+  { tier: 'BRONZE', rank: 'I', baseLp: 700, shortLabel: 'Bronze I' },
+  { tier: 'SILVER', rank: 'IV', baseLp: 800, shortLabel: 'Silver IV' },
+  { tier: 'SILVER', rank: 'III', baseLp: 900, shortLabel: 'Silver III' },
+  { tier: 'SILVER', rank: 'II', baseLp: 1000, shortLabel: 'Silver II' },
+  { tier: 'SILVER', rank: 'I', baseLp: 1100, shortLabel: 'Silver I' },
+  { tier: 'GOLD', rank: 'IV', baseLp: 1200, shortLabel: 'Gold IV' },
+  { tier: 'GOLD', rank: 'III', baseLp: 1300, shortLabel: 'Gold III' },
+  { tier: 'GOLD', rank: 'II', baseLp: 1400, shortLabel: 'Gold II' },
+  { tier: 'GOLD', rank: 'I', baseLp: 1500, shortLabel: 'Gold I' },
+  { tier: 'PLATINUM', rank: 'IV', baseLp: 1600, shortLabel: 'Plat IV' },
+  { tier: 'PLATINUM', rank: 'III', baseLp: 1700, shortLabel: 'Plat III' },
+  { tier: 'PLATINUM', rank: 'II', baseLp: 1800, shortLabel: 'Plat II' },
+  { tier: 'PLATINUM', rank: 'I', baseLp: 1900, shortLabel: 'Plat I' },
+  { tier: 'EMERALD', rank: 'IV', baseLp: 2000, shortLabel: 'Em IV' },
+  { tier: 'EMERALD', rank: 'III', baseLp: 2100, shortLabel: 'Em III' },
+  { tier: 'EMERALD', rank: 'II', baseLp: 2200, shortLabel: 'Em II' },
+  { tier: 'EMERALD', rank: 'I', baseLp: 2300, shortLabel: 'Em I' },
+  { tier: 'DIAMOND', rank: 'IV', baseLp: 2400, shortLabel: 'Dia IV' },
+  { tier: 'DIAMOND', rank: 'III', baseLp: 2500, shortLabel: 'Dia III' },
+  { tier: 'DIAMOND', rank: 'II', baseLp: 2600, shortLabel: 'Dia II' },
+  { tier: 'DIAMOND', rank: 'I', baseLp: 2700, shortLabel: 'Dia I' },
+  { tier: 'MASTER', rank: '', baseLp: 2800, shortLabel: 'Master' },
+];
+
+export { ORDERED_DIVISIONS };
+
+/** Matches Rust `tier_rank_to_absolute_lp` (100 LP per division, Master = 2800). */
+export function divisionLabelToAbsoluteLp(division: string): number {
+  const parts = division.trim().toUpperCase().split(/\s+/);
+  const tier = parts[0] ?? 'PLATINUM';
+  const rank = parts[1] ?? 'IV';
+  if (tier === 'MASTER' || tier === 'GRANDMASTER' || tier === 'CHALLENGER') {
+    return 2800;
+  }
+  const match = ORDERED_DIVISIONS.find((d) => d.tier === tier && d.rank === rank);
+  if (match) return match.baseLp;
+  const tierDefault = ORDERED_DIVISIONS.find((d) => d.tier === tier);
+  return tierDefault ? tierDefault.baseLp : 1600;
+}
+
+export function formatTitleDivision(tier: string, rank: string): string {
+  const t = tier.trim();
+  if (!t) return 'Unranked';
+  const titleTier = t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+  const r = rank.trim().toUpperCase();
+  return r && titleTier !== 'Master' && titleTier !== 'Grandmaster' && titleTier !== 'Challenger'
+    ? `${titleTier} ${r}`
+    : titleTier;
+}
+
+export function absoluteLpToDivisionLabel(absLp: number): string {
+  if (absLp >= 2800) {
+    return `Master · ${Math.round(absLp - 2800)} LP`;
+  }
+  const clamped = Math.max(0, Math.round(absLp));
+  const idx = Math.min(ORDERED_DIVISIONS.length - 1, Math.floor(clamped / 100));
+  const div = ORDERED_DIVISIONS[idx]!;
+  const remLp = clamped - div.baseLp;
+  return `${formatTitleDivision(div.tier, div.rank)} · ${remLp} LP`;
+}
+
+export interface LpTargetProgress {
+  currentAbsLp: number;
+  currentLabel: string;
+  targetAbsLp: number;
+  targetLabel: string;
+  lpRemaining: number;
+  divisionsRemaining: number;
+  estimatedNetWins: number;
+  goalReached: boolean;
+}
+
+export function computeLpTargetProgress(
+  currentAbsLp: number,
+  targetDivision: string
+): LpTargetProgress {
+  const targetAbsLp = divisionLabelToAbsoluteLp(targetDivision);
+  const [rawTier = 'PLATINUM', rawRank = 'IV'] = targetDivision.trim().split(/\s+/);
+  const targetLabel = formatTitleDivision(rawTier, rawRank);
+  const lpRemaining = Math.max(0, targetAbsLp - currentAbsLp);
+  const divisionsRemaining = Math.max(0, Math.ceil(lpRemaining / 100));
+  const estimatedNetWins = lpRemaining === 0 ? 0 : Math.ceil(lpRemaining / 22);
+  return {
+    currentAbsLp,
+    currentLabel: absoluteLpToDivisionLabel(currentAbsLp),
+    targetAbsLp,
+    targetLabel,
+    lpRemaining,
+    divisionsRemaining,
+    estimatedNetWins,
+    goalReached: lpRemaining === 0,
+  };
+}

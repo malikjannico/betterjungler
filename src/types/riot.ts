@@ -65,6 +65,11 @@ export interface LivePlayer {
   };
 }
 
+export interface LiveAbilitySlot {
+  abilityLevel?: number;
+  displayName?: string;
+}
+
 export interface LiveActivePlayer {
   summonerName: string;
   riotId?: string;
@@ -72,6 +77,12 @@ export interface LiveActivePlayer {
   riotIdTagLine?: string;
   level: number;
   currentGold: number;
+  abilities?: {
+    Q?: LiveAbilitySlot;
+    W?: LiveAbilitySlot;
+    E?: LiveAbilitySlot;
+    R?: LiveAbilitySlot;
+  };
   championStats: {
     attackDamage: number;
     abilityPower: number;

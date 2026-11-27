@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { generateAdcGamePlan } from './adc/adcGamePlanEngine';
 import { deriveHudCards } from './hudModel';
 import { buildMultiClearRoutes } from './jungleRoutingEngine';
 
@@ -230,5 +231,60 @@ describe('hudModel', () => {
     expect(adcHud.objectiveCard?.shortName).toBe('DRG');
     expect(adcHud.buyCard?.itemId).toBe(3032);
     expect(adcHud.cueCard?.title).toContain('Recall spike');
+  });
+
+  it('derives CS/min vs target, Skill Order, and Lv2/Macro Game Plan widgets for coached roles and suppresses them on off-role', () => {
+    const adcPlan = generateAdcGamePlan({
+      playerChampionId: 145, // Kai'Sa
+      allyRoles: { bottom: 145, utility: 89 },
+      enemyRoles: { jungle: 64, bottom: 222, utility: 117 },
+      mapSide: 'blue',
+    });
+    const adcFull = deriveHudCards({
+      phase: 'in_game',
+      gameTime: 180,
+      objectives: [],
+      buildPlan: null,
+      topCue: null,
+      openingRoute: null,
+      hotkey: 'Alt+J',
+      activeRole: 'bottom',
+      creepScore: 24,
+      targetCsPerMin: 7.2,
+      targetDivisionLabel: 'EMERALD IV',
+      skillOrder: {
+        championName: "Kai'Sa",
+        nextSkill: 'W',
+        unspentPoints: 1,
+        currentLevels: { Q: 1, W: 0, E: 0, R: 0 },
+        maxOrderLabel: 'R > Q > E > W',
+        priorityList: ['R', 'Q', 'E', 'W'],
+        promptLabel: 'LEVEL W NOW',
+      },
+      adcWinPlan: adcPlan,
+    });
+
+    expect(adcFull.csCard?.csPerMin).toBe(8);
+    expect(adcFull.csCard?.status).toBe('ahead');
+    expect(adcFull.skillOrderCard?.nextSkill).toBe('W');
+    expect(adcFull.gamePlanCard?.phaseTitle).toBe('Level-2 Plan');
+    expect(adcFull.gamePlanCard?.powerSpikeLabel.length).toBeGreaterThan(4);
+
+    const offRole = deriveHudCards({
+      phase: 'in_game',
+      gameTime: 180,
+      objectives: [],
+      buildPlan: null,
+      topCue: null,
+      openingRoute: null,
+      hotkey: 'Alt+J',
+      activeRole: 'off_role',
+      creepScore: 24,
+      skillOrder: adcFull.skillOrderCard,
+      adcWinPlan: null,
+    });
+    expect(offRole.csCard).toBeNull();
+    expect(offRole.skillOrderCard).toBeNull();
+    expect(offRole.gamePlanCard).toBeNull();
   });
 });

@@ -79,6 +79,13 @@ describe('SettingsView master-detail categories, rollback & roles', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Overlay & HUD/ }));
 
     expect(screen.getByText(/Recommended In-Game League HUD Settings/i)).toBeInTheDocument();
+    expect(screen.getByText(/Modular HUD Widgets/i)).toBeInTheDocument();
+    const skillSwitch = screen.getByRole('switch', { name: /Skill Order/i });
+    expect(skillSwitch).toHaveAttribute('aria-checked', 'true');
+    const spySaveWidgets = vi.spyOn(tauriBridge, 'saveHudWidgets').mockResolvedValue({} as never);
+    fireEvent.click(skillSwitch);
+    expect(spySaveWidgets).toHaveBeenCalled();
+    spySaveWidgets.mockRestore();
     const hotkeySelect = screen.getByLabelText('Global Hotkey') as HTMLSelectElement;
     await act(async () => {
       fireEvent.change(hotkeySelect, { target: { value: 'Alt+B' } });

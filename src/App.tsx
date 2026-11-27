@@ -3,7 +3,6 @@ import type { CSSProperties } from 'react';
 import {
   Activity,
   History,
-  Info,
   Map as MapIcon,
   Settings,
   Sparkles,
@@ -72,7 +71,6 @@ import type {
   ApiKeyHealthStatus,
   AppMetaInfo,
   ClimbGoal,
-  DemoScenarioId,
   HighEloMetaSnapshot,
   HudCorner,
   LpHistoryPoint,
@@ -111,15 +109,6 @@ function mergeMatchesById(
     .slice(0, maxItems);
 }
 
-const DEMO_OPTIONS: Array<{ id: DemoScenarioId; label: string }> = [
-  { id: 'idle', label: 'Live Client Mode' },
-  { id: 'champ_select', label: 'Sample: Champ Select' },
-  { id: 'loading', label: 'Sample: Loading & Map' },
-  { id: 'in_game_early', label: 'Sample: Early Game (4:15)' },
-  { id: 'in_game_mid', label: 'Sample: Mid Game (19:24)' },
-  { id: 'in_game_full_build', label: 'Sample: Full Build (37:40)' },
-];
-
 function matchesHotkey(e: KeyboardEvent, hotkey: string): boolean {
   const key = e.key.toLowerCase();
   if (hotkey === 'Alt+J') return e.altKey && key === 'j';
@@ -147,10 +136,10 @@ function cornerAlignmentClasses(corner: HudCorner): string {
 type NavItemDef = Omit<M3NavRailItem<ActiveTab>, 'live'>;
 
 const NAV_ITEMS: NavItemDef[] = [
+  { id: 'climb_goals', label: 'Climb & Goals', shortLabel: 'Climb', icon: TrendingUp },
   { id: 'champ_select', label: 'Champ Select', shortLabel: 'Draft', icon: Swords },
   { id: 'win_plan', label: 'Win Plan & Map', shortLabel: 'Win Plan', icon: MapIcon },
   { id: 'live_coach', label: 'Live Coach', shortLabel: 'Live', icon: Activity },
-  { id: 'climb_goals', label: 'Climb & Goals', shortLabel: 'Climb', icon: TrendingUp },
   { id: 'post_game', label: 'Post-Game Review', shortLabel: 'Review', icon: History },
 ];
 
@@ -187,7 +176,6 @@ function tabMatchesLivePhase(tab: ActiveTab, phase: GamePhase): boolean {
 
 export function App() {
   const isTauri = isTauriEnvironment();
-  const [demoScenario, setDemoScenario] = useState<DemoScenarioId>('idle');
   const [liveState, setLiveState] = useState<AppRuntimeState | null>(null);
   const [overlayMode, setMode] = useState<OverlayMode>('expanded');
   const [activeTab, setActiveTab] = useState<ActiveTab>('climb_goals');
@@ -226,7 +214,6 @@ export function App() {
       hasApiKey: false,
     },
   });
-  const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('betterjungler_nav_collapsed') === 'true';
@@ -238,7 +225,6 @@ export function App() {
     section: SettingsSectionId;
     token: number;
   }>({ section: 'account', token: 0 });
-  const [legalOpen, setLegalOpen] = useState(false);
   const [apiKeyHealth, setApiKeyHealth] = useState<ApiKeyHealthStatus | null>(null);
   const [appMeta, setAppMeta] = useState<AppMetaInfo>({
     version: pkg.version,
@@ -263,9 +249,6 @@ export function App() {
   const [lastAutoSyncedMatchId, setLastAutoSyncedMatchId] = useState<string | null>(null);
   const [autoSyncNotice, setAutoSyncNotice] = useState<string | null>(null);
   const [autoPostGameToken, setAutoPostGameToken] = useState(0);
-  const simSelectRef = useRef<HTMLSelectElement | null>(null);
-  const simPopoverRef = useRef<HTMLDivElement | null>(null);
-  const simButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const lastPhaseRef = useRef<GamePhase | null>(null);
   const lastAccountPuuidRef = useRef<string | null>(null);
@@ -329,9 +312,6 @@ export function App() {
       if (!active || !state) return;
       lastPhaseRef.current = state.phase;
       setLiveState(state);
-      if (isTauri && state.phase !== 'idle') {
-        setDemoScenario('idle');
-      }
       if (state.summonerProfile) {
         setSummonerProfile(state.summonerProfile);
       }
@@ -366,9 +346,6 @@ export function App() {
     const unsubPromise = subscribeGameState(
       (state) => {
         setLiveState(state);
-        if (isTauri && state.phase !== 'idle') {
-          setDemoScenario('idle');
-        }
         if (state.summonerProfile) {
           setSummonerProfile(state.summonerProfile);
         }
@@ -463,17 +440,6 @@ export function App() {
         setNavCollapsed((prev) => !prev);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSimulatorOpen((prev) => !prev);
-        return;
-      }
-      if (e.key === 'Escape' && simulatorOpen) {
-        e.preventDefault();
-        setSimulatorOpen(false);
-        simButtonRef.current?.focus();
-        return;
-      }
       if (!isTauri && matchesHotkey(e, settings.overlayHotkey)) {
         e.preventDefault();
         const next: OverlayMode = overlayMode === 'expanded' ? 'compact' : 'expanded';
@@ -483,52 +449,28 @@ export function App() {
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isTauri, overlayMode, settings.overlayHotkey, simulatorOpen]);
-
-  useEffect(() => {
-    if (!simulatorOpen) return;
-    simSelectRef.current?.focus();
-    function handlePointerDown(e: MouseEvent) {
-      const target = e.target as Node;
-      if (simButtonRef.current?.contains(target)) {
-        return;
-      }
-      if (simPopoverRef.current && !simPopoverRef.current.contains(target)) {
-        setSimulatorOpen(false);
-      }
-    }
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [simulatorOpen]);
+  }, [isTauri, overlayMode, settings.overlayHotkey]);
 
   const rawLiveClock = liveState?.liveGame?.gameData.gameTime ?? 0;
-  const activeClockSource =
-    demoScenario === 'idle' ? liveState : undefined;
   const liveMatchActive =
-    demoScenario === 'idle' && liveState?.phase === 'in_game' && Boolean(liveState.liveGame);
-  const interpolatedLiveTime = useInterpolatedGameTime(
-    activeClockSource?.liveGame?.gameData.gameTime ?? rawLiveClock,
-    liveMatchActive
-  );
+    liveState?.phase === 'in_game' && Boolean(liveState.liveGame);
+  const interpolatedLiveTime = useInterpolatedGameTime(rawLiveClock, liveMatchActive);
 
   const livePersonalLearning = useMemo(
     () =>
-      demoScenario === 'idle'
-        ? computePersonalLearningSnapshot(
-            matches,
-            matches,
-            settings.targetDivision,
-            sqlPersonalLearning
-          )
-        : null,
-    [demoScenario, matches, settings.targetDivision, sqlPersonalLearning]
+      computePersonalLearningSnapshot(
+        matches,
+        matches,
+        settings.targetDivision,
+        sqlPersonalLearning
+      ),
+    [matches, settings.targetDivision, sqlPersonalLearning]
   );
 
   const adcRoleBenchmarks = patchPackStatus?.payload.roleBenchmarks?.bottom;
 
   // Role-isolated ADC learning: only ADC (BOTTOM) games and the BOTTOM-scoped SQL summary.
   const adcPersonalLearning = useMemo(() => {
-    if (demoScenario !== 'idle') return null;
     const snap = computeAdcPersonalLearningSnapshot(
       matches,
       settings.targetDivision,
@@ -536,12 +478,11 @@ export function App() {
       adcRoleBenchmarks
     );
     return snap.adcMatchCount > 0 ? snap : null;
-  }, [demoScenario, matches, settings.targetDivision, adcSqlPersonalLearning, adcRoleBenchmarks]);
+  }, [matches, settings.targetDivision, adcSqlPersonalLearning, adcRoleBenchmarks]);
 
   const sessionCtx = useMemo(
     () =>
       deriveSessionContext({
-        demoScenario,
         liveState,
         manualRole,
         settings,
@@ -549,13 +490,12 @@ export function App() {
         matches,
         lpHistory,
         highEloMeta,
-        interpolatedGameTime: demoScenario === 'idle' && liveMatchActive ? interpolatedLiveTime : undefined,
+        interpolatedGameTime: liveMatchActive ? interpolatedLiveTime : undefined,
         objectiveTimings: patchPackStatus?.payload.objectiveTimings,
         personalLearning: livePersonalLearning,
         adcPersonalLearning,
       }),
     [
-      demoScenario,
       liveState,
       manualRole,
       settings,
@@ -856,19 +796,7 @@ export function App() {
     }
   }
 
-  function handleScenarioChange(
-    nextScenario: DemoScenarioId,
-    options?: { stayOnTab?: boolean }
-  ) {
-    setDemoScenario(nextScenario);
-    if (options?.stayOnTab) return;
-    if (nextScenario === 'champ_select') setActiveTab('champ_select');
-    else if (nextScenario === 'loading') setActiveTab('win_plan');
-    else if (nextScenario.startsWith('in_game')) setActiveTab('live_coach');
-  }
-
   async function handleSyncMatches() {
-    if (demoScenario !== 'idle') return;
     const profilePuuid = sessionCtx.climb.profile?.puuid;
     const riotIdParts = settings.riotId.trim().split('#');
     const hasRiotId =
@@ -1150,12 +1078,6 @@ export function App() {
                 ? (runtimeState.recordingElapsedSec ?? 0)
                 : null
             }
-            simulationLabel={sessionCtx.simulationLabel}
-            onExitSimulation={() => handleScenarioChange('idle')}
-            onToggleSimulator={() => setSimulatorOpen((v) => !v)}
-            simulatorOpen={simulatorOpen}
-            simulatorActive={demoScenario !== 'idle'}
-            simulatorButtonRef={simButtonRef}
             onToggleHud={() =>
               void toggleOverlayMode(overlayMode === 'compact' ? 'expanded' : 'compact')
             }
@@ -1164,43 +1086,6 @@ export function App() {
             profile={profilePill}
             showWindowControls={isTauri}
           />
-
-          {/* Simulator Popover (Ctrl+K or top-bar pill) */}
-          {simulatorOpen && (
-            <div
-              ref={simPopoverRef}
-              role="dialog"
-              aria-label="Scenario Simulator"
-              className="absolute top-[52px] right-6 z-30 w-72 rounded-[16px] bg-[var(--md-sys-color-surface-container-high)] p-4 text-[var(--md-sys-color-on-surface)] shadow-[0_4px_8px_3px_rgba(0,0,0,0.15),0_1px_3px_rgba(0,0,0,0.3)]"
-            >
-              <div className="mb-3 flex items-center justify-between">
-                <span className="m3-title-s">Scenario Simulator</span>
-                <button
-                  type="button"
-                  onClick={() => setSimulatorOpen(false)}
-                  className="m3-label-l m3-focus-ring rounded-full px-2 py-1 text-[var(--md-sys-color-primary)] hover:underline"
-                >
-                  Close
-                </button>
-              </div>
-              <select
-                ref={simSelectRef}
-                aria-label="Simulation scenario"
-                value={demoScenario}
-                onChange={(e) => {
-                  handleScenarioChange(e.target.value as DemoScenarioId);
-                  setSimulatorOpen(false);
-                }}
-                className="m3-body-m w-full rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2.5 text-[var(--md-sys-color-on-surface)] outline-none focus:border-[var(--md-sys-color-primary)]"
-              >
-                {DEMO_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id} className="bg-zinc-900 text-slate-100">
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Scrollable Tab Workspace */}
           <main className="hud-scroll min-h-0 flex-1 overflow-y-auto px-6 pt-2 pb-5">
@@ -1257,20 +1142,20 @@ export function App() {
                     summaries={sessionCtx.climb.summaries}
                     matches={sessionCtx.climb.jungleMatches}
                     allMatchesForSessions={sessionCtx.climb.matches}
-                    sqlPersonalLearning={demoScenario === 'idle' ? sqlPersonalLearning : null}
+                    sqlPersonalLearning={sqlPersonalLearning}
                     offRoleExcludedCount={sessionCtx.climb.offRoleExcludedCount}
                     activeRole={sessionCtx.activeRole}
                     roleSource={sessionCtx.roleSource}
                     onSelectRole={setManualRole}
                     adcMatches={sessionCtx.climb.adcMatches}
                     adcOffRoleExcludedCount={sessionCtx.climb.adcOffRoleExcludedCount}
-                    adcSqlPersonalLearning={demoScenario === 'idle' ? adcSqlPersonalLearning : null}
+                    adcSqlPersonalLearning={adcSqlPersonalLearning}
                     roleBenchmarks={adcRoleBenchmarks}
                     lpHistory={sessionCtx.climb.lpHistory}
                     patchVersion={patchVersion}
                     goals={climbGoals}
                     highEloMeta={sessionCtx.climb.highEloMeta}
-                    canSyncLive={canSyncLive || demoScenario !== 'idle'}
+                    canSyncLive={canSyncLive}
                     accountReady={sessionCtx.climb.accountReady}
                     emptyReason={sessionCtx.climb.emptyReason}
                     hasVerifiedKey={apiKeyHealth?.status === 'valid'}
@@ -1284,9 +1169,6 @@ export function App() {
                     onSyncMatches={handleSyncMatches}
                     onOpenSettings={() => openSettingsSection('account')}
                     onTestHud={() => void toggleOverlayMode('compact')}
-                    onPreviewSample={(scenario) =>
-                      handleScenarioChange(scenario, { stayOnTab: true })
-                    }
                   />
                 )}
                 {activeTab === 'champ_select' && (
@@ -1305,7 +1187,6 @@ export function App() {
                     activeRole={sessionCtx.activeRole}
                     roleSource={sessionCtx.roleSource}
                     onSelectRole={setManualRole}
-                    onPreviewSample={handleScenarioChange}
                   />
                 )}
                 {activeTab === 'win_plan' && (
@@ -1330,7 +1211,6 @@ export function App() {
                     activeRole={sessionCtx.activeRole}
                     adcPlan={winPlanPayload?.adcPlan ?? null}
                     onSelectRole={setManualRole}
-                    onPreviewSample={handleScenarioChange}
                   />
                 )}
                 {activeTab === 'live_coach' && (
@@ -1347,7 +1227,6 @@ export function App() {
                     smiteThresholds={patchPackStatus?.payload.smiteThresholds}
                     playedRole={liveCoachPayload?.playedRole ?? sessionCtx.livePlayedRole}
                     adcWinPlan={liveCoachPayload?.adcWinPlan ?? null}
-                    onPreviewSample={handleScenarioChange}
                   />
                 )}
                 {activeTab === 'post_game' && (
@@ -1374,9 +1253,6 @@ export function App() {
                     }
                     onSyncMatches={handleSyncMatches}
                     onOpenSettings={(section) => openSettingsSection(section ?? 'account')}
-                    onPreviewSample={(scenario) =>
-                      handleScenarioChange(scenario, { stayOnTab: true })
-                    }
                   />
                 )}
                 {activeTab === 'settings' && (
@@ -1417,25 +1293,14 @@ export function App() {
           {/* Mandatory Riot Games Legal Disclaimer */}
           <footer
             role="contentinfo"
-            className="border-t border-[var(--md-sys-color-outline-variant)] px-6 py-1.5 text-[11px] leading-[15px] text-[var(--md-sys-color-outline)]"
+            className="border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] px-6 py-2 text-[11px] leading-relaxed text-[var(--md-sys-color-on-surface-variant)]"
           >
-            <div className="flex items-center justify-between gap-3">
-              <span className={legalOpen ? 'flex-1' : 'flex-1 truncate'}>
-                BetterJungler isn&apos;t endorsed by Riot Games and doesn&apos;t reflect the views
-                or opinions of Riot Games or anyone officially involved in producing or managing Riot
-                Games properties. Riot Games, and all associated properties are trademarks or
-                registered trademarks of Riot Games, Inc.
-              </span>
-              <button
-                type="button"
-                aria-expanded={legalOpen}
-                onClick={() => setLegalOpen((v) => !v)}
-                aria-label="Toggle legal disclaimer"
-                className="m3-icon-btn m3-state h-7 w-7 shrink-0"
-              >
-                <Info className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            <p>
+              BetterJungler isn&apos;t endorsed by Riot Games and doesn&apos;t reflect the views or
+              opinions of Riot Games or anyone officially involved in producing or managing Riot
+              Games properties. Riot Games, and all associated properties are trademarks or
+              registered trademarks of Riot Games, Inc.
+            </p>
           </footer>
         </div>
       </div>

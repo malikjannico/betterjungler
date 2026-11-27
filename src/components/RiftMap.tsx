@@ -35,6 +35,47 @@ interface ReplayModeProps {
   pathPoints: NormalizedMapPoint[];
   enemyPathPoints?: NormalizedMapPoint[];
   markers: TimelineMapMarker[];
+  roleLabel?: 'jungle' | 'bottom' | 'off_role';
+}
+
+const MAX_CONTIGUOUS_STEP_DIST = 260;
+
+/**
+ * Splits a trail into contiguous movement segments (breaking on fountain recalls / Teleports)
+ * and renders smooth quadratic Bezier SVG curves through midpoints.
+ */
+function buildSmoothPathSegments(points: NormalizedMapPoint[]): string[] {
+  if (points.length < 2) return [];
+  const groups: NormalizedMapPoint[][] = [];
+  let current: NormalizedMapPoint[] = [points[0]!];
+
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]!;
+    const pt = points[i]!;
+    const dist = Math.hypot(pt.x - prev.x, pt.y - prev.y);
+    if (dist > MAX_CONTIGUOUS_STEP_DIST) {
+      if (current.length >= 2) groups.push(current);
+      current = [pt];
+    } else {
+      current.push(pt);
+    }
+  }
+  if (current.length >= 2) groups.push(current);
+
+  return groups.map((pts) => {
+    if (pts.length === 2) {
+      return `M ${pts[0]!.x.toFixed(1)} ${pts[0]!.y.toFixed(1)} L ${pts[1]!.x.toFixed(1)} ${pts[1]!.y.toFixed(1)}`;
+    }
+    let d = `M ${pts[0]!.x.toFixed(1)} ${pts[0]!.y.toFixed(1)}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const midX = (pts[i]!.x + pts[i + 1]!.x) / 2;
+      const midY = (pts[i]!.y + pts[i + 1]!.y) / 2;
+      d += ` Q ${pts[i]!.x.toFixed(1)} ${pts[i]!.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
+    }
+    const last = pts[pts.length - 1]!;
+    d += ` L ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+    return d;
+  });
 }
 
 export type RiftMapProps = RouteModeProps | ReplayModeProps;
@@ -94,7 +135,7 @@ function RouteRiftMap({
       >
         {/* Hero Interactive Map Frame */}
         <div
-          className={`relative mx-auto aspect-square w-full min-w-0 overflow-hidden rounded-[16px] border border-white/10 bg-[#080b11] shadow-inner ${
+          className={`relative isolate z-0 mx-auto aspect-square w-full min-w-0 overflow-hidden rounded-[16px] border border-white/10 bg-[#080b11] shadow-inner ${
             compact ? 'max-w-[340px] md:max-w-none' : 'max-w-[420px] lg:max-w-none'
           }`}
         >
@@ -145,9 +186,10 @@ function RouteRiftMap({
 
           {/* Accessible 40px Ward Targets */}
           {showWards &&
-            wardSpots.map((ward) => {
+            wardSpots.map((ward, idx) => {
               const style = WARD_KIND_STYLE[ward.kind];
               const isSelected = selectedWard?.id === ward.id;
+              const isControl = ward.kind === 'control';
               return (
                 <button
                   key={ward.id}
@@ -163,16 +205,14 @@ function RouteRiftMap({
                   <span
                     style={{
                       borderColor: style.color,
-                      backgroundColor: isSelected ? style.bg : 'rgba(9,12,20,0.82)',
+                      backgroundColor: isSelected ? style.bg : 'rgba(9,12,20,0.9)',
+                      color: isSelected ? '#ffffff' : style.color,
                     }}
-                    className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition motion-reduce:transition-none ${
-                      isSelected ? 'scale-115 shadow-lg' : 'group-hover:scale-110'
-                    }`}
+                    className={`tabular-nums flex h-6 w-6 items-center justify-center border-2 text-[10px] font-extrabold transition motion-reduce:transition-none ${
+                      isControl ? 'rounded-[6px] rotate-45' : 'rounded-full'
+                    } ${isSelected ? 'scale-115 shadow-[0_0_12px_rgba(255,255,255,0.3)]' : 'group-hover:scale-110'}`}
                   >
-                    <span
-                      style={{ backgroundColor: style.color }}
-                      className="h-2 w-2 rounded-full"
-                    />
+                    <span className={isControl ? '-rotate-45' : undefined}>{idx + 1}</span>
                   </span>
                 </button>
               );
@@ -249,7 +289,7 @@ function RouteRiftMap({
           )}
         </div>
 
-        {/* Route Sequence & Selected Ward Detail */}
+        {/* Route Sequence & Selected / Clickable Ward Detail */}
         <div className="flex min-w-0 flex-col justify-between gap-3 text-xs">
           <div>
             <div className="text-xs font-semibold text-white">
@@ -258,7 +298,7 @@ function RouteRiftMap({
             <p className="mt-1 text-[11px] text-slate-400">
               {route
                 ? route.summary
-                : 'Click a ward marker on the map to inspect placement timing and safety goal.'}
+                : 'Click a numbered ward pin on the map or list to inspect placement timing and flank coverage.'}
             </p>
             {steps.length > 0 && (
               <ol className="mt-3 divide-y divide-white/[0.06] border-t border-b border-white/[0.06]">
@@ -293,9 +333,60 @@ function RouteRiftMap({
                 })}
               </ol>
             )}
+
+            {steps.length === 0 && showWards && wardSpots.length > 0 && (
+              <ol className="mt-3 space-y-1.5">
+                {wardSpots.map((ward, idx) => {
+                  const style = WARD_KIND_STYLE[ward.kind];
+                  const isSelected = selectedWard?.id === ward.id;
+                  return (
+                    <li key={ward.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedWardId(ward.id)}
+                        className={`flex w-full items-start gap-2.5 rounded-[12px] border px-3 py-2 text-left transition motion-reduce:transition-none ${
+                          isSelected
+                            ? 'border-white/25 bg-white/[0.08] text-white'
+                            : 'border-white/[0.06] bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]'
+                        }`}
+                      >
+                        <span
+                          style={{
+                            borderColor: style.color,
+                            color: style.color,
+                          }}
+                          className={`tabular-nums mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center border text-[10px] font-bold ${
+                            ward.kind === 'control' ? 'rounded-[5px]' : 'rounded-full'
+                          }`}
+                        >
+                          {idx + 1}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center justify-between gap-1.5">
+                            <span className="font-semibold text-white">{ward.label}</span>
+                            <span
+                              className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              style={{ backgroundColor: style.bg, color: style.color }}
+                            >
+                              {style.label}
+                            </span>
+                          </span>
+                          <span className="mt-0.5 block text-[10px] font-mono text-slate-400">
+                            {ward.timing}
+                          </span>
+                          <span className="mt-1 block text-[11px] leading-snug text-slate-300">
+                            {ward.reason}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
           </div>
 
-          {showWards && selectedWard && (
+          {showWards && selectedWard && steps.length > 0 && (
             <div className="lg-inset p-3.5 text-[11px]">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-semibold text-white">{selectedWard.label}</span>
@@ -320,6 +411,7 @@ function ReplayRiftMap({
   pathPoints,
   enemyPathPoints = [],
   markers,
+  roleLabel = 'jungle',
 }: ReplayModeProps) {
   const maxSeconds = Math.max(60, Math.round(durationSeconds));
   const minSeconds = Math.min(maxSeconds, (pathPoints[0]?.minute ?? 1) * 60);
@@ -370,14 +462,32 @@ function ReplayRiftMap({
     visibleMarkers[visibleMarkers.length - 1] ??
     null;
 
-  const polylinePoints = visiblePath.map((p) => `${p.x},${p.y}`).join(' ');
-  const enemyPolylinePoints = visibleEnemyPath.map((p) => `${p.x},${p.y}`).join(' ');
+  const smoothPlayerSegments = useMemo(() => buildSmoothPathSegments(visiblePath), [visiblePath]);
+  const smoothEnemySegments = useMemo(
+    () => buildSmoothPathSegments(visibleEnemyPath),
+    [visibleEnemyPath]
+  );
+  const currentPos = visiblePath[visiblePath.length - 1] ?? null;
+  const currentEnemyPos = visibleEnemyPath[visibleEnemyPath.length - 1] ?? null;
+
+  const replayHeading =
+    roleLabel === 'bottom'
+      ? 'Bot Lane Path & Timeline Replay'
+      : roleLabel === 'off_role'
+        ? 'Match Path & Timeline Replay'
+        : 'Jungle Path & Timeline Replay';
+  const enemyGhostLabel =
+    roleLabel === 'bottom'
+      ? 'Enemy ADC Ghost'
+      : roleLabel === 'off_role'
+        ? 'Lane Opponent Ghost'
+        : 'Enemy Jungler Ghost';
 
   return (
     <GlassSurface className="p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="t-title text-white/[0.92]">
-          Jungle Path &amp; Timeline Replay (0:00 – {formatClock(effectiveSecond)})
+          {replayHeading} (0:00 – {formatClock(effectiveSecond)})
         </h3>
 
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -404,7 +514,7 @@ function ReplayRiftMap({
                   : 'border-white/10 bg-white/[0.04] text-slate-400'
               }`}
             >
-              Enemy Jungler Ghost
+              {enemyGhostLabel}
             </button>
           )}
           <button
@@ -453,51 +563,88 @@ function ReplayRiftMap({
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] xl:grid-cols-[minmax(440px,520px)_minmax(0,1fr)]">
-        <div className="relative mx-auto aspect-square w-full max-w-[420px] min-w-0 overflow-hidden rounded-[16px] border border-white/10 bg-[#080b11] lg:max-w-none">
+        <div className="relative isolate z-0 mx-auto aspect-square w-full max-w-[420px] min-w-0 overflow-hidden rounded-[16px] border border-white/10 bg-[#080b11] lg:max-w-none">
           <svg
             viewBox="0 0 1000 1000"
             role="img"
-            aria-label="Post-Game Jungle Timeline Map"
+            aria-label={`Post-Game ${replayHeading}`}
             className="h-full w-full"
           >
             <OfficialRiftMapBase patchVersion={patchVersion} />
 
-            {showEnemyGhost && visibleEnemyPath.length > 1 && (
-              <polyline
-                points={enemyPolylinePoints}
-                fill="none"
-                stroke={RIFT_PALETTE.enemyGhostStroke}
-                strokeOpacity="0.6"
-                strokeWidth="2.4"
-                vectorEffect="non-scaling-stroke"
-                strokeDasharray="6 6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {showEnemyGhost &&
+              smoothEnemySegments.map((d, segIdx) => (
+                <path
+                  key={`enemy-seg-${segIdx}`}
+                  d={d}
+                  fill="none"
+                  stroke={RIFT_PALETTE.enemyGhostStroke}
+                  strokeOpacity={0.35 + ((segIdx + 1) / smoothEnemySegments.length) * 0.45}
+                  strokeWidth="2.4"
+                  vectorEffect="non-scaling-stroke"
+                  strokeDasharray="6 5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))}
+
+            {showEnemyGhost && currentEnemyPos && (
+              <circle
+                cx={currentEnemyPos.x}
+                cy={currentEnemyPos.y}
+                r="13"
+                fill="rgba(251, 113, 133, 0.25)"
+                stroke="#fb7185"
+                strokeWidth="3"
               />
             )}
 
-            {showPath && visiblePath.length > 1 && (
-              <>
-                <polyline
-                  points={polylinePoints}
-                  fill="none"
-                  stroke={RIFT_PALETTE.routeHalo}
-                  strokeWidth="7"
-                  vectorEffect="non-scaling-stroke"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+            {showPath &&
+              smoothPlayerSegments.map((d, segIdx) => {
+                const segAlpha = 0.45 + ((segIdx + 1) / smoothPlayerSegments.length) * 0.55;
+                return (
+                  <g key={`player-seg-${segIdx}`}>
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke={RIFT_PALETTE.routeHalo}
+                      strokeOpacity={segAlpha * 0.85}
+                      strokeWidth="6.5"
+                      vectorEffect="non-scaling-stroke"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke="#38bdf8"
+                      strokeOpacity={segAlpha}
+                      strokeWidth="3"
+                      vectorEffect="non-scaling-stroke"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </g>
+                );
+              })}
+
+            {showPath && currentPos && (
+              <g>
+                <circle
+                  cx={currentPos.x}
+                  cy={currentPos.y}
+                  r="18"
+                  fill="rgba(56, 189, 248, 0.22)"
                 />
-                <polyline
-                  points={polylinePoints}
-                  fill="none"
-                  stroke={RIFT_PALETTE.routeStroke}
+                <circle
+                  cx={currentPos.x}
+                  cy={currentPos.y}
+                  r="9"
+                  fill="#38bdf8"
+                  stroke="#ffffff"
                   strokeWidth="3"
-                  vectorEffect="non-scaling-stroke"
-                  strokeDasharray="9 7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
                 />
-              </>
+              </g>
             )}
           </svg>
 

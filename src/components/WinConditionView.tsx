@@ -30,7 +30,6 @@ import { generateAiDebrief } from '../services/tauriBridge';
 import type {
   AiCoachConfig,
   ClimbGoal,
-  DemoScenarioId,
   ObjectiveTimingsConfig,
   TeamCompAnalysis,
   WinConditionPlan,
@@ -38,7 +37,7 @@ import type {
 import type { MapSide } from '../types/riot';
 import { EmptyState } from './EmptyState';
 import { SummonersRiftMap } from './SummonersRiftMap';
-import { M3Button, M3Card, M3Chip, M3ListItem, M3SegmentedButton, cx } from './m3';
+import { M3Button, M3Card, M3Chip, M3SegmentedButton, cx } from './m3';
 import type { M3ChipTone } from './m3';
 
 interface WinConditionViewProps {
@@ -51,7 +50,6 @@ interface WinConditionViewProps {
   objectiveTimings?: ObjectiveTimingsConfig;
   emptyReason?: EmptyReason;
   draftProgress?: { locked: number; total: number };
-  onPreviewSample?: (scenario: DemoScenarioId) => void;
   /** Coached role currently driving the plan. `'bottom'` + `adcPlan` = ADC Bot Game Plan. */
   activeRole?: CoachedRole;
   adcPlan?: AdcWinConditionPlan | null;
@@ -185,9 +183,6 @@ function ObjectiveTrack({
             );
           })}
         </div>
-        <M3Chip size="sm" tone="plain" className={ON_SURFACE} title="Atakhan removed for Season 2026">
-          No Atakhan
-        </M3Chip>
       </div>
     </M3Card>
   );
@@ -363,7 +358,6 @@ export function WinConditionView({
   objectiveTimings = DEFAULT_OBJECTIVE_TIMINGS,
   emptyReason,
   draftProgress,
-  onPreviewSample,
   activeRole,
   adcPlan,
   onSelectRole,
@@ -503,8 +497,6 @@ export function WinConditionView({
               : `Your custom jungle route (Clear 1 from ${fmtClock(CAMP_SPAWN_SEC)}, ${fmtClock(objectiveTimings.scuttleInitialSec)} Scuttle), strong-side callout, and Season 2026 ward targets lock in as soon as all 10 champions are confirmed.`
             : `Enter Champion Select and lock all 10 champions (or start a match) to generate a draft-specific Win Plan and ${wantsAdc ? 'bot-lane game plan' : 'jungle route sequence'}.`
         }
-        onPreviewSample={onPreviewSample ? () => onPreviewSample('loading') : undefined}
-        sampleLabel="Preview sample plan & map"
       />
     );
   }
@@ -751,27 +743,54 @@ export function WinConditionView({
 
             {/* 4 ordered macro phases */}
             <M3Card variant="hero" as="section" className="!p-5" aria-label="Macro phases">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <h3 className="m3-title-m">Macro phases</h3>
-                <M3SegmentedButton<string>
-                  ariaLabel="Macro phase"
-                  size="sm"
-                  options={phases.map((p) => ({
-                    value: p.id,
-                    label: `${p.order}. ${p.label}`,
-                    title: p.timeWindow,
-                  }))}
-                  value={activePhase?.id ?? ''}
-                  onChange={setSelectedPhaseId}
-                />
+              <div className="mb-3 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="m3-title-m">Macro phases</h3>
+                  {activePhase && (
+                    <M3Chip size="sm" tone="primary" className="num" icon={<Timer aria-hidden />}>
+                      {activePhase.timeWindow}
+                    </M3Chip>
+                  )}
+                </div>
+                <div role="group" aria-label="Macro phase" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {phases.map((p) => {
+                    const selected = activePhase?.id === p.id;
+                    const shortTitle =
+                      p.order === 1
+                        ? 'Lv2 Lane'
+                        : p.order === 2
+                          ? 'Plates'
+                          : p.order === 3
+                            ? 'Mid Swap'
+                            : 'Late Teamfight';
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        aria-pressed={selected}
+                        title={`${p.label} (${p.timeWindow})`}
+                        onClick={() => setSelectedPhaseId(p.id)}
+                        className={cx(
+                          'm3-focus-ring rounded-[12px] border px-2.5 py-2 text-left text-[12px] font-semibold transition',
+                          selected
+                            ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)]'
+                            : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)] hover:border-[var(--md-sys-color-outline)]'
+                        )}
+                      >
+                        <div className="truncate">{p.order}. {shortTitle}</div>
+                        <div className="m3-label-m num truncate opacity-75">{p.timeWindow}</div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               {activePhase && (
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
                   <div>
-                    <M3Chip size="sm" tone="primary" className="num" icon={<Timer aria-hidden />}>
-                      {activePhase.timeWindow}
-                    </M3Chip>
-                    <p className="m3-body-m mt-2">{activePhase.focus}</p>
+                    <div className="m3-title-s text-[var(--md-sys-color-on-surface)]">
+                      {activePhase.label}
+                    </div>
+                    <p className="m3-body-m mt-1.5">{activePhase.focus}</p>
                   </div>
                   <ol className="space-y-1.5">
                     {activePhase.actions.map((action, idx) => (
@@ -816,42 +835,25 @@ export function WinConditionView({
 
             {/* Bot lane vision map */}
             <M3Card variant="hero" as="section" className="!p-5" aria-label="Bot lane vision map">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="m3-title-m flex items-center gap-2">
-                  <Eye size={18} aria-hidden /> Bot lane vision map
-                </h3>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="m3-title-m flex items-center gap-2">
+                    <Eye size={18} aria-hidden /> Bot lane vision map
+                  </h3>
+                  <p className={cx('m3-body-s mt-0.5', MUTED)}>
+                    Numbered pins match the priority ward spots for {mapSide === 'blue' ? 'Blue' : 'Red'} side.
+                  </p>
+                </div>
                 <M3Chip size="sm" tone="plain" className={ON_SURFACE}>
                   {ap.wardSpots.length} Season 2026 ward targets
                 </M3Chip>
               </div>
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
-                <SummonersRiftMap
-                  mapSide={mapSide}
-                  patchVersion={patchVersion}
-                  route={null}
-                  wardSpots={ap.wardSpots}
-                />
-                <div className="space-y-1">
-                  {ap.wardSpots.map((w) => (
-                    <M3ListItem
-                      key={w.id}
-                      title={w.label}
-                      description={w.reason}
-                      meta={w.timing}
-                      leading={
-                        <span
-                          aria-hidden
-                          className="block h-3 w-3 rotate-45 rounded-[3px]"
-                          style={{
-                            background:
-                              w.kind === 'control' ? 'var(--md-sys-color-error)' : 'var(--md-ext-warning)',
-                          }}
-                        />
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
+              <SummonersRiftMap
+                mapSide={mapSide}
+                patchVersion={patchVersion}
+                route={null}
+                wardSpots={ap.wardSpots}
+              />
             </M3Card>
           </div>
 

@@ -1,11 +1,11 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { HudApp } from './HudApp';
 import { DEMO_IN_GAME_MID } from './domain/simulationFixtures';
 import * as tauriBridge from './services/tauriBridge';
 
 describe('HudApp', () => {
-  it('subscribes to game state & preferences and renders 12px click-through HUD telemetry', async () => {
+  it('subscribes to game state & preferences and renders modular HUD widgets (objectives, build, cs, skill order, game plan, cue)', async () => {
     let pushState: ((s: NonNullable<Awaited<ReturnType<typeof tauriBridge.getAppState>>>) => void) | undefined;
     let pushPrefs: ((p: tauriBridge.HudPreferencesEvent) => void) | undefined;
 
@@ -21,6 +21,9 @@ describe('HudApp', () => {
         pushPrefs = onPrefs;
         return () => {};
       });
+    const spySaveWidgets = vi
+      .spyOn(tauriBridge, 'saveHudWidgets')
+      .mockImplementation(async (w) => w);
 
     render(<HudApp />);
     await act(async () => {
@@ -43,7 +46,19 @@ describe('HudApp', () => {
         lcuConnected: true,
         liveClientConnected: true,
         champSelect: null,
-        liveGame: DEMO_IN_GAME_MID,
+        liveGame: {
+          ...DEMO_IN_GAME_MID,
+          activePlayer: {
+            ...DEMO_IN_GAME_MID.activePlayer,
+            level: 11,
+            abilities: {
+              Q: { abilityLevel: 5 },
+              W: { abilityLevel: 2 },
+              E: { abilityLevel: 2 },
+              R: { abilityLevel: 1 },
+            },
+          },
+        },
         summonerProfile: null,
         patchVersion: '16.23.1',
       });
@@ -53,10 +68,29 @@ describe('HudApp', () => {
     expect(hud).toHaveAttribute('data-scale', '125');
     expect(screen.getByLabelText('Expand hotkey Alt+B')).toBeInTheDocument();
     expect(screen.getByTestId('hud-objective-timer')).toHaveTextContent('LIVE');
+    expect(screen.getByTestId('hud-widget-cs')).toBeInTheDocument();
+    expect(screen.getByTestId('hud-widget-skillOrder')).toHaveTextContent('LEVEL R NOW');
     expect(screen.getByTestId('hud-macro-cue')).toBeInTheDocument();
+
+    // Unlock HUD for dragging -> shows floating edit bar and toggles widget cleanly
+    await act(async () => {
+      pushPrefs?.({
+        hudCorner: 'beside-minimap',
+        overlayHotkey: 'Alt+B',
+        hudOpacity: 85,
+        hudScale: 125,
+        hudMonitor: 'primary',
+        minimapSide: 'right',
+        hudLocked: false,
+      });
+    });
+    expect(screen.getByText(/HUD Layout Edit/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'CS / min' }));
+    expect(spySaveWidgets).toHaveBeenCalled();
 
     spySubGame.mockRestore();
     spySubPrefs.mockRestore();
+    spySaveWidgets.mockRestore();
   });
 
   it('applies signed patch pack timings, hot-swaps on patch-pack-updated, and avoids 1Hz IPC polling', async () => {

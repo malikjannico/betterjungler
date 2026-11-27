@@ -32,7 +32,6 @@ import type { LivePlayedRole } from '../domain/sessionContext';
 import { getItemIconUrl } from '../services/ddragonService';
 import type {
   AdaptiveBuildPlan,
-  DemoScenarioId,
   ItemRecommendation,
   MacroCue,
   ObjectiveWindow,
@@ -57,7 +56,6 @@ interface LiveCoachViewProps {
   mapSide: MapSide | null;
   patchVersion: string;
   smiteThresholds?: SmiteThresholdsConfig;
-  onPreviewSample?: (scenario: DemoScenarioId) => void;
   /** Auto-detected played role. Falls back to `isJungleRole` when omitted. */
   playedRole?: LivePlayedRole;
   /** Pre-game ADC win plan (bot lane quick reference). */
@@ -93,7 +91,6 @@ export function LiveCoachView({
   mapSide,
   patchVersion,
   smiteThresholds,
-  onPreviewSample,
   playedRole,
   adcWinPlan = null,
 }: LiveCoachViewProps) {
@@ -123,8 +120,6 @@ export function LiveCoachView({
             ? 'Your match is loading. Objective timers, role-aware cues, and adaptive itemization activate automatically at 0:00.'
             : 'Connects automatically via Riot Live Client Data (127.0.0.1:2999) when your match begins — zero setup needed.'
         }
-        onPreviewSample={onPreviewSample ? () => onPreviewSample('in_game_mid') : undefined}
-        sampleLabel="Preview live match"
       />
     );
   }
@@ -350,7 +345,6 @@ function ObjectiveBoard({
         <h3 className="m3-title-m flex items-center gap-2">
           <Timer className="h-4 w-4" aria-hidden /> Live Objective Timers
         </h3>
-        <M3Chip size="sm">No Atakhan · 2026</M3Chip>
       </div>
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
         {rows.map((row) => {

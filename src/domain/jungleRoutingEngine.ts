@@ -377,7 +377,7 @@ export function buildMultiClearRoutes(
 }
 
 /**
- * Exact ward coordinates aligned to Summoner's Rift (map11.png) bushes.
+ * Calibrated Season 2026 ward coordinates aligned to Summoner's Rift (`map11.png`) bushes.
  */
 export function buildOfficialWardSpots(side: MapSide): WardSpot[] {
   const isBlue = side === 'blue';
@@ -387,20 +387,20 @@ export function buildOfficialWardSpots(side: MapSide): WardSpot[] {
       label: 'Enemy Raptor Brush Ward',
       kind: 'deep',
       phase: 'early',
-      x: isBlue ? 525 : 467,
+      x: isBlue ? 530 : 470,
       y: isBlue ? 385 : 615,
-      timing: '1:10 – 1:25 (recall for Oracle Lens)',
+      timing: '0:45 – 0:55 (recall for Oracle Lens)',
       reason:
-        'Spots enemy jungler on Raptors so your team knows immediately whether they are pathing Top or Bot.',
+        'Spots enemy jungler on Raptors before 0:55 camp spawn so you track whether they path Top or Bot.',
     },
     {
       id: 'pixel-river-ward',
       label: 'Top Pixel River Brush',
       kind: 'stealth',
       phase: 'early',
-      x: 342,
-      y: 422,
-      timing: '1:20 or 3:15 river check',
+      x: 432,
+      y: 432,
+      timing: '2:15 or 2:55 Scuttle check',
       reason: 'Covers Mid roams and early river transitions into your top quadrant.',
     },
     {
@@ -408,9 +408,9 @@ export function buildOfficialWardSpots(side: MapSide): WardSpot[] {
       label: 'Dragon River Control Ward',
       kind: 'control',
       phase: 'objective',
-      x: 598,
-      y: 742,
-      timing: '45s before Dragon spawn',
+      x: 622,
+      y: 658,
+      timing: '4:15 (45s before Dragon spawn)',
       reason:
         'Denies river entrance vision outside Dragon pit so you can sneak Dragon or trap face-checks.',
     },
@@ -419,9 +419,9 @@ export function buildOfficialWardSpots(side: MapSide): WardSpot[] {
       label: 'Baron / Grubs River Control Ward',
       kind: 'control',
       phase: 'objective',
-      x: 396,
-      y: 262,
-      timing: '45s before Grubs / Herald / Baron',
+      x: 378,
+      y: 342,
+      timing: '7:15 / 14:15 (45s before Grubs / Herald / Baron)',
       reason:
         'Denies top river entrance vision and catches enemy support/jungler clearing pit.',
     },
