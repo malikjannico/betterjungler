@@ -141,11 +141,25 @@ mod tests {
     fn detects_near_rate_limit_header_thresholds() {
         let mut headers = HeaderMap::new();
         headers.insert("x-app-rate-limit", HeaderValue::from_static("20:1,100:120"));
-        headers.insert("x-app-rate-limit-count", HeaderValue::from_static("19:1,42:120"));
-        assert!(near_rate_cap(&headers, "x-app-rate-limit", "x-app-rate-limit-count"));
+        headers.insert(
+            "x-app-rate-limit-count",
+            HeaderValue::from_static("19:1,42:120"),
+        );
+        assert!(near_rate_cap(
+            &headers,
+            "x-app-rate-limit",
+            "x-app-rate-limit-count"
+        ));
 
-        headers.insert("x-app-rate-limit-count", HeaderValue::from_static("5:1,42:120"));
-        assert!(!near_rate_cap(&headers, "x-app-rate-limit", "x-app-rate-limit-count"));
+        headers.insert(
+            "x-app-rate-limit-count",
+            HeaderValue::from_static("5:1,42:120"),
+        );
+        assert!(!near_rate_cap(
+            &headers,
+            "x-app-rate-limit",
+            "x-app-rate-limit-count"
+        ));
     }
 
     #[tokio::test]

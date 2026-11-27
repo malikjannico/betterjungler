@@ -63,10 +63,14 @@ pub fn aggregate_jungle_samples(
     let target_prefix = patch_major_minor(patch);
     let filtered_matches: Vec<&Value> = match_payloads
         .iter()
-        .filter(|m| match (&target_prefix, m["info"]["gameVersion"].as_str()) {
-            (Some(target), Some(ver)) => patch_major_minor(ver).as_deref() == Some(target.as_str()),
-            _ => true,
-        })
+        .filter(
+            |m| match (&target_prefix, m["info"]["gameVersion"].as_str()) {
+                (Some(target), Some(ver)) => {
+                    patch_major_minor(ver).as_deref() == Some(target.as_str())
+                }
+                _ => true,
+            },
+        )
         .collect();
 
     let mut agg: HashMap<i64, ChampAgg> = HashMap::new();
@@ -194,7 +198,11 @@ pub async fn sample_high_elo_jungle_meta(
         }
     }
 
-    Ok(aggregate_jungle_samples(&payloads, patch, platform.as_code()))
+    Ok(aggregate_jungle_samples(
+        &payloads,
+        patch,
+        platform.as_code(),
+    ))
 }
 
 #[cfg(test)]
@@ -226,7 +234,11 @@ mod tests {
         let snap = aggregate_jungle_samples(&[m1, m2_old_patch], "16.23.1", "EUW1");
         assert_eq!(snap.sample_matches, 1);
         assert!(snap.champions.iter().all(|c| c.champion_id != 32));
-        let viego = snap.champions.iter().find(|c| c.champion_id == 234).unwrap();
+        let viego = snap
+            .champions
+            .iter()
+            .find(|c| c.champion_id == 234)
+            .unwrap();
         assert_eq!(viego.games, 1);
         assert_eq!(viego.wins, 1);
         assert_eq!(viego.win_rate, 100.0);

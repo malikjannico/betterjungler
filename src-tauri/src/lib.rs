@@ -408,10 +408,7 @@ fn get_climb_goals(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<ClimbGoa
 }
 
 #[tauri::command]
-fn upsert_climb_goal(
-    state: State<'_, Arc<SharedState>>,
-    goal: ClimbGoalRecord,
-) -> AppResult<()> {
+fn upsert_climb_goal(state: State<'_, Arc<SharedState>>, goal: ClimbGoalRecord) -> AppResult<()> {
     let conn = state
         .db
         .lock()
@@ -605,13 +602,9 @@ async fn check_riot_api_key_health(
             });
         }
     };
-    let status = riot_api::probe_riot_api_key(
-        &state.riot_web_client,
-        &state.riot_limiter,
-        &auth,
-        &region,
-    )
-    .await;
+    let status =
+        riot_api::probe_riot_api_key(&state.riot_web_client, &state.riot_limiter, &auth, &region)
+            .await;
     Ok(status)
 }
 
@@ -766,7 +759,7 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                     LiveClientPollResult::NotInGame => {
                         let misses = shared
                             .live_miss_streak
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |prev| {
+                            .try_update(Ordering::SeqCst, Ordering::SeqCst, |prev| {
                                 Some(prev.saturating_add(1))
                             })
                             .unwrap_or(255)

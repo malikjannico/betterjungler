@@ -436,13 +436,17 @@ pub async fn riot_get_json<T: for<'de> Deserialize<'de>>(
         limiter.observe_headers(bucket, &headers).await;
 
         if status == 429 {
-            let retry_secs = parse_retry_after_seconds(&headers).unwrap_or(5).clamp(1, 120);
+            let retry_secs = parse_retry_after_seconds(&headers)
+                .unwrap_or(5)
+                .clamp(1, 120);
             let is_app_limit = headers
                 .get("x-rate-limit-type")
                 .and_then(|v| v.to_str().ok())
                 .map(|t| t.eq_ignore_ascii_case("application"))
                 .unwrap_or(true);
-            limiter.record_rate_limit(bucket, retry_secs, is_app_limit).await;
+            limiter
+                .record_rate_limit(bucket, retry_secs, is_app_limit)
+                .await;
 
             if retry_secs <= 15 && attempt + 1 < MAX_ATTEMPTS {
                 continue;
@@ -469,7 +473,9 @@ pub async fn riot_get_json<T: for<'de> Deserialize<'de>>(
             .map_err(|e| AppError::RiotApi(e.to_string()));
     }
 
-    Err(AppError::RiotApi("Riot API retry budget exhausted".to_string()))
+    Err(AppError::RiotApi(
+        "Riot API retry budget exhausted".to_string(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -837,10 +843,19 @@ mod tests {
 
     #[test]
     fn validates_platform_allowlist_and_routes() {
-        assert_eq!(parse_platform("EUW1").unwrap().account_regional_route(), "europe");
-        assert_eq!(parse_platform("OC1").unwrap().account_regional_route(), "americas");
+        assert_eq!(
+            parse_platform("EUW1").unwrap().account_regional_route(),
+            "europe"
+        );
+        assert_eq!(
+            parse_platform("OC1").unwrap().account_regional_route(),
+            "americas"
+        );
         assert_eq!(parse_platform("OC1").unwrap().match_regional_route(), "sea");
-        assert_eq!(parse_platform("SG2").unwrap().account_regional_route(), "asia");
+        assert_eq!(
+            parse_platform("SG2").unwrap().account_regional_route(),
+            "asia"
+        );
         assert!(parse_platform("evil.com/#").is_err());
     }
 
@@ -915,7 +930,8 @@ mod tests {
         });
 
         assert!(
-            normalize_match_v5_detail("EUW1_999", "p-missing", &match_json, &timeline_json).is_err()
+            normalize_match_v5_detail("EUW1_999", "p-missing", &match_json, &timeline_json)
+                .is_err()
         );
         let out = normalize_match_v5_detail("EUW1_999", "p-ally", &match_json, &timeline_json)
             .expect("missing enemy jg should still normalize");
@@ -934,13 +950,25 @@ mod tests {
     #[test]
     fn classifies_probe_status_codes() {
         let now = "2026-11-27T00:00:00Z".to_string();
-        assert_eq!(classify_probe_status(200, None, "EUW1", now.clone()).status, "valid");
-        assert_eq!(classify_probe_status(401, None, "EUW1", now.clone()).status, "expired");
-        assert_eq!(classify_probe_status(403, None, "EUW1", now.clone()).status, "expired");
+        assert_eq!(
+            classify_probe_status(200, None, "EUW1", now.clone()).status,
+            "valid"
+        );
+        assert_eq!(
+            classify_probe_status(401, None, "EUW1", now.clone()).status,
+            "expired"
+        );
+        assert_eq!(
+            classify_probe_status(403, None, "EUW1", now.clone()).status,
+            "expired"
+        );
         let rate = classify_probe_status(429, Some(12), "EUW1", now.clone());
         assert_eq!(rate.status, "rate_limited");
         assert!(rate.message.contains("12s"));
-        assert_eq!(classify_probe_status(503, None, "EUW1", now).status, "offline");
+        assert_eq!(
+            classify_probe_status(503, None, "EUW1", now).status,
+            "offline"
+        );
     }
 
     #[test]

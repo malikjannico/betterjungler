@@ -426,10 +426,7 @@ pub fn load_meta_snapshot(conn: &Connection) -> AppResult<Option<Value>> {
 
 pub fn tier_rank_to_absolute_lp(tier: &str, rank: &str, lp: i32) -> i32 {
     let normalized = tier.trim().to_uppercase();
-    let is_apex = matches!(
-        normalized.as_str(),
-        "MASTER" | "GRANDMASTER" | "CHALLENGER"
-    );
+    let is_apex = matches!(normalized.as_str(), "MASTER" | "GRANDMASTER" | "CHALLENGER");
     let tier_base = match normalized.as_str() {
         "IRON" => 0,
         "BRONZE" => 400,
@@ -546,8 +543,8 @@ pub fn save_riot_api_key(api_key: &str) -> AppResult<()> {
     if trimmed.is_empty() {
         return Err(AppError::Credential("API key cannot be empty".to_string()));
     }
-    let entry =
-        Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| AppError::Credential(e.to_string()))?;
+    let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER)
+        .map_err(|e| AppError::Credential(e.to_string()))?;
     entry
         .set_password(trimmed)
         .map_err(|e| AppError::Credential(e.to_string()))?;
@@ -555,8 +552,8 @@ pub fn save_riot_api_key(api_key: &str) -> AppResult<()> {
 }
 
 pub fn load_riot_api_key() -> AppResult<String> {
-    let entry =
-        Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| AppError::Credential(e.to_string()))?;
+    let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER)
+        .map_err(|e| AppError::Credential(e.to_string()))?;
     entry
         .get_password()
         .map_err(|e| AppError::Credential(format!("No Riot API key configured: {e}")))
@@ -572,7 +569,9 @@ pub fn has_riot_api_key() -> bool {
 pub fn save_ai_api_key(api_key: &str) -> AppResult<()> {
     let trimmed = api_key.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Credential("AI API key cannot be empty".to_string()));
+        return Err(AppError::Credential(
+            "AI API key cannot be empty".to_string(),
+        ));
     }
     let entry = Entry::new(KEYRING_SERVICE, KEYRING_AI_USER)
         .map_err(|e| AppError::Credential(e.to_string()))?;
@@ -694,6 +693,9 @@ mod tests {
     #[ignore = "Requires Windows Credential Manager session"]
     fn windows_keyring_roundtrip_persists_secret() {
         save_riot_api_key("RGAPI-test-roundtrip").expect("store secret");
-        assert_eq!(load_riot_api_key().expect("load secret"), "RGAPI-test-roundtrip");
+        assert_eq!(
+            load_riot_api_key().expect("load secret"),
+            "RGAPI-test-roundtrip"
+        );
     }
 }

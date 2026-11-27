@@ -199,25 +199,43 @@ mod tests {
     fn allows_update_only_when_idle_lobby_or_safe_post_game() {
         assert!(is_safe_to_install_update("idle", "None", false, 0));
         assert!(is_safe_to_install_update("idle", "Lobby", false, 0));
-        assert!(is_safe_to_install_update("post_game", "EndOfGame", false, 3));
+        assert!(is_safe_to_install_update(
+            "post_game",
+            "EndOfGame",
+            false,
+            3
+        ));
     }
 
     #[test]
     fn blocks_update_on_unknown_empty_or_active_gameflow_states() {
-        assert!(!is_safe_to_install_update("champ_select", "ChampSelect", false, 3));
+        assert!(!is_safe_to_install_update(
+            "champ_select",
+            "ChampSelect",
+            false,
+            3
+        ));
         assert!(!is_safe_to_install_update("loading", "GameStart", false, 3));
         assert!(!is_safe_to_install_update("in_game", "InProgress", true, 0));
         assert!(!is_safe_to_install_update("idle", "Reconnect", false, 5));
         assert!(!is_safe_to_install_update("idle", "Matchmaking", false, 5));
         assert!(!is_safe_to_install_update("idle", "Unknown", false, 5));
         assert!(!is_safe_to_install_update("idle", "", false, 5));
-        assert!(!is_safe_to_install_update("post_game", "EndOfGame", false, 1));
+        assert!(!is_safe_to_install_update(
+            "post_game",
+            "EndOfGame",
+            false,
+            1
+        ));
     }
 
     #[test]
     fn normalizes_update_mode_with_manual_fallback() {
         assert_eq!(normalize_update_mode("install_on_quit"), "install_on_quit");
-        assert_eq!(normalize_update_mode(" INSTALL_ON_QUIT "), "install_on_quit");
+        assert_eq!(
+            normalize_update_mode(" INSTALL_ON_QUIT "),
+            "install_on_quit"
+        );
         assert_eq!(normalize_update_mode("manual"), "manual");
         assert_eq!(normalize_update_mode("auto"), "manual");
         assert_eq!(normalize_update_mode(""), "manual");

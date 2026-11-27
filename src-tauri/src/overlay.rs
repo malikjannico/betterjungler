@@ -181,18 +181,18 @@ impl OverlayController {
             .get_webview_window("hud")
             .ok_or_else(|| AppError::Overlay("Dedicated HUD window not found".to_string()))?;
 
-        let prefs = self
-            .prefs
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_else(|_| HudPreferencesPayload {
-                hud_corner: "beside-minimap".to_string(),
-                overlay_hotkey: "Alt+J".to_string(),
-                hud_opacity: 92,
-                hud_scale: 100,
-                hud_monitor: "primary".to_string(),
-                minimap_side: "right".to_string(),
-            });
+        let prefs =
+            self.prefs
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_else(|_| HudPreferencesPayload {
+                    hud_corner: "beside-minimap".to_string(),
+                    overlay_hotkey: "Alt+J".to_string(),
+                    hud_opacity: 92,
+                    hud_scale: 100,
+                    hud_monitor: "primary".to_string(),
+                    minimap_side: "right".to_string(),
+                });
 
         if show_hud {
             self.position_hud_window(app, &hud_window, &prefs);
@@ -367,7 +367,8 @@ pub fn setup_overlay_controls(
         tray = tray.icon(icon);
     }
 
-    tray.build(app).map_err(|e| AppError::Overlay(e.to_string()))?;
+    tray.build(app)
+        .map_err(|e| AppError::Overlay(e.to_string()))?;
     Ok(())
 }
 
@@ -406,7 +407,7 @@ mod tests {
         let (pw, ph, px, py) =
             compute_physical_hud_rect("bottom-right", "right", 125, 1920, 0, 3840, 2160, 1.5);
         assert_eq!((pw, ph), (825, 465));
-        assert_eq!(px, 1920 + ((2560.0 - 550.0 - 16.0) * 1.5).round() as i32);
-        assert_eq!(py, ((1440.0 - 310.0 - 16.0) * 1.5).round() as i32);
+        assert_eq!(px, 1920 + ((2560.0_f64 - 550.0 - 16.0) * 1.5).round() as i32);
+        assert_eq!(py, ((1440.0_f64 - 310.0 - 16.0) * 1.5).round() as i32);
     }
 }

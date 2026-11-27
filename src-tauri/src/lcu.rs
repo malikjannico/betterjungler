@@ -285,12 +285,20 @@ fn parse_raw_champ_select_session(
     let ally_bans = if raw.bans.my_team_bans.is_empty() {
         action_ally_bans
     } else {
-        raw.bans.my_team_bans.into_iter().filter(|&id| id > 0).collect()
+        raw.bans
+            .my_team_bans
+            .into_iter()
+            .filter(|&id| id > 0)
+            .collect()
     };
     let enemy_bans = if raw.bans.their_team_bans.is_empty() {
         action_enemy_bans
     } else {
-        raw.bans.their_team_bans.into_iter().filter(|&id| id > 0).collect()
+        raw.bans
+            .their_team_bans
+            .into_iter()
+            .filter(|&id| id > 0)
+            .collect()
     };
 
     let my_team = raw
@@ -428,12 +436,17 @@ pub async fn fetch_champ_select_session(
         return Ok(None);
     }
     if !res.status().is_success() {
-        return Err(AppError::Lcu(format!("LCU champ-select HTTP {}", res.status())));
+        return Err(AppError::Lcu(format!(
+            "LCU champ-select HTTP {}",
+            res.status()
+        )));
     }
 
     let raw: RawLcuSession = res.json().await.map_err(|e| AppError::Lcu(e.to_string()))?;
     let (queue_id, party_ids) = fetch_queue_id_and_party(client, creds, &auth).await;
-    Ok(Some(parse_raw_champ_select_session(raw, queue_id, &party_ids)))
+    Ok(Some(parse_raw_champ_select_session(
+        raw, queue_id, &party_ids,
+    )))
 }
 
 /// Polls `/lol-gameflow/v1/gameflow-phase` over pinned loopback TLS.
@@ -490,7 +503,10 @@ pub async fn fetch_lcu_profile(
             s_res.status()
         )));
     }
-    let s_val: serde_json::Value = s_res.json().await.map_err(|e| AppError::Lcu(e.to_string()))?;
+    let s_val: serde_json::Value = s_res
+        .json()
+        .await
+        .map_err(|e| AppError::Lcu(e.to_string()))?;
 
     let game_name = s_val["gameName"]
         .as_str()
@@ -525,7 +541,10 @@ pub async fn fetch_lcu_profile(
         if r_res.status().is_success() {
             if let Ok(r_val) = r_res.json::<serde_json::Value>().await {
                 let solo = &r_val["queueMap"]["RANKED_SOLO_5x5"];
-                if let Some(t) = solo["tier"].as_str().filter(|s| !s.is_empty() && *s != "NONE") {
+                if let Some(t) = solo["tier"]
+                    .as_str()
+                    .filter(|s| !s.is_empty() && *s != "NONE")
+                {
                     tier = t.to_string();
                     rank = solo["division"].as_str().unwrap_or("").to_string();
                     league_points = solo["leaguePoints"].as_i64().unwrap_or(0) as i32;
