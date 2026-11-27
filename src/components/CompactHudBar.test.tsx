@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CompactHudBar } from './CompactHudBar';
 
 describe('CompactHudBar', () => {
-  it('enforces >= 12px classes, scales cleanly to 125%, emphasizes objective countdown, and clamps macro cue to 2 lines', () => {
+  it('renders transparent multi-card layout with >=12px text, 22px objective readout, and 2-line clamped cue', () => {
     const onExpand = vi.fn();
     render(
       <CompactHudBar
@@ -35,10 +35,11 @@ describe('CompactHudBar', () => {
     );
 
     const hud = screen.getByTestId('compact-hud-bar');
+    expect(hud).toHaveClass('bg-transparent');
     expect(hud).toHaveAttribute('data-scale', '125');
     expect(hud.style.zoom).toBe('1.25');
     expect(screen.getByTestId('hud-objective-timer')).toHaveTextContent('0:42');
-    expect(screen.getByTestId('hud-objective-timer')).toHaveClass('text-xl');
+    expect(screen.getByTestId('hud-objective-timer')).toHaveClass('text-[22px]');
     expect(screen.getByTestId('hud-macro-cue')).toHaveClass('line-clamp-2');
 
     // Verify 12px typography floor (no sub-12px classes inside HUD)

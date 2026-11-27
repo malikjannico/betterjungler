@@ -9,8 +9,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 use crate::error::{AppError, AppResult};
 
-const BASE_HUD_WIDTH: f64 = 440.0;
-const BASE_HUD_HEIGHT: f64 = 248.0;
+const BASE_HUD_WIDTH: f64 = 424.0;
+const BASE_HUD_HEIGHT: f64 = 184.0;
 const MARGIN: f64 = 16.0;
 
 #[derive(Debug, Clone, Serialize)]
@@ -38,7 +38,7 @@ impl Default for OverlayController {
             prefs: Arc::new(Mutex::new(HudPreferencesPayload {
                 hud_corner: "beside-minimap".to_string(),
                 overlay_hotkey: "Alt+J".to_string(),
-                hud_opacity: 92,
+                hud_opacity: 80,
                 hud_scale: 100,
                 hud_monitor: "primary".to_string(),
                 minimap_side: "right".to_string(),
@@ -148,7 +148,7 @@ impl OverlayController {
         let next = HudPreferencesPayload {
             hud_corner: corner.to_string(),
             overlay_hotkey: hotkey.to_string(),
-            hud_opacity: opacity.clamp(50, 100),
+            hud_opacity: opacity.clamp(70, 100),
             hud_scale: normalize_hud_scale(scale),
             hud_monitor: if monitor == "active" {
                 "active".to_string()
@@ -188,7 +188,7 @@ impl OverlayController {
                 .unwrap_or_else(|_| HudPreferencesPayload {
                     hud_corner: "beside-minimap".to_string(),
                     overlay_hotkey: "Alt+J".to_string(),
-                    hud_opacity: 92,
+                    hud_opacity: 80,
                     hud_scale: 100,
                     hud_monitor: "primary".to_string(),
                     minimap_side: "right".to_string(),
@@ -391,23 +391,23 @@ mod tests {
 
     #[test]
     fn scales_and_computes_physical_hud_pixels_for_high_dpi_monitors() {
-        assert_eq!(scaled_hud_dimensions(100), (440.0, 248.0));
-        assert_eq!(scaled_hud_dimensions(125), (550.0, 310.0));
-        assert_eq!(scaled_hud_dimensions(150), (660.0, 372.0));
+        assert_eq!(scaled_hud_dimensions(100), (424.0, 184.0));
+        assert_eq!(scaled_hud_dimensions(125), (530.0, 230.0));
+        assert_eq!(scaled_hud_dimensions(150), (636.0, 276.0));
 
-        let (rx, ry) = compute_hud_offset("beside-minimap", "right", 1920.0, 1080.0, 440.0, 248.0);
-        assert!(rx < 1920.0 - 440.0 - 250.0);
-        assert!((ry - 816.0).abs() < f64::EPSILON);
+        let (rx, ry) = compute_hud_offset("beside-minimap", "right", 1920.0, 1080.0, 424.0, 184.0);
+        assert!(rx < 1920.0 - 424.0 - 250.0);
+        assert!((ry - 880.0).abs() < f64::EPSILON);
 
-        let (lx, ly) = compute_hud_offset("beside-minimap", "left", 1920.0, 1080.0, 440.0, 248.0);
+        let (lx, ly) = compute_hud_offset("beside-minimap", "left", 1920.0, 1080.0, 424.0, 184.0);
         assert!((270.0..=340.0).contains(&lx));
-        assert!((ly - 816.0).abs() < f64::EPSILON);
+        assert!((ly - 880.0).abs() < f64::EPSILON);
 
         // Secondary 4K monitor offset at (1920, 0) with 150% DPI scaling & 125% HUD scale
         let (pw, ph, px, py) =
             compute_physical_hud_rect("bottom-right", "right", 125, 1920, 0, 3840, 2160, 1.5);
-        assert_eq!((pw, ph), (825, 465));
-        assert_eq!(px, 1920 + ((2560.0_f64 - 550.0 - 16.0) * 1.5).round() as i32);
-        assert_eq!(py, ((1440.0_f64 - 310.0 - 16.0) * 1.5).round() as i32);
+        assert_eq!((pw, ph), (795, 345));
+        assert_eq!(px, 1920 + ((2560.0_f64 - 530.0 - 16.0) * 1.5).round() as i32);
+        assert_eq!(py, ((1440.0_f64 - 230.0 - 16.0) * 1.5).round() as i32);
     }
 }

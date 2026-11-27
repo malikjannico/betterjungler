@@ -1,18 +1,19 @@
 import { useId, useMemo, useState } from 'react';
+import { formatClock } from '../domain/liveCoachEngine';
 import { buildGoldXpSeries } from '../domain/trendAnalyticsEngine';
 import type { MatchV5Detail } from '../types/riot';
 import { GlassSurface } from './GlassSurface';
 
 interface GoldXpDiffChartProps {
   match: MatchV5Detail;
-  activeMinute?: number;
-  onSelectMinute?: (minute: number) => void;
+  activeSecond?: number;
+  onSelectSecond?: (second: number) => void;
 }
 
 export function GoldXpDiffChart({
   match,
-  activeMinute,
-  onSelectMinute,
+  activeSecond,
+  onSelectSecond,
 }: GoldXpDiffChartProps) {
   const gradId = useId();
   const [metric, setMetric] = useState<'goldDiff' | 'xpDiff'>('goldDiff');
@@ -25,17 +26,20 @@ export function GoldXpDiffChart({
     return null;
   }
 
-  const controlledIdx =
-    activeMinute !== undefined
-      ? series.points.reduce(
-          (bestIdx, pt, idx) =>
-            Math.abs(pt.minute - activeMinute) <
-            Math.abs((series.points[bestIdx]?.minute ?? 0) - activeMinute)
-              ? idx
-              : bestIdx,
-          0
-        )
-      : internalIdx;
+  const targetFloorMin =
+    activeSecond !== undefined ? Math.floor(activeSecond / 60) : undefined;
+  let controlledIdx = internalIdx;
+  if (targetFloorMin !== undefined) {
+    let bestIdx = 0;
+    for (let i = 0; i < series.points.length; i += 1) {
+      if (series.points[i]!.minute <= targetFloorMin) {
+        bestIdx = i;
+      } else {
+        break;
+      }
+    }
+    controlledIdx = bestIdx;
+  }
 
   const width = 620;
   const height = 148;
@@ -131,7 +135,8 @@ export function GoldXpDiffChart({
             e.preventDefault();
             const clamped = Math.max(0, Math.min(coords.length - 1, idx));
             setInternalIdx(clamped);
-            onSelectMinute?.(coords[clamped]!.pt.minute);
+            const ptMinute = coords[clamped]!.pt.minute;
+            onSelectSecond?.(Math.min(match.durationSeconds, ptMinute * 60));
           };
           if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
             selectIndex(controlledIdx + 1);
@@ -209,7 +214,7 @@ export function GoldXpDiffChart({
                 key={c.pt.minute}
                 onClick={() => {
                   setInternalIdx(idx);
-                  onSelectMinute?.(c.pt.minute);
+                  onSelectSecond?.(Math.min(match.durationSeconds, c.pt.minute * 60));
                 }}
                 className="cursor-pointer"
               >
@@ -230,8 +235,11 @@ export function GoldXpDiffChart({
 
       <div className="mt-2 flex flex-wrap items-center justify-between text-[11px] text-slate-400">
         <span>
-          Minute{' '}
-          <strong className="tabular-nums text-white">{activeCoord.pt.minute}:00</strong> · Gold{' '}
+          Cursor{' '}
+          <strong className="tabular-nums text-white">
+            {formatClock(activeSecond ?? activeCoord.pt.minute * 60)}
+          </strong>{' '}
+          · Gold{' '}
           <strong
             className={`tabular-nums ${
               activeCoord.pt.goldDiff >= 0 ? 'text-emerald-300' : 'text-rose-300'

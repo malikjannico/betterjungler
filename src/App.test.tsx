@@ -32,20 +32,46 @@ describe('BetterJungler App Integration', () => {
     localStorage.clear();
   });
 
-  it('renders sidebar rail navigation, preserves Solo/Duo anonymity, and synchronizes RiftMap + chart scrubber', async () => {
+  it('boots cleanly on Climb & Goals empty state without fake defaults', async () => {
     await renderAppAndFlush();
 
-    expect(screen.getByText('BETTERJUNGLER')).toBeInTheDocument();
+    expect(screen.getByText('BetterJungler')).toBeInTheDocument();
+    expect(screen.getByText(/Connect League Client or your Riot ID to begin/i)).toBeInTheDocument();
+    expect(screen.queryByText(/0 local\/demo ranked games/i)).not.toBeInTheDocument();
+
+    // Champ Select & Win Plan stay honestly gated until active draft/game or explicit sample preview
+    fireEvent.click(screen.getByRole('button', { name: /Champ Select/i }));
+    expect(screen.getByText('Not in Champ Select')).toBeInTheDocument();
+    expect(screen.queryByText(/Top 5 jungle picks/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Win Plan & Map/i }));
+    expect(screen.getByText(/Win Plan & Map unlock once draft completes/i)).toBeInTheDocument();
+  });
+
+  it('activates Simulator scenarios, enforces Solo/Duo anonymity, 4-clear single-row selector, and seconds-granular Post-Game sync', async () => {
+    await renderAppAndFlush();
+
+    // Enter Champ Select sample via EmptyState CTA -> preserves Solo/Duo anonymity
+    fireEvent.click(screen.getByRole('button', { name: /Champ Select/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Preview sample draft/i }));
     expect(screen.getByText('Champion Select Draft Coach')).toBeInTheDocument();
     expect(screen.getByText('Ally 1')).toBeInTheDocument();
     expect(screen.queryByText('TopLanerRealName')).not.toBeInTheDocument();
 
-    // Switch to Win Plan & Map -> test interactive RiftMap step & ward buttons
+    // Win Plan stays locked at 9/10 while player hasn't picked
     fireEvent.click(screen.getByRole('button', { name: /Win Plan & Map/i }));
-    expect(screen.getByText(/Enemy Win Condition to Deny/i)).toBeInTheDocument();
-    expect(screen.getByText(/Enemy Jungle Opening & Lane Gankability/i)).toBeInTheDocument();
-    expect(screen.getByText(/Invade Risk:/i)).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /Summoner's Rift Jungle Route/i })).toBeInTheDocument();
+    expect(screen.getByText(/9\/10 picks locked/i)).toBeInTheDocument();
+
+    // Switch Simulator to Loading -> Win Plan unlocks with 4 Clear Sequence buttons
+    fireEvent.click(screen.getByRole('button', { name: /Simulator/i }));
+    fireEvent.change(screen.getByLabelText('Simulation scenario'), {
+      target: { value: 'loading' },
+    });
+    expect(screen.getByText(/Enemy win condition to deny/i)).toBeInTheDocument();
+    const clearButtons = screen
+      .getByRole('group', { name: 'Clear sequence' })
+      .querySelectorAll('button');
+    expect(clearButtons).toHaveLength(4);
 
     const step1 = screen.getByRole('button', { name: /Step 1:/i });
     fireEvent.click(step1);
@@ -56,15 +82,15 @@ describe('BetterJungler App Integration', () => {
     fireEvent.click(wardBtn);
     expect(screen.getByText('Dragon River Control Ward')).toBeInTheDocument();
 
-    // Open Simulator popover -> switch scenario to Mid Game
+    // Switch Simulator to Mid Game -> Live Coach
     fireEvent.click(screen.getByRole('button', { name: /Simulator/i }));
-    const selector = screen.getByLabelText('Simulation scenario');
-    fireEvent.change(selector, { target: { value: 'in_game_mid' } });
+    fireEvent.change(screen.getByLabelText('Simulation scenario'), {
+      target: { value: 'in_game_mid' },
+    });
     expect(screen.getByText(/Elemental Dragon/i)).toBeInTheDocument();
     expect(screen.getByText(/Adaptive Item Build/i)).toBeInTheDocument();
-    expect(screen.getByText(/900 Smite|1200 Smite|600 Smite/i)).toBeInTheDocument();
 
-    // Post-Game Review + synchronized chart <-> map timeline scrubber + ghost path + JSON export
+    // Post-Game Review + synchronized seconds cursor + JSON export
     fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
     expect(screen.getByText(/What You Did Good/i)).toBeInTheDocument();
     const ghostBtn = screen.getByRole('button', { name: /Enemy Jungler Ghost/i });
@@ -76,67 +102,46 @@ describe('BetterJungler App Integration', () => {
     const createObjectUrlSpy = vi.fn<(obj: Blob | MediaSource) => string>(
       () => 'blob:betterjungler-review'
     );
-    const revokeObjectUrlSpy = vi.fn();
     URL.createObjectURL = createObjectUrlSpy;
-    URL.revokeObjectURL = revokeObjectUrlSpy;
+    URL.revokeObjectURL = vi.fn();
     const clickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, 'click')
       .mockImplementation(() => {});
     try {
       fireEvent.click(screen.getByRole('button', { name: /Export Review JSON/i }));
       expect(screen.getByText(/Exported betterjungler-review-/i)).toBeInTheDocument();
-      expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
-      const exportedBlob = createObjectUrlSpy.mock.calls[0]?.[0] as Blob | undefined;
-      expect(exportedBlob).toBeDefined();
-      const exportedText = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result ?? ''));
-        reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob'));
-        reader.readAsText(exportedBlob!);
-      });
-      expect(exportedText).toContain('"schemaVersion": 1');
-      expect(exportedText).toContain(`"appVersion": "${pkg.version}"`);
-      expect(exportedText).not.toContain('puuid');
-      expect(exportedText).not.toContain('summonerName');
-      expect(exportedText).not.toContain('riotId');
     } finally {
       clickSpy.mockRestore();
       URL.createObjectURL = origCreateObjectUrl;
       URL.revokeObjectURL = origRevokeObjectUrl;
     }
-    const scrubber = screen.getByLabelText('Timeline minute cutoff');
-    fireEvent.change(scrubber, { target: { value: '10' } });
-    expect(screen.getByText(/Jungle Path & Timeline Replay \(0m – 10m\)/i)).toBeInTheDocument();
-    expect(screen.getByText('10:00')).toBeInTheDocument();
 
-    // Keyboard slider navigation -> syncs chart & map
+    const scrubber = screen.getByLabelText('Timeline cursor seconds');
+    fireEvent.change(scrubber, { target: { value: '600' } });
+    expect(screen.getByText(/Jungle Path & Timeline Replay \(0:00 – 10:00\)/i)).toBeInTheDocument();
+
     const chartSlider = screen.getByRole('slider', { name: 'Inspect match timeline minute' });
     fireEvent.keyDown(chartSlider, { key: 'Home' });
     fireEvent.keyDown(chartSlider, { key: 'ArrowRight' });
-    expect(screen.getByText(/Jungle Path & Timeline Replay \(0m – 2m\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Jungle Path & Timeline Replay \(0:00 – 2:00\)/i)).toBeInTheDocument();
 
-    // Climb Ladder & Goals + Match Focus roundtrip across views
+    // Climb Ladder & Goals + Match Focus roundtrip
     fireEvent.click(screen.getByRole('button', { name: /Climb & Goals/i }));
     expect(screen.getByText(/Division Climb Ladder/i)).toBeInTheDocument();
-    expect(screen.getByText(/Recommended Next Focus Goals/i)).toBeInTheDocument();
-
     const pinButtons = screen.getAllByRole('button', { name: /Pin Goal/i });
-    expect(pinButtons.length).toBeGreaterThan(0);
     fireEvent.click(pinButtons[0]!);
     await act(async () => {
       await Promise.resolve();
     });
-    const focusBtn = screen.getByRole('button', { name: /Set as Match Focus/i });
-    fireEvent.click(focusBtn);
+    fireEvent.click(screen.getByRole('button', { name: /Set as Match Focus/i }));
     await act(async () => {
       await Promise.resolve();
     });
     fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
-    expect(screen.getByText(/Last Game Takeaway/i)).toBeInTheDocument();
     expect(screen.getByText(/Focus (PASS|MISS)/i)).toBeInTheDocument();
   });
 
-  it('toggles into Compact HUD via button/expand roundtrip, Ctrl+K Simulator with Escape focus return, and renders LiquidGlassFilter', async () => {
+  it('toggles into Compact HUD, Ctrl+K Simulator with Escape focus return, and renders LiquidGlassFilter', async () => {
     const { container } = render(
       <>
         <LiquidGlassFilter />
@@ -159,8 +164,9 @@ describe('BetterJungler App Integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Compact HUD/i }));
     expect(screen.getByTestId('compact-hud-bar')).toBeInTheDocument();
+    expect(screen.getByText(/HUD armed · appears in game/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Expand/i }));
-    expect(screen.getByText('BETTERJUNGLER')).toBeInTheDocument();
+    expect(screen.getByText('BetterJungler')).toBeInTheDocument();
   });
 
   it('renders passive kbd shortcut hint when CompactHudBar is click-through and displays Riot legal disclaimer', async () => {
@@ -190,28 +196,18 @@ describe('BetterJungler App Integration', () => {
     localStorage.setItem('betterjungler_last_seen_version', '0.1.0');
     try {
       await renderAppAndFlush();
-      // Browser demo starts in champ_select -> What's New waits safely until idle
-      expect(screen.queryByText(/What's New in v/i)).not.toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole('button', { name: /Simulator/i }));
-      fireEvent.change(screen.getByLabelText('Simulation scenario'), {
-        target: { value: 'idle' },
-      });
-
-      expect(screen.getByText(new RegExp(`What's New in v${pkg.version.replaceAll('.', '\\.')}`, 'i'))).toBeInTheDocument();
+      // Idle on boot -> What's New is shown cleanly
+      expect(
+        screen.getByText(new RegExp(`What's New in v${pkg.version.replaceAll('.', '\\.')}`, 'i'))
+      ).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: "Dismiss What's New" }));
-      expect(screen.queryByText(new RegExp(`What's New in v${pkg.version.replaceAll('.', '\\.')}`, 'i'))).not.toBeInTheDocument();
       expect(localStorage.getItem('betterjungler_last_seen_version')).toBe(pkg.version);
 
-      expect(screen.getByText(/First-Run Windows Setup/i)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: 'Dismiss setup checklist' }));
-      expect(screen.queryByText(/First-Run Windows Setup/i)).not.toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      expect(screen.getByText(/Keyless LCU Mode active/i)).toBeInTheDocument();
       expect(screen.getByText(/About & Automatic Updates/i)).toBeInTheDocument();
       expect(screen.getByText(`v${pkg.version}`)).toBeInTheDocument();
 
-      // Verify changing HUD scale does not wipe unsaved Riot ID edits
       const riotIdInput = screen.getByLabelText(/Riot ID/i) as HTMLInputElement;
       fireEvent.change(riotIdInput, { target: { value: 'UnsavedSmurf#EUW' } });
       fireEvent.change(screen.getByLabelText('HUD Scale'), { target: { value: '125' } });

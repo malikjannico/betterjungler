@@ -68,12 +68,22 @@ export const KPI_META: Record<
   },
 };
 
+export const MIN_GOAL_COMPLETION_GAMES = 10;
+
 export function isGoalTargetMet(
   goal: ClimbGoal,
   comparisons: DivisionBenchmarkComparison[],
-  hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure')
+  matchCountOrHasMatches: number | boolean = comparisons.some(
+    (c) => c.gapText !== 'Sync matches to measure'
+  )
 ): boolean {
-  if (!hasMatches) return false;
+  const sampleCount =
+    typeof matchCountOrHasMatches === 'number'
+      ? matchCountOrHasMatches
+      : matchCountOrHasMatches
+        ? MIN_GOAL_COMPLETION_GAMES
+        : 0;
+  if (sampleCount < MIN_GOAL_COMPLETION_GAMES) return false;
   const matchComp = comparisons.find((c) => c.metric === goal.metric);
   if (!matchComp) return false;
   return goal.lowerIsBetter
@@ -84,12 +94,18 @@ export function isGoalTargetMet(
 export function syncGoalsWithRollingProgress(
   goals: ClimbGoal[],
   comparisons: DivisionBenchmarkComparison[],
-  hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure')
+  matchCountOrHasMatches: number | boolean = comparisons.some(
+    (c) => c.gapText !== 'Sync matches to measure'
+  )
 ): ClimbGoal[] {
+  const hasMatches =
+    typeof matchCountOrHasMatches === 'number'
+      ? matchCountOrHasMatches > 0
+      : matchCountOrHasMatches;
   return goals.map((goal) => {
     const matchComp = comparisons.find((c) => c.metric === goal.metric);
     if (!matchComp || !hasMatches) return goal;
-    const met = isGoalTargetMet(goal, comparisons, hasMatches);
+    const met = isGoalTargetMet(goal, comparisons, matchCountOrHasMatches);
     return {
       ...goal,
       currentValue: matchComp.currentValue,

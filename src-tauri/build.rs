@@ -15,6 +15,7 @@ fn main() {
             "get_climb_goals",
             "upsert_climb_goal",
             "delete_climb_goal",
+            "set_focus_goal",
             "refresh_high_elo_meta",
             "get_cached_meta_snapshot",
             "save_ai_api_key",

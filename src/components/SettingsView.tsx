@@ -386,6 +386,11 @@ export function SettingsView({
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
             Riot Account &amp; Climb Target
           </h2>
+          <p className="rounded-[8px] border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200/90">
+            <strong>Keyless LCU Mode active:</strong> Open League of Legends for automatic Champ
+            Select &amp; Live HUD coaching without an API key. Add a Riot API key below only for
+            Match-V5 timeline history sync.
+          </p>
 
           <label className="block text-xs">
             <span className="text-slate-300">Riot ID (Name#Tag)</span>
@@ -658,9 +663,9 @@ export function SettingsView({
                 <input
                   type="range"
                   aria-label="HUD Opacity"
-                  min={50}
+                  min={70}
                   max={100}
-                  value={draft.hudOpacity}
+                  value={Math.max(70, draft.hudOpacity)}
                   onChange={(e) =>
                     handleImmediateOverlayPatch(
                       { hudOpacity: Number(e.target.value) },

@@ -100,7 +100,13 @@ export function ClimbTrendCharts({
                 cx={c.x}
                 cy={c.y}
                 r="4"
-                fill={c.pt.win ? '#34d399' : '#fb7185'}
+                fill={
+                  c.pt.win === true
+                    ? '#34d399'
+                    : c.pt.win === false
+                      ? '#fb7185'
+                      : '#94a3b8'
+                }
               />
             ))}
           </svg>

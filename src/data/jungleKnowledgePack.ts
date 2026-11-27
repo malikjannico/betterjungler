@@ -1472,15 +1472,46 @@ export function getChampionMeta(championId: number): ChampionMetaEntry {
   };
 }
 
+export function findChampionIdByName(name: string): number | undefined {
+  const clean = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!clean) return undefined;
+  const jg = JUNGLE_CHAMPIONS.find(
+    (c) =>
+      c.name.toLowerCase().replace(/[^a-z0-9]/g, '') === clean ||
+      c.key.toLowerCase().replace(/[^a-z0-9]/g, '') === clean
+  );
+  if (jg) return jg.championId;
+  for (const entry of Object.values(CHAMPION_META_TABLE)) {
+    if (
+      entry.name.toLowerCase().replace(/[^a-z0-9]/g, '') === clean ||
+      entry.key.toLowerCase().replace(/[^a-z0-9]/g, '') === clean
+    ) {
+      return entry.championId;
+    }
+  }
+  if (hydratedDdragon) {
+    for (const dd of Object.values(hydratedDdragon.championsById)) {
+      if (
+        dd.name.toLowerCase().replace(/[^a-z0-9]/g, '') === clean ||
+        dd.key.toLowerCase().replace(/[^a-z0-9]/g, '') === clean
+      ) {
+        return dd.id;
+      }
+    }
+  }
+  return undefined;
+}
+
 /**
  * Generates multi-clear jungle routes in normalized [0..1000] official map11.png coordinates.
  */
 export function buildRoutesForSide(
   side: MapSide,
   strongSide: 'top' | 'bot' | 'mid',
-  preferredFirstClear: 'full_clear' | 'three_camp_gank' = 'full_clear'
+  preferredFirstClear: 'full_clear' | 'three_camp_gank' = 'full_clear',
+  customFirstReason?: string
 ): JungleRoute[] {
-  return buildMultiClearRoutes(side, strongSide, preferredFirstClear);
+  return buildMultiClearRoutes(side, strongSide, preferredFirstClear, customFirstReason);
 }
 
 export function buildWardSpotsForSide(side: MapSide): WardSpot[] {

@@ -99,6 +99,7 @@ vi.mock('./services/tauriBridge', () => ({
   setOverlayMode: vi.fn(),
   upsertClimbGoal: vi.fn(),
   deleteClimbGoal: vi.fn(),
+  setFocusGoal: vi.fn().mockResolvedValue([]),
   refreshHighEloMeta: vi.fn(),
   saveSettings: vi.fn(),
   saveRiotApiKey: vi.fn(),

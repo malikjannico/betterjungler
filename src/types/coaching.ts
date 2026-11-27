@@ -42,10 +42,14 @@ export type JungleRouteStage =
 
 export interface JungleRoute {
   id: string;
+  clearNumber: 1 | 2 | 3 | 4;
+  shortLabel: string;
+  descriptor: string;
   label: string;
   side: MapSide;
   stage: JungleRouteStage;
   stageLabel: string;
+  objectiveFocus?: 'dragon' | 'grubs' | 'baron';
   timeWindow: string;
   whyThisClear: string;
   style: 'full_clear' | 'three_camp_gank' | 'invade';
@@ -321,7 +325,7 @@ export interface LpHistoryPoint {
   rank: string;
   leaguePoints: number;
   absoluteLp: number;
-  win: boolean;
+  win?: boolean | null;
   matchId?: string;
 }
 
@@ -391,9 +395,10 @@ export interface ReviewFinding {
 
 export interface PostGameKpis {
   csPerMin: number;
-  csAt4: number;
+  csAt4?: number;
   csAt5?: number;
   csAt10?: number;
+  csAt10Minute?: number;
   goldDiffAt10: number;
   goldDiffAt15: number;
   xpDiffAt15: number;

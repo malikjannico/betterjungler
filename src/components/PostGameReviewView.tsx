@@ -1,12 +1,15 @@
-import { useMemo, useState } from 'react';
+import { History } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import pkg from '../../package.json';
 import { synthesizeDemoPostGameDebrief } from '../domain/aiCoachFallback';
 import { evaluateFocusGoalAgainstMatch } from '../domain/climbLadderEngine';
 import { formatClock } from '../domain/liveCoachEngine';
 import { analyzePostGameMatch } from '../domain/postGameReviewEngine';
+import type { EmptyReason } from '../domain/sessionContext';
 import { generateAiDebrief } from '../services/tauriBridge';
-import type { AiCoachConfig, ClimbGoal } from '../types/coaching';
+import type { AiCoachConfig, ClimbGoal, DemoScenarioId } from '../types/coaching';
 import type { MatchV5Detail } from '../types/riot';
+import { EmptyState } from './EmptyState';
 import { GlassSurface } from './GlassSurface';
 import { GoldXpDiffChart } from './GoldXpDiffChart';
 import { PostGameTimelineMap } from './PostGameTimelineMap';
@@ -21,7 +24,10 @@ interface PostGameReviewViewProps {
   focusGoal?: ClimbGoal | null;
   lastAutoSyncedMatchId?: string | null;
   autoSyncNotice?: string | null;
+  emptyReason?: EmptyReason;
   onSyncMatches: () => Promise<void>;
+  onOpenSettings?: () => void;
+  onPreviewSample?: (scenario: DemoScenarioId) => void;
 }
 
 export function PostGameReviewView({
@@ -34,7 +40,10 @@ export function PostGameReviewView({
   focusGoal,
   lastAutoSyncedMatchId,
   autoSyncNotice,
+  emptyReason,
   onSyncMatches,
+  onOpenSettings,
+  onPreviewSample,
 }: PostGameReviewViewProps) {
   const [selection, setSelection] = useState<{
     manualId: string | null;
@@ -43,10 +52,10 @@ export function PostGameReviewView({
     manualId: null,
     seenAutoSyncId: lastAutoSyncedMatchId ?? null,
   });
-  const [activeMinuteState, setActiveMinuteState] = useState<{
+  const [activeSecondState, setActiveSecondState] = useState<{
     matchId: string;
-    minute: number | null;
-  }>({ matchId: '', minute: null });
+    second: number | null;
+  }>({ matchId: '', second: null });
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -63,6 +72,20 @@ export function PostGameReviewView({
     kind: 'success' | 'error';
     message: string;
   } | null>(null);
+  const pendingRevokesRef = useRef<Array<{ timerId: number; url: string }>>([]);
+
+  useEffect(() => {
+    const revokes = pendingRevokesRef;
+    return () => {
+      for (const entry of revokes.current) {
+        window.clearTimeout(entry.timerId);
+        if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+          URL.revokeObjectURL(entry.url);
+        }
+      }
+      revokes.current = [];
+    };
+  }, []);
 
   const followAutoSync =
     Boolean(lastAutoSyncedMatchId) &&
@@ -76,9 +99,9 @@ export function PostGameReviewView({
   const selectedMatch =
     matches.find((m) => m.matchId === effectiveSelectedId) ?? matches[0] ?? null;
 
-  const activeMinute =
-    selectedMatch && activeMinuteState.matchId === selectedMatch.matchId
-      ? activeMinuteState.minute
+  const activeSecond =
+    selectedMatch && activeSecondState.matchId === selectedMatch.matchId
+      ? activeSecondState.second
       : null;
   const aiDebrief =
     selectedMatch && aiDebriefState.matchId === selectedMatch.matchId ? aiDebriefState.text : null;
@@ -133,7 +156,15 @@ export function PostGameReviewView({
           anchor.click();
         } finally {
           anchor.remove();
-          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+          const timerId = window.setTimeout(() => {
+            pendingRevokesRef.current = pendingRevokesRef.current.filter(
+              (entry) => entry.url !== url
+            );
+            if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+              URL.revokeObjectURL(url);
+            }
+          }, 1000);
+          pendingRevokesRef.current.push({ timerId, url });
         }
       } else {
         try {
@@ -178,6 +209,7 @@ export function PostGameReviewView({
     const context = JSON.stringify({
       champion: report.championName,
       enemyJungler: report.enemyJunglerName,
+      duration: formatClock(report.durationSeconds),
       win: report.win,
       grade: report.grade,
       targetDivision,
@@ -208,26 +240,39 @@ export function PostGameReviewView({
 
   if (!selectedMatch || !report) {
     return (
-      <GlassSurface className="space-y-3 p-8 text-center text-xs text-slate-300">
-        <p>
-          No ranked jungle matches loaded yet. Sync your recent games or select a Demo scenario.
-        </p>
-        <div>
-          <button
-            type="button"
-            disabled={!canSyncLive || syncing}
-            onClick={() => void handleSync()}
-            className="lg-btn-glass px-4 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {syncing ? 'Syncing...' : canSyncLive ? 'Sync Recent Games' : 'Save Riot API Key in Settings'}
-          </button>
-        </div>
-        {syncError && (
-          <p className="mx-auto max-w-md rounded-lg border border-rose-400/35 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">
-            {syncError}
-          </p>
-        )}
-      </GlassSurface>
+      <div className="space-y-4">
+        <EmptyState
+          icon={History}
+          title="No ranked jungle matches loaded yet"
+          description={
+            emptyReason === 'no_account' || !canSyncLive
+              ? 'Save your Riot ID & Personal Riot API Key in Settings to download Match-V5 timelines and review pathing, objectives, and mistakes.'
+              : 'Sync your recent ranked jungle games to review minute-by-minute gold swings, pathing replay, and objective mistakes.'
+          }
+          action={
+            canSyncLive
+              ? {
+                  label: syncing ? 'Syncing...' : 'Sync Recent Games',
+                  onClick: () => void handleSync(),
+                  disabled: syncing,
+                }
+              : onOpenSettings
+                ? {
+                    label: 'Open Settings',
+                    onClick: onOpenSettings,
+                  }
+                : undefined
+          }
+          onPreviewSample={onPreviewSample ? () => onPreviewSample('in_game_mid') : undefined}
+          sampleLabel="Preview sample review"
+        >
+          {syncError && (
+            <p className="t-caption mt-3 rounded-[7px] border border-rose-400/35 bg-rose-400/10 px-3 py-2 text-rose-200">
+              {syncError}
+            </p>
+          )}
+        </EmptyState>
+      </div>
     );
   }
 
@@ -240,8 +285,12 @@ export function PostGameReviewView({
           ? 'text-white border-white/25 bg-white/10'
           : 'text-rose-200 border-rose-300/40 bg-rose-400/10';
 
+  const effectiveCursorSecond = activeSecond ?? selectedMatch.durationSeconds;
+  const csTenLabel =
+    report.kpis.csAt10Minute === 11 ? 'CS @5 / @11' : 'CS @5 / @10';
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Match Selector Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="lg-segmented flex flex-wrap items-center gap-1">
@@ -257,15 +306,15 @@ export function PostGameReviewView({
                     manualId: m.matchId,
                     seenAutoSyncId: lastAutoSyncedMatchId ?? null,
                   });
-                  setActiveMinuteState({
+                  setActiveSecondState({
                     matchId: m.matchId,
-                    minute: Math.max(1, Math.ceil(m.durationSeconds / 60)),
+                    second: m.durationSeconds,
                   });
                 }}
-                className={`rounded-full px-3 py-1 text-left text-xs transition ${
+                className={`rounded-[7px] px-3 py-1 text-left text-xs transition ${
                   active
                     ? 'lg-segment-active font-semibold'
-                    : 'border border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-100'
+                    : 'border border-transparent text-white/[0.62] hover:bg-white/[0.04] hover:text-white'
                 }`}
               >
                 <span
@@ -276,7 +325,7 @@ export function PostGameReviewView({
                   {m.win ? 'W' : 'L'}
                 </span>
                 <span>{m.championName}</span>
-                <span className="tabular-nums ml-1.5 text-[10px] text-slate-400">
+                <span className="tabular-nums ml-1.5 text-[11px] text-white/[0.55]">
                   {m.kills}/{m.deaths}/{m.assists}
                 </span>
               </button>
@@ -289,7 +338,7 @@ export function PostGameReviewView({
             type="button"
             disabled={!report}
             onClick={handleExportReview}
-            className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-slate-200 disabled:opacity-50"
+            className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white/[0.85] disabled:opacity-50"
           >
             Export Review JSON
           </button>
@@ -311,7 +360,7 @@ export function PostGameReviewView({
       {exportFeedback && (
         <p
           role={exportFeedback.kind === 'error' ? 'alert' : 'status'}
-          className={`rounded-lg border px-3 py-2 text-xs ${
+          className={`t-caption rounded-[8px] border px-3 py-2 ${
             exportFeedback.kind === 'error'
               ? 'border-rose-400/35 bg-rose-500/10 text-rose-200'
               : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
@@ -322,7 +371,7 @@ export function PostGameReviewView({
       )}
 
       {syncError && (
-        <p className="rounded-lg border border-rose-400/35 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">
+        <p className="t-caption rounded-[8px] border border-rose-400/35 bg-rose-400/10 px-3 py-2 text-rose-200">
           {syncError}
         </p>
       )}
@@ -330,26 +379,24 @@ export function PostGameReviewView({
       {autoSyncNotice && !syncError && (
         <p
           role="status"
-          className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+          className="t-caption rounded-[8px] border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100"
         >
           {autoSyncNotice}
         </p>
       )}
 
-      {/* Last Game Takeaway & Focus Goal Grading */}
+      {/* Last Game Takeaway & Lead Focus Goal PASS/MISS Verdict */}
       <GlassSurface className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs">
         <div className="space-y-0.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+            <span className="t-caption font-semibold text-white/[0.55]">
               Last Game Takeaway
             </span>
             {selectedMatch.matchId === lastAutoSyncedMatchId && (
-              <span className="rounded-full border border-emerald-400/35 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-200">
-                Auto-Synced
-              </span>
+              <span className="t-caption font-medium text-emerald-300">Auto-Synced</span>
             )}
           </div>
-          <p className="text-slate-200">
+          <p className="t-body text-white/[0.88]">
             {report.mistakes[0]?.detail ??
               report.improvements[0]?.detail ??
               report.highlights[0]?.detail ??
@@ -358,19 +405,17 @@ export function PostGameReviewView({
         </div>
 
         {focusGoal && focusGoalResult && (
-          <div className="flex items-center gap-2 rounded-lg border border-white/12 bg-white/[0.04] px-3 py-1.5">
+          <div className="lg-inset flex items-center gap-2.5 px-3 py-2">
             <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                focusGoalResult.passed
-                  ? 'bg-emerald-500/20 text-emerald-200'
-                  : 'bg-rose-500/20 text-rose-200'
+              className={`t-caption font-bold ${
+                focusGoalResult.passed ? 'text-emerald-300' : 'text-rose-300'
               }`}
             >
               Focus {focusGoalResult.passed ? 'PASS' : 'MISS'}
             </span>
-            <div className="text-[11px]">
-              <div className="font-medium text-white">{focusGoal.title}</div>
-              <div className="tabular-nums text-[10px] text-slate-400">
+            <div className="t-caption">
+              <div className="font-medium text-white/[0.92]">{focusGoal.title}</div>
+              <div className="tabular-nums text-[11px] text-white/[0.55]">
                 {focusGoalResult.deltaLabel}
               </div>
             </div>
@@ -379,22 +424,22 @@ export function PostGameReviewView({
       </GlassSurface>
 
       {/* Match Header + Grade + KPIs */}
-      <GlassSurface className="p-5">
+      <GlassSurface className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2.5">
-              <h2 className="text-sm font-semibold text-white">
+              <h2 className="t-title text-white/[0.92]">
                 {report.championName} vs {report.enemyJunglerName}
               </h2>
               <span
-                className={`text-[11px] font-semibold ${
+                className={`t-caption font-semibold ${
                   report.win ? 'text-emerald-300' : 'text-rose-300'
                 }`}
               >
-                {report.win ? 'VICTORY' : 'DEFEAT'} · {formatClock(report.durationSeconds)}
+                {report.win ? 'Victory' : 'Defeat'} · {formatClock(report.durationSeconds)}
               </span>
             </div>
-            <p className="mt-0.5 text-[11px] text-slate-400">
+            <p className="t-caption mt-0.5 text-white/[0.55]">
               Benchmarked against {targetDivision}
             </p>
           </div>
@@ -409,24 +454,22 @@ export function PostGameReviewView({
 
         <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-7">
           {[
-            { label: 'CS / Min', value: String(report.kpis.csPerMin) },
+            { label: 'CS / min', value: String(report.kpis.csPerMin) },
             {
-              label: 'CS @5 / @10',
+              label: csTenLabel,
               value: `${report.kpis.csAt5 ?? 'n/a'} / ${report.kpis.csAt10 ?? 'n/a'}`,
             },
             {
-              label: 'Gold Diff @15',
+              label: 'Gold diff @15',
               value: `${report.kpis.goldDiffAt15 >= 0 ? '+' : ''}${report.kpis.goldDiffAt15}g`,
             },
-            { label: 'Obj Share', value: `${report.kpis.objectiveSharePct}%` },
-            { label: 'Vision / Min', value: String(report.kpis.visionPerMin) },
-            { label: 'Pre-Obj Deaths', value: String(report.kpis.preObjectiveDeaths) },
-            { label: 'Control Wards', value: String(report.kpis.controlWardsBought) },
+            { label: 'Obj share', value: `${report.kpis.objectiveSharePct}%` },
+            { label: 'Vision / min', value: String(report.kpis.visionPerMin) },
+            { label: 'Pre-obj deaths', value: String(report.kpis.preObjectiveDeaths) },
+            { label: 'Control wards', value: String(report.kpis.controlWardsBought) },
           ].map((kpi) => (
             <div key={kpi.label} className="lg-inset px-3 py-2.5">
-              <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                {kpi.label}
-              </div>
+              <div className="t-caption text-white/[0.55]">{kpi.label}</div>
               <div className="tabular-nums mt-1 text-base font-bold text-white">
                 {kpi.value}
               </div>
@@ -439,9 +482,9 @@ export function PostGameReviewView({
       <GoldXpDiffChart
         key={`chart-${selectedMatch.matchId}`}
         match={selectedMatch}
-        activeMinute={activeMinute ?? Math.max(1, Math.ceil(selectedMatch.durationSeconds / 60))}
-        onSelectMinute={(minute) =>
-          setActiveMinuteState({ matchId: selectedMatch.matchId, minute })
+        activeSecond={effectiveCursorSecond}
+        onSelectSecond={(second) =>
+          setActiveSecondState({ matchId: selectedMatch.matchId, second })
         }
       />
 
@@ -452,43 +495,43 @@ export function PostGameReviewView({
         pathPoints={report.pathPoints}
         enemyPathPoints={report.enemyPathPoints}
         markers={report.markers}
-        activeMinute={activeMinute ?? Math.max(1, Math.ceil(selectedMatch.durationSeconds / 60))}
-        onChangeMinute={(minute) =>
-          setActiveMinuteState({ matchId: selectedMatch.matchId, minute })
+        activeSecond={effectiveCursorSecond}
+        onChangeSecond={(second) =>
+          setActiveSecondState({ matchId: selectedMatch.matchId, second })
         }
       />
 
       {/* What You Did Good / Mistakes / Where to Improve */}
-      <GlassSurface className="p-5">
+      <GlassSurface className="p-4">
         <div className="grid gap-6 md:grid-cols-3">
           <div>
-            <div className="mb-2.5 text-xs font-semibold text-emerald-300">
+            <div className="t-caption mb-2.5 font-semibold text-emerald-300">
               What You Did Good
             </div>
             <div className="space-y-2.5">
               {report.highlights.map((item) => (
-                <div key={item.id} className="text-[11px]">
-                  <div className="font-semibold text-white">{item.title}</div>
-                  <p className="mt-0.5 text-slate-400">{item.detail}</p>
+                <div key={item.id} className="t-caption">
+                  <div className="font-semibold text-white/[0.92]">{item.title}</div>
+                  <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
                 </div>
               ))}
             </div>
           </div>
 
           <div className="border-t border-white/[0.08] pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6">
-            <div className="mb-2.5 text-xs font-semibold text-rose-300">
+            <div className="t-caption mb-2.5 font-semibold text-rose-300">
               Mistakes to Cut Out
             </div>
             <div className="space-y-2.5">
               {report.mistakes.length > 0 ? (
                 report.mistakes.map((item) => (
-                  <div key={item.id} className="text-[11px]">
-                    <div className="font-semibold text-white">{item.title}</div>
-                    <p className="mt-0.5 text-slate-400">{item.detail}</p>
+                  <div key={item.id} className="t-caption">
+                    <div className="font-semibold text-white/[0.92]">{item.title}</div>
+                    <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
                   </div>
                 ))
               ) : (
-                <p className="text-[11px] text-slate-400">
+                <p className="t-caption text-white/[0.58]">
                   No major macro mistakes flagged in this match.
                 </p>
               )}
@@ -496,14 +539,14 @@ export function PostGameReviewView({
           </div>
 
           <div className="border-t border-white/[0.08] pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6">
-            <div className="mb-2.5 text-xs font-semibold text-white">
+            <div className="t-caption mb-2.5 font-semibold text-white/[0.92]">
               Where &amp; How to Improve
             </div>
             <div className="space-y-2.5">
               {report.improvements.map((item) => (
-                <div key={item.id} className="text-[11px]">
-                  <div className="font-semibold text-white">{item.title}</div>
-                  <p className="mt-0.5 text-slate-400">{item.detail}</p>
+                <div key={item.id} className="t-caption">
+                  <div className="font-semibold text-white/[0.92]">{item.title}</div>
+                  <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
                 </div>
               ))}
             </div>
@@ -514,7 +557,7 @@ export function PostGameReviewView({
       {/* Optional BYOK AI Coach Debrief */}
       <GlassSurface className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-medium text-slate-300">
+          <span className="t-caption font-medium text-white/[0.75]">
             Optional AI Coach Debrief (
             {aiConfig.provider === 'off'
               ? 'Built-in Coaching Preview / Configure AI in Settings'
@@ -532,11 +575,11 @@ export function PostGameReviewView({
         </div>
 
         {aiDebrief && (
-          <pre className="lg-inset mt-3 whitespace-pre-wrap p-3 font-sans text-xs leading-relaxed text-slate-200">
+          <pre className="lg-inset t-caption mt-3 whitespace-pre-wrap p-3 font-sans leading-relaxed text-white/[0.88]">
             {aiDebrief}
           </pre>
         )}
-        {aiError && <p className="mt-2 text-xs text-rose-300">{aiError}</p>}
+        {aiError && <p className="t-caption mt-2 text-rose-300">{aiError}</p>}
       </GlassSurface>
     </div>
   );

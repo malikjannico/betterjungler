@@ -2,6 +2,19 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [1.1.0] - 2026-11-27
+
+### Added
+- **Truthful Session Gating & Climb Home Page**: Centralized view readiness in `deriveSessionContext()`, promoted **Climb & Goals** to the default Home tab, and replaced idle/unconfigured synthetic fallbacks across Champ Select, Win Plan & Map, Live Coach, Post-Game Review, and Climb & Goals with calm `<EmptyState>` views and an explicit Simulator preview opt-in.
+- **Modular Transparent Compact HUD (`424×184`)**: Redesigned Compact HUD into independent frosted micro-cards (Status Pill, Pre-1:30 Route Card, 2-Column Objective Countdown + Next Buy cards, and conditional Tactical Cue card) over a transparent click-through canvas with a `70%` opacity legibility floor (`80%` default).
+- **Single-Row Clear Sequence & Dynamic Pathing**: Refined `jungleRoutingEngine` (`pickFirstClear`) to select strictly one optimal Clear 1 (`full_clear` or `three_camp_gank`), adapt Clear 2 accordingly, and render a single-line 4-column segmented bar (`Clear 1`–`Clear 4`) with an animated active thumb.
+- **SQLite `PRAGMA user_version` Fact Tables & Transactional Focus Goal**: Added schema version migrations (`v2`), idempotent backfill into `matches_fact`, `match_metrics`, `match_events`, `mistake_hits`, and `baselines`, atomic `set_focus_goal` command, `wins + losses` LP settlement deduplication, League install auto-detection, and seconds-granular Post-Game timeline scrubbing.
+- **WGC Recording & Riot Replay API Spike**: Documented Windows Graphics Capture + Media Foundation hardware H.264 architecture and `.rofl` / Replay API (`127.0.0.1:2999/replay/*`) deep-linking in `docs/RECORDER_AND_REPLAY_SPIKE.md`.
+
+### Changed
+- **UI Sophistication & Craft Overhaul**: Adopted a 4-step typography scale, concentric window/card/control radii (`12px`/`10px`/`7px`), flat hairline card plates, a `40px` header strip with persistent simulation banner, and a single priority notification slot.
+- **Statistical & Timeline Honesty**: Applied Beta-Binomial shrinkage to Champ Select win-rate weighting (`scoreChampion()`), enforced `n >= 10` rolling sample depth before locking Climb Goal completions, eliminated extrapolated `CS @4` guesses, and hardened `.github/workflows/release.yml` signing secret scoping.
+
 ## [1.0.0] - 2026-11-27
 
 ### Added

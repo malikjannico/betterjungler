@@ -187,18 +187,22 @@ fn record_lp_if_changed(
         }
     }
     let abs_lp = tier_rank_to_absolute_lp(&profile.tier, &profile.rank, profile.league_points);
+    let total_games = profile.wins.saturating_add(profile.losses);
     let latest = storage::get_latest_lp_snapshot(conn).ok().flatten();
     let should_insert = match &latest {
         Some(prev) => {
-            prev.absolute_lp != abs_lp || (recent_win.is_some() && prev.league_points == 0)
+            let games_advanced = prev.total_games.is_some_and(|prev_tg| total_games > prev_tg);
+            prev.absolute_lp != abs_lp
+                || (recent_win.is_some() && prev.league_points == 0)
+                || games_advanced
         }
         None => true,
     };
     if should_insert {
         let won = match &latest {
-            Some(prev) if abs_lp > prev.absolute_lp => true,
-            Some(prev) if abs_lp < prev.absolute_lp => false,
-            _ => recent_win.unwrap_or_else(|| profile.wins >= profile.losses),
+            Some(prev) if abs_lp > prev.absolute_lp => Some(true),
+            Some(prev) if abs_lp < prev.absolute_lp => Some(false),
+            _ => recent_win.or(if latest.is_some() { Some(false) } else { None }),
         };
         let _ = storage::append_lp_snapshot(
             conn,
@@ -210,6 +214,7 @@ fn record_lp_if_changed(
                 absolute_lp: abs_lp,
                 win: won,
                 match_id,
+                total_games: Some(total_games),
             },
         );
     }
@@ -426,6 +431,18 @@ fn delete_climb_goal(state: State<'_, Arc<SharedState>>, goal_id: String) -> App
 }
 
 #[tauri::command]
+fn set_focus_goal(
+    state: State<'_, Arc<SharedState>>,
+    goal_id: String,
+) -> AppResult<Vec<ClimbGoalRecord>> {
+    let mut conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::set_focus_goal(&mut conn, &goal_id)
+}
+
+#[tauri::command]
 async fn refresh_high_elo_meta(
     state: State<'_, Arc<SharedState>>,
     region: String,
@@ -530,7 +547,7 @@ fn update_overlay_preferences(
         settings.hud_corner = hud_corner;
         settings.overlay_hotkey = overlay_hotkey;
         if let Some(op) = hud_opacity {
-            settings.hud_opacity = op.clamp(50, 100);
+            settings.hud_opacity = op.clamp(70, 100);
         }
         if let Some(sc) = hud_scale {
             settings.hud_scale = overlay::normalize_hud_scale(sc);
@@ -997,6 +1014,7 @@ pub fn run() {
             get_climb_goals,
             upsert_climb_goal,
             delete_climb_goal,
+            set_focus_goal,
             refresh_high_elo_meta,
             get_cached_meta_snapshot,
             save_ai_api_key,
@@ -1082,10 +1100,18 @@ mod tests {
 
         let hist = storage::list_lp_history(&conn, 10).expect("list lp");
         assert_eq!(hist.len(), 4);
-        assert!(hist[0].win);
-        assert!(!hist[1].win);
-        assert!(!hist[2].win);
+        assert_eq!(hist[0].win, Some(true));
+        assert_eq!(hist[1].win, Some(false));
+        assert_eq!(hist[2].win, Some(false));
         assert_eq!(hist[2].match_id.as_deref(), Some("M3"));
         assert_eq!(hist[3].match_id.as_deref(), Some("M4"));
+
+        // Fresh baseline snapshot with recent_win=None stays neutral (None)
+        let conn2 = Connection::open_in_memory().expect("in-memory sqlite 2");
+        storage::run_migrations(&conn2).expect("migrations 2");
+        record_lp_if_changed(&conn2, &sample_profile("GOLD", "IV", 50), None, None);
+        let base_hist = storage::list_lp_history(&conn2, 5).expect("base hist");
+        assert_eq!(base_hist.len(), 1);
+        assert_eq!(base_hist[0].win, None);
     }
 }

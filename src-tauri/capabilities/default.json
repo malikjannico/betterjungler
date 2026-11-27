@@ -26,6 +26,7 @@
     "allow-get-climb-goals",
     "allow-upsert-climb-goal",
     "allow-delete-climb-goal",
+    "allow-set-focus-goal",
     "allow-refresh-high-elo-meta",
     "allow-get-cached-meta-snapshot",
     "allow-save-ai-api-key",

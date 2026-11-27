@@ -72,6 +72,14 @@ describe('climbLadderEngine', () => {
     expect(csGoal?.status).toBe('completed');
     expect(deathGoal?.status).toBe('active');
 
+    // Sample depth guard (n < 10) prevents premature automatic goal completion
+    const insufficientDepth = syncGoalsWithRollingProgress(
+      [csGoal!].map((g) => ({ ...g, status: 'active' as const })),
+      evaluation.comparisons,
+      5
+    );
+    expect(insufficientDepth[0]?.status).toBe('active');
+
     const frozenWithoutMatches = syncGoalsWithRollingProgress(
       [csGoal!].map((g) => ({ ...g, status: 'active' as const })),
       evaluation.comparisons,

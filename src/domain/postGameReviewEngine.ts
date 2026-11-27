@@ -63,22 +63,21 @@ export function analyzePostGameMatch(
   const visionPerMin = Math.round((match.visionScore / durationMins) * 100) / 100;
   const controlWardsBought = match.controlWardsBought;
 
-  const frame4 = getFrameAtMinute(match, 4);
-  const frame10 = getFrameAtMinute(match, 10);
-  const frame15 = getFrameAtMinute(match, 15);
-
+  const exactFrame4 = match.frames.find((f) => f.minute === 4);
   const exactFrame5 = match.frames.find((f) => f.minute === 5);
   const frame6 = match.frames.find((f) => f.minute === 6);
-  const csAt4 = frame4?.cs ?? Math.round(csPerMin * 4);
+  const csAt4 = match.durationSeconds < 240 ? undefined : exactFrame4?.cs;
   const csAt5 =
     match.durationSeconds < 300
       ? undefined
       : exactFrame5?.cs ??
-        (frame4 && frame6 && frame4.minute === 4
-          ? Math.round((frame4.cs + frame6.cs) / 2)
-          : undefined);
-  const exactFrame10 = match.frames.find((f) => f.minute === 10 || f.minute === 11);
+        (exactFrame4 && frame6 ? Math.round((exactFrame4.cs + frame6.cs) / 2) : undefined);
+  const exactFrame10 =
+    match.frames.find((f) => f.minute === 10) ?? match.frames.find((f) => f.minute === 11);
   const csAt10 = match.durationSeconds < 600 ? undefined : exactFrame10?.cs;
+  const csAt10Minute = csAt10 !== undefined ? exactFrame10?.minute : undefined;
+  const frame10 = getFrameAtMinute(match, 10);
+  const frame15 = getFrameAtMinute(match, 15);
   const goldDiffAt10 = frame10 ? frame10.totalGold - frame10.enemyJunglerGold : 0;
   const goldDiffAt15 = frame15 ? frame15.totalGold - frame15.enemyJunglerGold : 0;
   const xpDiffAt15 = frame15 ? frame15.xp - frame15.enemyJunglerXp : 0;
@@ -123,6 +122,7 @@ export function analyzePostGameMatch(
     csAt4,
     csAt5,
     csAt10,
+    csAt10Minute,
     goldDiffAt10,
     goldDiffAt15,
     xpDiffAt15,
@@ -241,7 +241,10 @@ export function analyzePostGameMatch(
       category: 'pathing',
       severity: 'positive',
       title: `Strong Early Jungle Tempo (+${goldDiffAt15}g @ 15m)`,
-      detail: `Out-paced ${match.enemyJunglerName} through the first 15 minutes with ${csAt4} CS at 4:00.`,
+      detail:
+        csAt4 !== undefined
+          ? `Out-paced ${match.enemyJunglerName} through the first 15 minutes with ${csAt4} CS at 4:00.`
+          : `Out-paced ${match.enemyJunglerName} through the first 15 minutes in early jungle gold tempo.`,
     });
   }
   if (objectiveSharePct >= 55) {

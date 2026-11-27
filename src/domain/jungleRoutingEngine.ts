@@ -1,4 +1,5 @@
 import type {
+  JungleChampionProfile,
   JungleRoute,
   JungleRouteStep,
   ObjectiveWindow,
@@ -50,17 +51,122 @@ function makeStep(
   return { order, campId, campName, x: pos.x, y: pos.y, targetTime, note };
 }
 
+export interface PickFirstClearInput {
+  champion?: JungleChampionProfile;
+  strongSide: 'top' | 'bot' | 'mid';
+  strongLanePriority?: number;
+  invadeRisk?: 'low' | 'medium' | 'high';
+}
+
+export interface FirstClearDecision {
+  style: 'full_clear' | 'three_camp_gank';
+  reason: string;
+}
+
 /**
- * Generates multi-clear jungle routes covering:
- * 1) Opening Clear (1:30-3:30)
- * 2) Respawn Sequence Clear 2 (4:15-5:45) - explains repeating starting quadrant order
- * 3) Objective-Synced Clears (6:00-14:00) - Dragon vs Voidgrubs/Herald
+ * Selects strictly ONE recommended opening clear style based on champion identity,
+ * strong-side lane priority, and enemy jungle invade threat.
+ */
+export function pickFirstClear(input: PickFirstClearInput): FirstClearDecision {
+  const champ = input.champion;
+  let score = 0;
+
+  if (champ?.preferredFirstClear === 'three_camp_gank') score += 2;
+  if (champ?.powerSpike === 'early') score += 1;
+  if ((input.strongLanePriority ?? 6) >= 8) score += 2;
+  else if ((input.strongLanePriority ?? 6) === 7) score += 1;
+
+  if (champ?.clearSpeed === 'fast' && champ?.preferredFirstClear === 'full_clear') score -= 2;
+  if (champ?.powerSpike === 'late') score -= 1;
+  if (input.invadeRisk === 'high') score -= 2;
+  if (input.strongSide === 'mid') score -= 1;
+
+  if (score >= 3 && input.strongSide !== 'mid') {
+    const laneWord = input.strongSide === 'bot' ? 'Bot' : 'Top';
+    return {
+      style: 'three_camp_gank',
+      reason: `Fast Level 3 gank toward ${laneWord} exploits high lane volatility 45s before enemy full-clear finishes.`,
+    };
+  }
+
+  return {
+    style: 'full_clear',
+    reason:
+      'Unlocks Level 4 + 1st item component on recall. Path toward your strong side to reach 3:30 Scuttle with priority.',
+  };
+}
+
+export function buildObjectiveSyncRoute(
+  side: MapSide,
+  focus: 'dragon' | 'grubs'
+): JungleRoute {
+  const isBlue = side === 'blue';
+  const own = isBlue ? RIFT_NODES.blue : RIFT_NODES.red;
+
+  if (focus === 'dragon') {
+    return {
+      id: `${side}-clear3-dragon`,
+      clearNumber: 3,
+      shortLabel: 'Clear 3',
+      descriptor: 'Dragon Sync · Top → Bot',
+      label: 'Clear 3 · Dragon Sync (Top → Bot)',
+      side,
+      stage: 'objective_sync',
+      stageLabel: 'Clear 3 · Dragon',
+      objectiveFocus: 'dragon',
+      timeWindow: '6:00 – 14:00',
+      whyThisClear:
+        'Start Top camps ~65s before Dragon so your clear ends Bot-side with full HP and spent gold right on spawn.',
+      style: 'full_clear',
+      summary:
+        'Clear Top quadrant -> Bot quadrant -> Dragon Pit to arrive 30s early without dropping camp XP.',
+      steps: [
+        makeStep(1, 'd-1', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '-65s', 'Clear Top-side camp while Dragon is 1m out'),
+        makeStep(2, 'd-2', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '-48s', 'Transition downward toward Mid'),
+        makeStep(3, 'd-3', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '-30s', 'Ping Bot/Mid to shove waves'),
+        makeStep(4, 'd-4', isBlue ? 'Red Buff' : 'Blue Buff', isBlue ? own.red : own.blue, '-15s', 'Secure buff combat stats for river fight'),
+        makeStep(5, 'd-pit', 'Dragon Pit', RIFT_NODES.river.dragon, 'Spawn', 'Place Control Ward & secure Dragon'),
+      ],
+    };
+  }
+
+  return {
+    id: `${side}-clear3-grubs`,
+    clearNumber: 3,
+    shortLabel: 'Clear 3',
+    descriptor: 'Grubs / Herald Sync · Bot → Top',
+    label: 'Clear 3 · Grubs / Herald Sync (Bot → Top)',
+    side,
+    stage: 'objective_sync',
+    stageLabel: 'Clear 3 · Top Obj',
+    objectiveFocus: 'grubs',
+    timeWindow: '6:00 – 14:00',
+    whyThisClear:
+      'Flip Bot → Top before Voidgrubs or Rift Herald so you finish camps next to Top River with lane priority.',
+    style: 'full_clear',
+    summary: 'Sequence Bot camps into Top camps -> sweep Baron/Grubs pit and take Top objective.',
+    steps: [
+      makeStep(1, 'g-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '-65s', 'Clear Bot-side outer camp first'),
+      makeStep(2, 'g-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '-48s', 'Move upward across Mid'),
+      makeStep(3, 'g-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '-30s', 'Check Top/Mid wave push'),
+      makeStep(4, 'g-4', isBlue ? 'Blue Buff' : 'Red Buff', isBlue ? own.blue : own.red, '-15s', 'Grab buff before contesting river'),
+      makeStep(5, 'g-pit', 'Grubs / Herald Pit', RIFT_NODES.river.baronGrubs, 'Spawn', 'Sweep & secure Grubs/Herald'),
+    ],
+  };
+}
+
+/**
+ * Generates strictly ONE route per clear number (Clear 1 through Clear 4):
+ * 1) Opening Clear (1:30–3:30)
+ * 2) Second Clear / Cleanup Sequence (follows from Clear 1 style)
+ * 3) Objective-Synced Clear (Dragon or Grubs/Herald)
  * 4) Mid/Late Baron & Cross-Map Control (14:00+)
  */
 export function buildMultiClearRoutes(
   side: MapSide,
   strongSide: 'top' | 'bot' | 'mid',
-  preferredFirstClear: 'full_clear' | 'three_camp_gank' = 'full_clear'
+  preferredFirstClear: 'full_clear' | 'three_camp_gank' = 'full_clear',
+  customFirstReason?: string
 ): JungleRoute[] {
   const isBlue = side === 'blue';
   const own = isBlue ? RIFT_NODES.blue : RIFT_NODES.red;
@@ -106,14 +212,21 @@ export function buildMultiClearRoutes(
         makeStep(7, 'b-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '3:30', 'Take Bot Crab -> gank Bot or recall'),
       ];
 
+  const dirLabel =
+    strongSide === 'bot' ? 'Top → Bot' : strongSide === 'mid' ? 'Bot → Top (Mid Focus)' : 'Bot → Top';
+
   const clear1Full: JungleRoute = {
     id: `${side}-clear1-full`,
-    label: `Clear 1 · Full Clear (${strongSide === 'bot' ? 'Top → Bot' : strongSide === 'mid' ? 'Bot → Top (Mid Focus)' : 'Bot → Top'})`,
+    clearNumber: 1,
+    shortLabel: 'Clear 1',
+    descriptor: `Full Clear · ${dirLabel}`,
+    label: `Clear 1 · Full Clear (${dirLabel})`,
     side,
     stage: 'clear_1',
     stageLabel: 'Clear 1 · Opening',
     timeWindow: '1:30 – 3:30',
     whyThisClear:
+      customFirstReason ??
       'Unlocks Level 4 + 1st item component on recall. Path toward your strong side so you arrive at 3:30 Scuttle with winning lane priority.',
     style: 'full_clear',
     summary:
@@ -125,12 +238,16 @@ export function buildMultiClearRoutes(
 
   const clear1ThreeCamp: JungleRoute = {
     id: `${side}-clear1-3camp`,
+    clearNumber: 1,
+    shortLabel: 'Clear 1',
+    descriptor: `3-Camp Lv3 Gank · ${strongSide === 'bot' ? 'Bot' : strongSide === 'mid' ? 'Mid/Top' : 'Top'}`,
     label: `Clear 1 · 3-Camp ${strongSide === 'bot' ? 'Bot' : strongSide === 'mid' ? 'Mid/Top' : 'Top'} Gank`,
     side,
     stage: 'clear_1',
     stageLabel: 'Clear 1 · Fast Lv3',
     timeWindow: '1:30 – 2:45',
     whyThisClear:
+      customFirstReason ??
       'Use when your strong side is volatile and you are an early-ganking jungler; strike 45s before enemy full-clear finishes.',
     style: 'three_camp_gank',
     summary: 'Double-buff + 1 camp for Level 3 gank/invade at 2:45 before enemy hits Level 4.',
@@ -157,90 +274,89 @@ export function buildMultiClearRoutes(
             ],
   };
 
-  // Clear 2: Repeat starting quadrant order (minor camps respawn ~2:15 after kill!)
-  const clear2Repeat: JungleRoute = {
-    id: `${side}-clear2-respawn`,
-    label: 'Clear 2 · Respawn Sequence (Lv 5–6)',
-    side,
-    stage: 'clear_2',
-    stageLabel: 'Clear 2 · Respawn',
-    timeWindow: '4:15 – 5:45',
-    whyThisClear:
-      'Minor camps respawn ~2:15 after death in the exact order you cleared them. Repeat your Clear 1 starting side after recalling so camps spawn right as you walk up — no wasted walking.',
-    style: 'full_clear',
-    summary:
-      'Recall at 3:45–4:00, buy boots/components + Control Ward, then sweep back through your respawning quadrants to hit Level 5–6 for 1st Dragon/Grubs.',
-    steps:
-      strongSide === 'bot'
-        ? [
-            makeStep(1, 'c2-1', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '4:15', 'First minor camp respawns right after recall'),
-            makeStep(2, 'c2-2', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:35', 'Keep camps synced on respawn timer'),
-            makeStep(3, 'c2-3', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:55', 'Look Mid transition gank if wave is pushed'),
-            makeStep(4, 'c2-4', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '5:15', 'Finish quadrant for Level 5–6'),
-            makeStep(5, 'c2-obj', 'Dragon Prep', RIFT_NODES.river.dragon, '5:30', 'Drop Control Ward & contest 1st Dragon'),
-          ]
-        : [
-            makeStep(1, 'c2-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '4:15', 'First minor camp respawns right after recall'),
-            makeStep(2, 'c2-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:35', 'Maintain tight camp sequencing'),
-            makeStep(3, 'c2-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:55', 'Hover Mid/Top if enemy overextends'),
-            makeStep(4, 'c2-4', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '5:15', 'Hit Level 5–6 before Grubs spawn'),
-            makeStep(5, 'c2-obj', 'Voidgrubs Setup', RIFT_NODES.river.baronGrubs, '5:50', 'Sweep pit & take 6:00 Voidgrubs'),
-          ],
-  };
+  // Clear 2 follows from Clear 1 style
+  const clear2Route: JungleRoute =
+    preferredFirstClear === 'three_camp_gank'
+      ? {
+          id: `${side}-clear2-cleanup`,
+          clearNumber: 2,
+          shortLabel: 'Clear 2',
+          descriptor: 'Cleanup & Scuttle Sweep · Catch Remaining Camps',
+          label: 'Clear 2 · Cleanup Remaining Camps (Lv 4–5)',
+          side,
+          stage: 'clear_2',
+          stageLabel: 'Clear 2 · Cleanup',
+          timeWindow: '3:05 – 4:45',
+          whyThisClear:
+            'After a 3-camp gank, immediately harvest the three untouched minor camps and Scuttle so you avoid falling behind enemy Level 5–6.',
+          style: 'full_clear',
+          summary:
+            'Take River Scuttle after your gank, clear your skipped quadrant camps, then recall cleanly before buff respawns.',
+          steps:
+            strongSide === 'bot'
+              ? [
+                  makeStep(1, 'c2t-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '3:30', 'Grab Bot Scuttle if wave allows'),
+                  makeStep(2, 'c2t-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '3:45', 'Clear untouched outer minor camp'),
+                  makeStep(3, 'c2t-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:05', 'Harvest AoE camp gold & XP'),
+                  makeStep(4, 'c2t-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:25', 'Finish skipped camps before recall'),
+                ]
+              : [
+                  makeStep(1, 'c2t-crab', 'Top Scuttle', RIFT_NODES.river.topScuttle, '3:30', 'Contest Top Crab with lane prio'),
+                  makeStep(2, 'c2t-1', isBlue ? 'Wolves' : 'Blue Buff', isBlue ? own.wolves : own.blue, '3:48', 'Collect untouched quadrant camps'),
+                  makeStep(3, 'c2t-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:10', 'Catch XP back up cleanly'),
+                  makeStep(4, 'c2t-3', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '4:30', 'Recall with component + Control Ward'),
+                ],
+        }
+      : {
+          id: `${side}-clear2-respawn`,
+          clearNumber: 2,
+          shortLabel: 'Clear 2',
+          descriptor: 'Respawn Sequence · Lv 5–6 Spike',
+          label: 'Clear 2 · Respawn Sequence (Lv 5–6)',
+          side,
+          stage: 'clear_2',
+          stageLabel: 'Clear 2 · Respawn',
+          timeWindow: '4:15 – 5:45',
+          whyThisClear:
+            'Minor camps respawn ~2:15 after death in the exact order you cleared them. Repeat your Clear 1 starting side after recalling so camps spawn right as you walk up.',
+          style: 'full_clear',
+          summary:
+            'Recall at 3:45–4:00, buy boots/components + Control Ward, then sweep back through your respawning quadrants to hit Level 5–6.',
+          steps:
+            strongSide === 'bot'
+              ? [
+                  makeStep(1, 'c2-1', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '4:15', 'First minor camp respawns right after recall'),
+                  makeStep(2, 'c2-2', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:35', 'Keep camps synced on respawn timer'),
+                  makeStep(3, 'c2-3', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:55', 'Look Mid transition gank if wave is pushed'),
+                  makeStep(4, 'c2-4', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '5:15', 'Finish quadrant for Level 5–6'),
+                  makeStep(5, 'c2-obj', 'Dragon Prep', RIFT_NODES.river.dragon, '5:30', 'Drop Control Ward & contest 1st Dragon'),
+                ]
+              : [
+                  makeStep(1, 'c2-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '4:15', 'First minor camp respawns right after recall'),
+                  makeStep(2, 'c2-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:35', 'Maintain tight camp sequencing'),
+                  makeStep(3, 'c2-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:55', 'Hover Mid/Top if enemy overextends'),
+                  makeStep(4, 'c2-4', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '5:15', 'Hit Level 5–6 before Grubs spawn'),
+                  makeStep(5, 'c2-obj', 'Voidgrubs Setup', RIFT_NODES.river.baronGrubs, '5:50', 'Sweep pit & take 6:00 Voidgrubs'),
+                ],
+        };
 
-  // Clear 3a: Dragon Objective Sync (6:00 - 14:00)
-  const clear3Dragon: JungleRoute = {
-    id: `${side}-clear3-dragon`,
-    label: 'Clear 3 · Dragon Sync (Top → Bot)',
-    side,
-    stage: 'objective_sync',
-    stageLabel: 'Clear 3 · Dragon',
-    timeWindow: '6:00 – 14:00',
-    whyThisClear:
-      'Do NOT blindly repeat the same route if Dragon is spawning! Start Top-side camps 60s before Dragon so your clear naturally ends Bot-side with full HP and spent gold.',
-    style: 'full_clear',
-    summary:
-      'Clear Top quadrant -> Bot quadrant -> Dragon Pit so you arrive 30s before spawn without losing camp XP.',
-    steps: [
-      makeStep(1, 'd-1', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '-65s', 'Clear Top-side camp while Dragon is 1m out'),
-      makeStep(2, 'd-2', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '-48s', 'Transition downward toward Mid'),
-      makeStep(3, 'd-3', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '-30s', 'Ping Bot/Mid to shove waves'),
-      makeStep(4, 'd-4', isBlue ? 'Red Buff' : 'Blue Buff', isBlue ? own.red : own.blue, '-15s', 'Secure buff combat stats for river fight'),
-      makeStep(5, 'd-pit', 'Dragon Pit', RIFT_NODES.river.dragon, 'Spawn', 'Place Control Ward & secure Dragon'),
-    ],
-  };
-
-  // Clear 3b: Grubs / Herald Objective Sync (6:00 - 14:00)
-  const clear3Grubs: JungleRoute = {
-    id: `${side}-clear3-grubs`,
-    label: 'Clear 3 · Grubs / Herald Sync (Bot → Top)',
-    side,
-    stage: 'objective_sync',
-    stageLabel: 'Clear 3 · Top Obj',
-    timeWindow: '6:00 – 14:00',
-    whyThisClear:
-      'When Voidgrubs or Rift Herald is your priority, flip your clear Bot → Top so you end adjacent to Top River with Top/Mid priority.',
-    style: 'full_clear',
-    summary: 'Sequence Bot camps into Top camps -> sweep Baron/Grubs pit and take Top objective.',
-    steps: [
-      makeStep(1, 'g-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '-65s', 'Clear Bot-side outer camp first'),
-      makeStep(2, 'g-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '-48s', 'Move upward across Mid'),
-      makeStep(3, 'g-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '-30s', 'Check Top/Mid wave push'),
-      makeStep(4, 'g-4', isBlue ? 'Blue Buff' : 'Red Buff', isBlue ? own.blue : own.red, '-15s', 'Grab buff before contesting river'),
-      makeStep(5, 'g-pit', 'Grubs / Herald Pit', RIFT_NODES.river.baronGrubs, 'Spawn', 'Sweep & secure Grubs/Herald'),
-    ],
-  };
+  // Clear 3: single default objective sync based on strong side (live mode swaps via buildObjectiveSyncRoute)
+  const clear3Route = buildObjectiveSyncRoute(side, strongSide === 'top' ? 'grubs' : 'dragon');
 
   // Clear 4+: Late Baron & Cross-Map Invade (14:00+)
   const clear4Baron: JungleRoute = {
     id: `${side}-clear4-baron`,
+    clearNumber: 4,
+    shortLabel: 'Clear 4',
+    descriptor: 'Baron & Cross-Map Control',
     label: 'Clear 4+ · Baron / Cross-Map Invade',
     side,
     stage: 'late_baron',
-    stageLabel: 'Clear 4+ · Mid/Late',
+    stageLabel: 'Clear 4 · Mid/Late',
+    objectiveFocus: 'baron',
     timeWindow: '14:00+',
     whyThisClear:
-      'In mid/late game, stop full-clearing diagonally from base. Farm the quadrant beside the next major objective (Baron or Soul) and steal enemy camps opposite their jungler.',
+      'In mid/late game, stop full-clearing diagonally from base. Farm the quadrant beside the next major objective (Baron or Soul) and steal opposite camps.',
     style: 'invade',
     summary:
       'Keep Top-side camps cleared around Baron, drop deep enemy-quadrant wards, and counter-jungle whenever enemy shows Bot.',
@@ -252,9 +368,12 @@ export function buildMultiClearRoutes(
     ],
   };
 
-  return preferredFirstClear === 'three_camp_gank'
-    ? [clear1ThreeCamp, clear1Full, clear2Repeat, clear3Dragon, clear3Grubs, clear4Baron]
-    : [clear1Full, clear1ThreeCamp, clear2Repeat, clear3Dragon, clear3Grubs, clear4Baron];
+  return [
+    preferredFirstClear === 'three_camp_gank' ? clear1ThreeCamp : clear1Full,
+    clear2Route,
+    clear3Route,
+    clear4Baron,
+  ];
 }
 
 /**
@@ -282,8 +401,7 @@ export function buildOfficialWardSpots(side: MapSide): WardSpot[] {
       x: 342,
       y: 422,
       timing: '1:20 or 3:15 river check',
-      reason:
-        'Covers Mid roams and early river transitions into your top quadrant.',
+      reason: 'Covers Mid roams and early river transitions into your top quadrant.',
     },
     {
       id: 'dragon-pit-control',
@@ -338,23 +456,20 @@ export function selectLiveActiveRoute(
   }
 
   const nextObj = objectives[0];
+  const side: MapSide = routes[0]?.side ?? 'blue';
   if (gameTime < 900) {
-    if (nextObj?.id === 'dragon') {
-      return (
-        routes.find((r) => r.id.includes('clear3-dragon')) ??
-        routes.find((r) => r.stage === 'objective_sync') ??
-        routes[0]!
-      );
-    }
-    return (
-      routes.find((r) => r.id.includes('clear3-grubs')) ??
-      routes.find((r) => r.stage === 'objective_sync') ??
-      routes[0]!
+    const desiredFocus: 'dragon' | 'grubs' = nextObj?.id === 'dragon' ? 'dragon' : 'grubs';
+    const matching = routes.find(
+      (r) => r.stage === 'objective_sync' && r.objectiveFocus === desiredFocus
     );
+    return matching ?? buildObjectiveSyncRoute(side, desiredFocus);
   }
 
   if (nextObj?.id === 'dragon' && nextObj.secondsRemaining <= 95) {
-    return routes.find((r) => r.id.includes('clear3-dragon')) ?? routes[0]!;
+    const matching = routes.find(
+      (r) => r.stage === 'objective_sync' && r.objectiveFocus === 'dragon'
+    );
+    return matching ?? buildObjectiveSyncRoute(side, 'dragon');
   }
 
   return routes.find((r) => r.stage === 'late_baron') ?? routes[0]!;

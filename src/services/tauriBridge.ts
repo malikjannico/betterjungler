@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   lolInstallPath: 'C:\\Riot Games\\League of Legends',
   overlayHotkey: 'Alt+J',
   hudCorner: 'beside-minimap',
-  hudOpacity: 92,
+  hudOpacity: 80,
   hudScale: 100,
   hudMonitor: 'primary',
   minimapSide: 'right',
@@ -126,8 +126,7 @@ export async function subscribeHudPreferences(
 
 export async function loadLpHistory(): Promise<LpHistoryPoint[]> {
   if (!isTauriEnvironment()) {
-    const { DEMO_LP_HISTORY } = await import('../domain/postGameFixtures');
-    return DEMO_LP_HISTORY;
+    return [];
   }
   return invokeTauri<LpHistoryPoint[]>('get_lp_history');
 }
@@ -246,8 +245,7 @@ export async function syncRecentMatches(
 
 export async function getCachedMatches(puuid?: string): Promise<MatchV5Detail[]> {
   if (!isTauriEnvironment()) {
-    const { DEMO_POST_GAME_MATCHES } = await import('../domain/postGameFixtures');
-    return DEMO_POST_GAME_MATCHES;
+    return [];
   }
   return invokeTauri<MatchV5Detail[]>('get_cached_matches', {
     puuid: puuid ?? null,
@@ -289,10 +287,20 @@ export async function deleteClimbGoal(goalId: string): Promise<void> {
   await invokeTauri<void>('delete_climb_goal', { goalId });
 }
 
+export async function setFocusGoal(goalId: string): Promise<ClimbGoal[]> {
+  if (!isTauriEnvironment()) {
+    const { setSingleFocusGoal } = await import('../domain/climbLadderEngine');
+    const existing = await loadClimbGoals();
+    const updated = setSingleFocusGoal(existing, goalId);
+    localStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(updated));
+    return updated;
+  }
+  return invokeTauri<ClimbGoal[]>('set_focus_goal', { goalId });
+}
+
 export async function getCachedMetaSnapshot(): Promise<HighEloMetaSnapshot | null> {
   if (!isTauriEnvironment()) {
-    const { DEMO_HIGH_ELO_SNAPSHOT } = await import('../domain/postGameFixtures');
-    return DEMO_HIGH_ELO_SNAPSHOT;
+    return null;
   }
   return invokeTauri<HighEloMetaSnapshot | null>('get_cached_meta_snapshot');
 }

@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
+import { formatClock } from '../domain/liveCoachEngine';
 import type {
   JungleRoute,
   NormalizedMapPoint,
@@ -29,8 +30,8 @@ interface ReplayModeProps {
   mode: 'replay';
   patchVersion: string;
   durationSeconds: number;
-  activeMinute: number;
-  onChangeMinute: (minute: number) => void;
+  activeSecond: number;
+  onChangeSecond: (second: number) => void;
   pathPoints: NormalizedMapPoint[];
   enemyPathPoints?: NormalizedMapPoint[];
   markers: TimelineMapMarker[];
@@ -304,14 +305,14 @@ function RouteRiftMap({
 function ReplayRiftMap({
   patchVersion,
   durationSeconds,
-  activeMinute,
-  onChangeMinute,
+  activeSecond,
+  onChangeSecond,
   pathPoints,
   enemyPathPoints = [],
   markers,
 }: ReplayModeProps) {
-  const maxMinute = Math.max(1, Math.ceil(durationSeconds / 60));
-  const minMinute = Math.min(1, pathPoints[0]?.minute ?? 1);
+  const maxSeconds = Math.max(60, Math.round(durationSeconds));
+  const minSeconds = Math.min(maxSeconds, (pathPoints[0]?.minute ?? 1) * 60);
   const [showPath, setShowPath] = useState(true);
   const [showEnemyGhost, setShowEnemyGhost] = useState(false);
   const [showCombat, setShowCombat] = useState(true);
@@ -320,22 +321,23 @@ function ReplayRiftMap({
     (markers.find((m) => m.kind === 'pre_obj_death') ?? markers[0])?.id ?? null
   );
 
-  const effectiveCutoff = Math.min(Math.max(minMinute, activeMinute), maxMinute);
+  const effectiveSecond = Math.min(Math.max(0, activeSecond), maxSeconds);
+  const effectiveMinuteCutoff = Math.max(1, Math.floor(effectiveSecond / 60));
 
   const visiblePath = useMemo(
-    () => pathPoints.filter((p) => p.minute <= effectiveCutoff),
-    [pathPoints, effectiveCutoff]
+    () => pathPoints.filter((p) => p.minute <= effectiveMinuteCutoff),
+    [pathPoints, effectiveMinuteCutoff]
   );
 
   const visibleEnemyPath = useMemo(
-    () => enemyPathPoints.filter((p) => p.minute <= effectiveCutoff),
-    [enemyPathPoints, effectiveCutoff]
+    () => enemyPathPoints.filter((p) => p.minute <= effectiveMinuteCutoff),
+    [enemyPathPoints, effectiveMinuteCutoff]
   );
 
   const visibleMarkers = useMemo(
     () =>
       markers.filter((m) => {
-        if (m.minute > effectiveCutoff) return false;
+        if (m.timestampSec > effectiveSecond) return false;
         if (!showWards && (m.kind === 'ward' || m.kind === 'control_ward')) {
           return false;
         }
@@ -350,7 +352,7 @@ function ReplayRiftMap({
         }
         return true;
       }),
-    [markers, effectiveCutoff, showWards, showCombat]
+    [markers, effectiveSecond, showWards, showCombat]
   );
 
   const selectedMarker =
@@ -362,10 +364,10 @@ function ReplayRiftMap({
   const enemyPolylinePoints = visibleEnemyPath.map((p) => `${p.x},${p.y}`).join(' ');
 
   return (
-    <GlassSurface className="p-5">
+    <GlassSurface className="p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold text-white">
-          Jungle Path &amp; Timeline Replay (0m – {effectiveCutoff}m)
+        <h3 className="t-title text-white/[0.92]">
+          Jungle Path &amp; Timeline Replay (0:00 – {formatClock(effectiveSecond)})
         </h3>
 
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -422,20 +424,21 @@ function ReplayRiftMap({
         </div>
       </div>
 
-      {/* Synchronized Timeline Scrubber */}
+      {/* Synchronized Seconds-Granular Timeline Scrubber */}
       <div className="lg-inset mb-4 flex items-center gap-3 px-3 py-2 text-xs">
-        <span className="text-[11px] text-slate-400">Timeline Minute</span>
+        <span className="t-caption text-white/[0.62]">Timeline</span>
         <input
           type="range"
-          aria-label="Timeline minute cutoff"
-          min={minMinute}
-          max={maxMinute}
-          value={effectiveCutoff}
-          onChange={(e) => onChangeMinute(Number(e.target.value))}
+          aria-label="Timeline cursor seconds"
+          min={Math.min(0, minSeconds)}
+          max={maxSeconds}
+          step={1}
+          value={effectiveSecond}
+          onChange={(e) => onChangeSecond(Number(e.target.value))}
           className="flex-1 accent-white"
         />
-        <span className="tabular-nums font-mono text-xs font-semibold text-white">
-          {effectiveCutoff}m / {maxMinute}m
+        <span className="tabular-nums font-mono t-caption font-semibold text-white">
+          {formatClock(effectiveSecond)} / {formatClock(maxSeconds)}
         </span>
       </div>
 
@@ -499,7 +502,7 @@ function ReplayRiftMap({
                 aria-label={marker.label}
                 onClick={() => {
                   setSelectedMarkerId(marker.id);
-                  onChangeMinute(Math.max(minMinute, marker.minute));
+                  onChangeSecond(marker.timestampSec);
                 }}
                 style={{
                   left: `${toMapPercent(marker.x)}%`,
@@ -539,8 +542,8 @@ function ReplayRiftMap({
                 </p>
               </div>
             ) : (
-              <p className="mt-1 text-[11px] text-slate-400">
-                No events up to {effectiveCutoff}m — scrub forward to inspect later plays.
+              <p className="mt-1 t-caption text-white/[0.62]">
+                No events up to {formatClock(effectiveSecond)} — scrub forward to inspect later plays.
               </p>
             )}
           </div>
@@ -552,17 +555,17 @@ function ReplayRiftMap({
                 type="button"
                 onClick={() => {
                   setSelectedMarkerId(m.id);
-                  onChangeMinute(Math.max(minMinute, m.minute));
+                  onChangeSecond(m.timestampSec);
                 }}
-                className={`flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-[11px] transition motion-reduce:transition-none ${
+                className={`flex w-full items-center justify-between gap-2 px-2 py-2 text-left t-caption transition motion-reduce:transition-none ${
                   selectedMarker?.id === m.id
                     ? 'bg-white/[0.07] text-white'
-                    : 'text-slate-300 hover:bg-white/[0.03]'
+                    : 'text-white/[0.75] hover:bg-white/[0.03]'
                 }`}
               >
                 <span className="min-w-0 truncate">{m.label}</span>
-                <span className="tabular-nums shrink-0 font-mono text-[10px] text-slate-400">
-                  {m.minute}m
+                <span className="tabular-nums shrink-0 font-mono text-[11px] text-white/[0.55]">
+                  {formatClock(m.timestampSec)}
                 </span>
               </button>
             ))}

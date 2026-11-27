@@ -583,7 +583,7 @@ export function computeAdaptiveBuild(
 
 export function computeMacroGuidance(
   liveData: LiveGameData,
-  winPlan: WinConditionPlan,
+  winPlan: WinConditionPlan | null,
   objectives: ObjectiveWindow[]
 ): MacroCue[] {
   const gameTime = liveData.gameData.gameTime;
@@ -618,7 +618,9 @@ export function computeMacroGuidance(
       id: 'first-clear',
       category: 'clear',
       priority: 'high',
-      title: `Execute ${winPlan.strongSide.toUpperCase()} pathing tempo`,
+      title: winPlan
+        ? `Execute ${winPlan.strongSide.toUpperCase()} pathing tempo`
+        : 'Execute disciplined opening clear',
       detail: 'Do not force low-percentage ganks before finishing your quadrant; keep Smite for 3:30 Scuttle.',
     });
   } else {
@@ -627,7 +629,9 @@ export function computeMacroGuidance(
       category: 'clear',
       priority: 'normal',
       title: 'Sequence camps toward strong side',
-      detail: `Clear camps from ${winPlan.weakSide.toUpperCase()} -> ${winPlan.strongSide.toUpperCase()} so you are naturally positioned for ganks & objectives.`,
+      detail: winPlan
+        ? `Clear camps from ${winPlan.weakSide.toUpperCase()} -> ${winPlan.strongSide.toUpperCase()} so you are naturally positioned for ganks & objectives.`
+        : 'Clear toward your next spawning neutral objective so you arrive with spent gold and camp tempo.',
     });
   }
 
@@ -637,7 +641,9 @@ export function computeMacroGuidance(
       id: 'gank-push',
       category: 'gank',
       priority: 'high',
-      title: `Play around ${winPlan.strongSide.toUpperCase()} lane & tower plates`,
+      title: winPlan
+        ? `Play around ${winPlan.strongSide.toUpperCase()} lane & tower plates`
+        : 'Convert ganks into wave shove & tower plates',
       detail:
         'After a successful gank or enemy recall, help shove the wave into tower for plates & tempo before resetting.',
     });

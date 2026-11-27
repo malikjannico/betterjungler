@@ -8,8 +8,8 @@ interface PostGameTimelineMapProps {
   pathPoints: NormalizedMapPoint[];
   enemyPathPoints?: NormalizedMapPoint[];
   markers: TimelineMapMarker[];
-  activeMinute?: number;
-  onChangeMinute?: (minute: number) => void;
+  activeSecond?: number;
+  onChangeSecond?: (second: number) => void;
 }
 
 export function PostGameTimelineMap({
@@ -18,14 +18,13 @@ export function PostGameTimelineMap({
   pathPoints,
   enemyPathPoints,
   markers,
-  activeMinute,
-  onChangeMinute,
+  activeSecond,
+  onChangeSecond,
 }: PostGameTimelineMapProps) {
-  const maxMinute = Math.max(1, Math.ceil(durationSeconds / 60));
-  const [internalMinute, setInternalMinute] = useState<number>(maxMinute);
+  const [internalSecond, setInternalSecond] = useState<number>(durationSeconds);
 
-  const effectiveMinute = activeMinute ?? internalMinute;
-  const handleMinuteChange = onChangeMinute ?? setInternalMinute;
+  const effectiveSecond = activeSecond ?? internalSecond;
+  const handleSecondChange = onChangeSecond ?? setInternalSecond;
 
   return (
     <RiftMap
@@ -35,8 +34,8 @@ export function PostGameTimelineMap({
       pathPoints={pathPoints}
       enemyPathPoints={enemyPathPoints}
       markers={markers}
-      activeMinute={effectiveMinute}
-      onChangeMinute={handleMinuteChange}
+      activeSecond={effectiveSecond}
+      onChangeSecond={handleSecondChange}
     />
   );
 }

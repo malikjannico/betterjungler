@@ -191,11 +191,20 @@ export function computeLpDeltaSummary(history: LpHistoryPoint[]): LpDeltaSummary
     if (pt.absoluteLp > maxAbsLp) maxAbsLp = pt.absoluteLp;
   }
 
-  // Current win/loss streak from the end
+  // Current win/loss streak from the end (ignoring neutral baseline snapshots)
   let streak = 0;
+  let streakOutcome: boolean | null = null;
   for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i]!.win === last.win) streak += 1;
-    else break;
+    const ptWin = history[i]!.win;
+    if (typeof ptWin !== 'boolean') break;
+    if (streakOutcome === null) {
+      streakOutcome = ptWin;
+      streak = 1;
+    } else if (ptWin === streakOutcome) {
+      streak += 1;
+    } else {
+      break;
+    }
   }
 
   return {
@@ -203,6 +212,9 @@ export function computeLpDeltaSummary(history: LpHistoryPoint[]): LpDeltaSummary
     currentLabel: `${last.tier} ${last.rank} • ${last.leaguePoints} LP`,
     minAbsLp: Math.max(0, minAbsLp - 15),
     maxAbsLp: maxAbsLp + 15,
-    streakText: `${streak}${last.win ? 'W' : 'L'} streak`,
+    streakText:
+      streakOutcome === null
+        ? 'Baseline'
+        : `${streak}${streakOutcome ? 'W' : 'L'} streak`,
   };
 }

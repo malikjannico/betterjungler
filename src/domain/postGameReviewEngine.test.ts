@@ -90,4 +90,19 @@ describe('postGameReviewEngine', () => {
       report.pathPoints.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
     ).toBe(true);
   });
+
+  it('never extrapolates missing @4 or @10 CS frames or leaks undefined into findings', () => {
+    const base = DEMO_POST_GAME_MATCHES[0]!;
+    const missing4And10 = {
+      ...base,
+      frames: base.frames.filter((f) => f.minute !== 4 && f.minute !== 10),
+    };
+    const report = analyzePostGameMatch(missing4And10, 'PLATINUM IV');
+    expect(report.kpis.csAt4).toBeUndefined();
+    expect(report.kpis.csAt10).toBeUndefined();
+    expect(report.kpis.csAt10Minute).toBeUndefined();
+    for (const f of [...report.highlights, ...report.mistakes, ...report.improvements]) {
+      expect(f.detail).not.toContain('undefined');
+    }
+  });
 });

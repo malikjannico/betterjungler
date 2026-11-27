@@ -143,9 +143,9 @@ describe('champSelectEngine', () => {
     expect(soloDuoHiddenInferred).toBe(234);
   });
 
-  it('weights personal rolling win rate when a jungler has at least 3 recent games', () => {
+  it('weights personal rolling win rate via Bayesian shrinkage when a jungler has >= 3 games', () => {
     const personalStats = computePersonalChampStats([
-      { championId: 234, win: true }, // Viego: 4G 100% WR
+      { championId: 234, win: true }, // Viego: 4G 100% WR -> (4 + 6)/16 = 62.5% shrunk
       { championId: 234, win: true },
       { championId: 234, win: true },
       { championId: 234, win: true },
@@ -168,7 +168,8 @@ describe('champSelectEngine', () => {
     const viego = recs.find((r) => r.champion.championId === 234);
     const khazix = recs.find((r) => r.champion.championId === 121);
     const leeSin = recs.find((r) => r.champion.championId === 64);
-    expect(viego?.reasons.some((r) => r.includes('Your 100% WR (4G)'))).toBe(true);
+    expect(viego?.reasons.some((r) => r.includes('Your 100% WR (4G'))).toBe(true);
+    expect(viego?.reasons.some((r) => r.includes('shrunk'))).toBe(true);
     if (khazix) {
       expect(khazix.reasons.some((r) => r.includes('Your '))).toBe(false);
     }

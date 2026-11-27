@@ -13,7 +13,7 @@ describe('winConditionEngine', () => {
     expect(plan.primaryWinCondition.length).toBeGreaterThan(20);
     expect(plan.enemyWinConditionToDeny.length).toBeGreaterThan(20);
     expect(plan.strongSide).toBe('bot');
-    expect(plan.routes.length).toBeGreaterThanOrEqual(2);
+    expect(plan.routes).toHaveLength(4);
     expect(plan.routes[0]?.side).toBe('blue');
     for (const step of plan.routes[0]!.steps) {
       expect(step.x).toBeGreaterThanOrEqual(0);

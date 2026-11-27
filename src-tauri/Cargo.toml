@@ -1,6 +1,6 @@
 [package]
 name = "betterjungler"
-version = "1.0.0"
+version = "1.1.0"
 description = "Riot-compliant League of Legends Jungle Companion & Windows HUD Overlay"
 authors = ["BetterJungler"]
 edition = "2021"

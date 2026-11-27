@@ -1,11 +1,14 @@
-import { formatClock } from '../domain/liveCoachEngine';
+import { deriveHudCards } from '../domain/hudModel';
+import { getItemIconUrl } from '../services/ddragonService';
 import type {
   AdaptiveBuildPlan,
   HudScalePercent,
+  JungleRoute,
   MacroCue,
   ObjectiveWindow,
 } from '../types/coaching';
 import type { GamePhase } from '../types/riot';
+import { HudCard } from './hud/HudCard';
 
 interface CompactHudBarProps {
   phase: GamePhase;
@@ -13,64 +16,77 @@ interface CompactHudBarProps {
   objectives: ObjectiveWindow[];
   buildPlan: AdaptiveBuildPlan | null;
   topCue: MacroCue | null;
+  openingRoute?: JungleRoute | null;
+  patchVersion?: string;
   hotkey: string;
   scalePercent?: HudScalePercent;
   clickThrough?: boolean;
   onExpand: () => void;
 }
 
+/**
+ * Modular multi-card transparent floating HUD anchored at the bottom-right corner
+ * over a completely transparent background canvas (`bg-transparent`).
+ */
 export function CompactHudBar({
   phase,
   gameTime,
   objectives,
   buildPlan,
   topCue,
+  openingRoute = null,
+  patchVersion = '16.23.1',
   hotkey,
   scalePercent = 100,
   clickThrough = false,
   onExpand,
 }: CompactHudBarProps) {
-  const nextObj = objectives[0];
-  const isUrgent =
-    nextObj?.status === 'live' || nextObj?.status === 'prep_vision';
+  const model = deriveHudCards({
+    phase,
+    gameTime,
+    objectives,
+    buildPlan,
+    topCue,
+    openingRoute,
+    hotkey,
+  });
+
   const zoomFactor = scalePercent / 100;
 
   return (
     <div
       data-testid="compact-hud-bar"
       data-phase={phase}
-      data-urgent={isUrgent ? 'true' : 'false'}
+      data-urgent={model.isUrgent ? 'true' : 'false'}
       data-scale={scalePercent}
       style={{
-        backgroundColor: 'rgba(10, 13, 19, var(--hud-alpha, 0.92))',
         zoom: zoomFactor !== 1 ? zoomFactor : undefined,
       }}
-      className={`flex h-full w-full flex-col justify-between rounded-[20px] border border-white/15 p-3.5 text-xs text-slate-100 select-none ${
-        clickThrough ? '' : 'shadow-[0_18px_40px_-10px_rgba(0,0,0,0.9)]'
-      }`}
+      className="flex h-full w-full flex-col-reverse items-end justify-start gap-2 bg-transparent p-2 text-xs text-white select-none"
     >
-      <div className="flex items-center justify-between gap-2 pb-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={`inline-block h-2 w-2 shrink-0 rounded-full ${
-              isUrgent
-                ? 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
-                : 'bg-emerald-400'
-            }`}
-          />
-          <span className="shrink-0 text-xs font-semibold tracking-[0.12em] text-white">
-            BETTERJUNGLER
-          </span>
-          <span className="truncate text-xs font-medium uppercase tracking-wider text-slate-400">
-            {phase.replace('_', ' ')}
-            {gameTime > 0 ? ` · ${formatClock(gameTime)}` : ''}
-          </span>
-        </div>
+      {/* Card 1: Status & Hotkey Chip */}
+      <HudCard
+        pill
+        urgent={model.isUrgent}
+        className="flex h-[30px] items-center gap-2.5 px-3"
+      >
+        <span
+          className={`inline-block h-2 w-2 shrink-0 rounded-full ${
+            model.statusChip.dotTone === 'urgent'
+              ? 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
+              : model.statusChip.dotTone === 'active'
+                ? 'bg-emerald-400'
+                : 'bg-white/40'
+          }`}
+        />
+        <span className="tabular-nums whitespace-nowrap text-xs font-medium text-white/[0.92]">
+          {model.statusChip.label}
+        </span>
 
         {clickThrough ? (
           <kbd
             aria-label={`Expand hotkey ${hotkey}`}
-            className="shrink-0 whitespace-nowrap rounded-full border border-white/15 bg-white/[0.06] px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-200"
+            className="shrink-0 whitespace-nowrap rounded-full border border-white/15 bg-white/[0.06] px-2 py-0.5 font-mono text-xs font-semibold text-white/[0.78]"
           >
             {hotkey}
           </kbd>
@@ -78,93 +94,129 @@ export function CompactHudBar({
           <button
             type="button"
             onClick={onExpand}
-            className="lg-btn-glass shrink-0 whitespace-nowrap !rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
+            className="shrink-0 whitespace-nowrap rounded-full border border-white/18 bg-white/[0.08] px-2.5 py-0.5 text-xs font-semibold text-white transition hover:bg-white/[0.14]"
             title={`Expand HUD (${hotkey})`}
           >
             Expand ({hotkey})
           </button>
         )}
-      </div>
+      </HudCard>
 
-      <div className="grid grid-cols-2 gap-2.5 border-t border-white/[0.08] pt-2.5">
-        <div className="lg-inset min-w-0 p-2.5">
-          <div className="text-xs font-medium uppercase tracking-wider text-slate-400">
-            Next Objective
+      {/* Card 2 (Pre-1:30 / Loading): Opening Route Micro-Card */}
+      {model.routeCard && (
+        <HudCard className="flex h-[64px] w-[408px] flex-col justify-between px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-xs font-semibold text-white/[0.92]">
+              {model.routeCard.title}
+            </span>
+            <span className="tabular-nums shrink-0 text-xs text-white/[0.72]">
+              {model.routeCard.timeWindow}
+            </span>
           </div>
-          {nextObj ? (
-            <div className="mt-1">
+          <div className="truncate text-xs text-white/[0.72]">
+            {model.routeCard.campsLine}
+          </div>
+        </HudCard>
+      )}
+
+      {/* Card 2a & 2b (In-Game): Objective Countdown + Next Buy Floating Row */}
+      {(model.objectiveCard || model.buyCard) && (
+        <div
+          className={`grid w-[408px] gap-2 ${
+            model.objectiveCard && model.buyCard ? 'grid-cols-2' : 'grid-cols-1'
+          }`}
+        >
+          {model.objectiveCard && (
+            <HudCard
+              urgent={model.objectiveCard.isLive || model.objectiveCard.isPrep}
+              className="flex h-[64px] min-w-0 flex-col justify-between px-3 py-2"
+            >
               <div className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-xs font-semibold text-white">
-                  {nextObj.name}
+                <span className="truncate text-xs font-semibold text-white/[0.92]">
+                  {model.objectiveCard.name}
                 </span>
                 <span
                   data-testid="hud-objective-timer"
-                  className={`tabular-nums shrink-0 whitespace-nowrap text-xl leading-none font-bold ${
-                    nextObj.status === 'live'
+                  className={`tabular-nums shrink-0 whitespace-nowrap text-[22px] leading-none font-bold ${
+                    model.objectiveCard.isLive
                       ? 'text-emerald-300'
-                      : nextObj.status === 'prep_vision'
+                      : model.objectiveCard.isPrep
                         ? 'text-amber-300'
                         : 'text-white'
                   }`}
                 >
-                  {nextObj.status === 'live'
-                    ? 'LIVE'
-                    : formatClock(nextObj.secondsRemaining)}
+                  {model.objectiveCard.timerText}
                 </span>
               </div>
-              <div className="mt-1 truncate text-xs text-slate-300">
-                {nextObj.actionText}
+
+              <div className="space-y-1">
+                <div className="h-0.5 w-full overflow-hidden rounded-full bg-white/15">
+                  <div
+                    className={`h-full rounded-full ${
+                      model.objectiveCard.isLive
+                        ? 'bg-emerald-400'
+                        : model.objectiveCard.isPrep
+                          ? 'bg-amber-400'
+                          : 'bg-white/65'
+                    }`}
+                    style={{ width: `${model.objectiveCard.urgencyPct}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-1.5 text-xs text-white/[0.72]">
+                  <span className="truncate font-medium">{model.objectiveCard.actionChip}</span>
+                  {model.objectiveCard.secondary && (
+                    <span className="tabular-nums shrink-0 text-white/[0.72]">
+                      {model.objectiveCard.secondary.timerText}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="mt-1.5 text-xs text-slate-400">
-              Waiting for match clock
-            </div>
+            </HudCard>
+          )}
+
+          {model.buyCard && (
+            <HudCard className="flex h-[64px] min-w-0 items-center justify-between gap-2 px-3 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <img
+                  src={getItemIconUrl(model.buyCard.itemId, patchVersion)}
+                  alt={model.buyCard.itemName}
+                  className="h-7 w-7 shrink-0 rounded-[7px] border border-white/15 bg-black"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-semibold text-white/[0.92]">
+                    {model.buyCard.itemName}
+                  </div>
+                  <div className="truncate text-xs text-white/[0.72]">
+                    {model.buyCard.trinketName}
+                  </div>
+                </div>
+              </div>
+              <span
+                className={`tabular-nums shrink-0 whitespace-nowrap text-xs font-bold ${
+                  model.buyCard.affordableNow ? 'text-emerald-300' : 'text-amber-200'
+                }`}
+              >
+                {model.buyCard.goldStatusText}
+              </span>
+            </HudCard>
           )}
         </div>
+      )}
 
-        <div className="lg-inset min-w-0 p-2.5">
-          <div className="text-xs font-medium uppercase tracking-wider text-slate-400">
-            Next Item Buy
-          </div>
-          {buildPlan?.nextItem ? (
-            <div className="mt-1">
-              <div className="flex items-baseline justify-between gap-1.5">
-                <span className="truncate text-xs font-semibold text-white">
-                  {buildPlan.nextItem.item.name}
-                </span>
-                <span
-                  className={`tabular-nums shrink-0 whitespace-nowrap text-xs font-bold ${
-                    buildPlan.nextItem.affordableNow
-                      ? 'text-emerald-300'
-                      : 'text-amber-200'
-                  }`}
-                >
-                  {buildPlan.nextItem.affordableNow
-                    ? 'BUY'
-                    : `-${buildPlan.nextItem.goldNeeded}g`}
-                </span>
-              </div>
-              <div className="mt-1 truncate text-xs text-slate-300">
-                {buildPlan.trinketAdvice.item.name}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-1.5 text-xs text-slate-400">
-              {buildPlan?.isFullBuild ? 'Full build active' : 'Farming first spike'}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {topCue && (
-        <div
-          data-testid="hud-macro-cue"
-          className="mt-2 line-clamp-2 border-t border-white/[0.06] pt-2 text-xs leading-snug text-slate-200"
+      {/* Card 3: Conditional High-Priority Macro Cue Micro-Card */}
+      {model.cueCard && (
+        <HudCard
+          urgent={model.cueCard.urgent}
+          className="max-h-[52px] w-[408px] px-3 py-2 text-xs leading-snug text-white/[0.78]"
         >
-          <span className="mr-1.5 font-semibold text-white">{topCue.title}:</span>
-          <span className="text-slate-300">{topCue.detail}</span>
-        </div>
+          <div data-testid="hud-macro-cue" className="line-clamp-2">
+            <span className="mr-1.5 font-semibold text-white">{model.cueCard.title}:</span>
+            <span>{model.cueCard.detail}</span>
+          </div>
+        </HudCard>
       )}
     </div>
   );

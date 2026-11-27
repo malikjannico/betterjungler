@@ -4,6 +4,7 @@ import {
   findJungleChampionById,
   getChampionMeta,
 } from '../data/jungleKnowledgePack';
+import { pickFirstClear } from './jungleRoutingEngine';
 import { analyzeTeamComposition } from './champSelectEngine';
 import type {
   EnemyJunglePlaybook,
@@ -77,19 +78,6 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
         ? 'Enemy wants early river skirmishes & invades — track their start with a 1:15 ward and trade opposite-side camps/objectives.'
         : 'Enemy wants to stall for 5v5 scaling — punish greedy wave clears, take Voidgrubs/Dragons on spawn, and deny free Baron setup.';
 
-  const preferredStyle = playerProfile?.preferredFirstClear ?? 'full_clear';
-  const routes = buildRoutesForSide(input.mapSide, strongSide, preferredStyle);
-  const recommendedRoute =
-    routes.find((r) => r.stage === 'clear_1' && r.style === preferredStyle) ?? routes[0]!;
-
-  const wardSpots = buildWardSpotsForSide(input.mapSide);
-
-  const phasePlaybook = {
-    early: `Start ${recommendedRoute.label}. Ward enemy raptors/entrance at 1:15 if facing an early invader. Path toward ${strongSide.toUpperCase()} for 3:30 Scuttle and first Dragon/Grubs prio.`,
-    mid: `Swap to Oracle Lens after first/second recall. Play around ${strongSide.toUpperCase()} Tier-1 turret push, sync camp clears with Dragon/Herald timers (arrive 45s early with a Control Ward).`,
-    late: `Shadow your main carry, clear vision around Baron/Elder 60s before spawn, and never risk a 50/50 Smite while your strong side wave is pushed against you.`,
-  };
-
   const enemyJgProfile = input.enemyRoles.jungle
     ? findJungleChampionById(input.enemyRoles.jungle)
     : undefined;
@@ -103,6 +91,39 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
   const earlyAggressive =
     enemyJgProfile?.preferredFirstClear === 'three_camp_gank' ||
     enemyJgProfile?.powerSpike === 'early';
+  const invadeRisk: 'low' | 'medium' | 'high' =
+    enemyJgProfile?.preferredFirstClear === 'three_camp_gank'
+      ? 'high'
+      : enemyJgProfile?.powerSpike === 'early'
+        ? 'medium'
+        : 'low';
+
+  const strongLanePriority = Math.min(
+    10,
+    Math.max(1, Math.round(strongSide === 'bot' ? botScore / 1.9 : topScore))
+  );
+  const firstClearDecision = pickFirstClear({
+    champion: playerProfile,
+    strongSide,
+    strongLanePriority,
+    invadeRisk,
+  });
+
+  const routes = buildRoutesForSide(
+    input.mapSide,
+    strongSide,
+    firstClearDecision.style,
+    firstClearDecision.reason
+  );
+  const recommendedRoute = routes[0]!;
+
+  const wardSpots = buildWardSpotsForSide(input.mapSide);
+
+  const phasePlaybook = {
+    early: `Start ${recommendedRoute.descriptor}. Ward enemy raptors/entrance at 1:15 if facing an early invader. Path toward ${strongSide.toUpperCase()} for 3:30 Scuttle and first Dragon/Grubs prio.`,
+    mid: `Swap to Oracle Lens after first/second recall. Play around ${strongSide.toUpperCase()} Tier-1 turret push, sync camp clears with Dragon/Herald timers (arrive 45s early with a Control Ward).`,
+    late: `Shadow your main carry, clear vision around Baron/Elder 60s before spawn, and never risk a 50/50 Smite while your strong side wave is pushed against you.`,
+  };
 
   const enemyJunglePlaybook: EnemyJunglePlaybook = {
     enemyChampionName: enemyJgName,
@@ -112,12 +133,7 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
     wardTarget115: earlyAggressive
       ? 'Enemy Raptor bush or your opposite-side river pixel brush at 1:15'
       : 'Enemy Raptor bush at 1:15 to reveal clear direction',
-    invadeRisk:
-      enemyJgProfile?.preferredFirstClear === 'three_camp_gank'
-        ? 'high'
-        : enemyJgProfile?.powerSpike === 'early'
-          ? 'medium'
-          : 'low',
+    invadeRisk,
     counterPlan: earlyAggressive
       ? 'Ping vulnerable side laners at 2:35, keep your second buff warded, or cross-invade if they show opposite.'
       : 'Match their camp tempo, save 1 Smite charge for 3:30 Crab, and contest with adjacent lane priority.',
