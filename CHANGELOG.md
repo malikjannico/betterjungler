@@ -2,6 +2,12 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [1.1.1] - 2026-11-27
+
+### Fixed
+- **Personal Riot API Key Sanitization & Honest `401`/`403` Diagnostics**: Strips invisible whitespace/BOM/zero-width characters on key save and load, distinguishes `401` vs `403` without misleadingly labeling non-expiring Personal API keys as 24-hour keys, surfaces Riot's sanitized status message, falls back to `Account-V1` verification when a `Riot ID` is configured, and shows verification results cleanly in Settings.
+- **Match-V5 PUUID Resolution (`HTTP 400 Bad Request` Fix)**: Automatically resolves the API-key-encrypted PUUID from `Account-V1` whenever `Sync Recent Games` receives an unencrypted 36-character LCU UUID or an `HTTP 400` encrypted-PUUID mismatch, and prints Riot's detailed HTTP error status message on non-2xx responses.
+
 ## [1.1.0] - 2026-11-27
 
 ### Added

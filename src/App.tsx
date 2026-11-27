@@ -661,9 +661,14 @@ export function App() {
   async function handleSyncMatches() {
     if (demoScenario !== 'idle') return;
     const profilePuuid = sessionCtx.climb.profile?.puuid;
-    if (!profilePuuid && isTauri) {
+    const riotIdParts = settings.riotId.trim().split('#');
+    const hasRiotId =
+      riotIdParts.length === 2 &&
+      Boolean(riotIdParts[0]?.trim()) &&
+      Boolean(riotIdParts[1]?.trim());
+    if (!profilePuuid && !hasRiotId && isTauri) {
       throw new Error(
-        'Load your Riot profile in Settings (or open League Client) before syncing Match-V5 games.'
+        'Save your Riot ID (Name#Tag) or load your profile in Settings before syncing Match-V5 games.'
       );
     }
     const synced = await syncRecentMatches(profilePuuid ?? '', settings.region, 8);

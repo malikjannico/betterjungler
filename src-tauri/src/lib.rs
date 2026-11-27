@@ -298,6 +298,34 @@ async fn apply_runes_and_spells(
     })
 }
 
+fn resolve_candidate_riot_id(state: &SharedState) -> Option<String> {
+    if let Ok(rt) = state.runtime.lock() {
+        if let Some(ref prof) = rt.summoner_profile {
+            let trimmed = prof.riot_id.trim();
+            if riot_api::is_valid_riot_id_format(trimmed) {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    if let Ok(conn) = state.db.lock() {
+        if let Ok(settings) = storage::load_settings(&conn) {
+            let trimmed = settings.riot_id.trim();
+            if riot_api::is_valid_riot_id_format(trimmed) {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn update_runtime_profile_puuid(state: &SharedState, encrypted_puuid: &str) {
+    if let Ok(mut rt) = state.runtime.lock() {
+        if let Some(ref mut prof) = rt.summoner_profile {
+            prof.puuid = encrypted_puuid.to_string();
+        }
+    }
+}
+
 #[tauri::command]
 async fn sync_recent_matches(
     state: State<'_, Arc<SharedState>>,
@@ -306,15 +334,70 @@ async fn sync_recent_matches(
     count: usize,
 ) -> AppResult<Vec<Value>> {
     let auth = resolve_riot_auth(&state)?;
-    let ids = riot_api::fetch_recent_ranked_match_ids(
+    let candidate_riot_id = resolve_candidate_riot_id(&state);
+    let mut effective_puuid = puuid.trim().to_string();
+    let mut already_resolved = false;
+
+    if riot_api::is_unencrypted_lcu_uuid(&effective_puuid) {
+        if let Some(ref rid) = candidate_riot_id {
+            effective_puuid = riot_api::resolve_encrypted_puuid_by_riot_id(
+                &state.riot_web_client,
+                &state.riot_limiter,
+                &auth,
+                rid,
+                &region,
+            )
+            .await?;
+            update_runtime_profile_puuid(&state, &effective_puuid);
+            already_resolved = true;
+        } else {
+            return Err(AppError::RiotApi(
+                "Save your Riot ID (Name#Tag) in Settings to resolve your Match-V5 PUUID."
+                    .to_string(),
+            ));
+        }
+    }
+
+    let ids = match riot_api::fetch_recent_ranked_match_ids(
         &state.riot_web_client,
         &state.riot_limiter,
         &auth,
-        &puuid,
+        &effective_puuid,
         &region,
         count,
     )
-    .await?;
+    .await
+    {
+        Ok(ids) => ids,
+        Err(AppError::RiotHttp { status: 400, detail }) if !already_resolved => {
+            if let Some(ref rid) = candidate_riot_id {
+                effective_puuid = riot_api::resolve_encrypted_puuid_by_riot_id(
+                    &state.riot_web_client,
+                    &state.riot_limiter,
+                    &auth,
+                    rid,
+                    &region,
+                )
+                .await?;
+                update_runtime_profile_puuid(&state, &effective_puuid);
+                riot_api::fetch_recent_ranked_match_ids(
+                    &state.riot_web_client,
+                    &state.riot_limiter,
+                    &auth,
+                    &effective_puuid,
+                    &region,
+                    count,
+                )
+                .await?
+            } else {
+                return Err(AppError::RiotHttp {
+                    status: 400,
+                    detail,
+                });
+            }
+        }
+        Err(err) => return Err(err),
+    };
 
     let mut details = Vec::new();
     for match_id in ids {
@@ -323,7 +406,7 @@ async fn sync_recent_matches(
                 .db
                 .lock()
                 .map_err(|e| AppError::Storage(e.to_string()))?;
-            storage::get_cached_match_detail(&conn, &match_id, &puuid)?
+            storage::get_cached_match_detail(&conn, &match_id, &effective_puuid)?
         };
 
         if let Some(detail) = cached {
@@ -336,7 +419,7 @@ async fn sync_recent_matches(
             &state.riot_limiter,
             &auth,
             &match_id,
-            &puuid,
+            &effective_puuid,
             &region,
         )
         .await
@@ -379,7 +462,7 @@ async fn sync_recent_matches(
             storage::cache_match_record(
                 &conn,
                 &match_id,
-                &puuid,
+                &effective_puuid,
                 &played_at,
                 &summary_stub,
                 &detail,
@@ -402,6 +485,14 @@ fn get_cached_matches(
         .lock()
         .map_err(|e| AppError::Storage(e.to_string()))?;
     let (_summaries, details) = storage::list_cached_matches(&conn, puuid.as_deref(), 15)?;
+    if details.is_empty() {
+        if let Some(ref p) = puuid {
+            if riot_api::is_unencrypted_lcu_uuid(p) {
+                let (_all_sum, all_details) = storage::list_cached_matches(&conn, None, 15)?;
+                return Ok(all_details);
+            }
+        }
+    }
     Ok(details)
 }
 
@@ -602,14 +693,21 @@ async fn check_riot_api_key_health(
 ) -> AppResult<ApiKeyHealthStatus> {
     let auth = match resolve_riot_auth(&state) {
         Ok(a) => a,
-        Err(AppError::Credential(_)) => {
-            let msg = concat!(
-                "No Riot API key or HTTPS proxy URL saved. ",
-                "Configure one in Settings to sync live Riot data."
-            );
+        Err(AppError::Credential(msg)) => {
+            let missing = msg.contains("No Riot API key configured");
+            let status = if missing { "missing" } else { "expired" };
+            let out_msg = if missing {
+                concat!(
+                    "No Riot API key or HTTPS proxy URL saved. ",
+                    "Configure one in Settings to sync live Riot data."
+                )
+                .to_string()
+            } else {
+                msg
+            };
             return Ok(ApiKeyHealthStatus {
-                status: "missing".to_string(),
-                message: msg.to_string(),
+                status: status.to_string(),
+                message: out_msg,
                 checked_at: chrono::Utc::now().to_rfc3339(),
             });
         }
@@ -621,9 +719,15 @@ async fn check_riot_api_key_health(
             });
         }
     };
-    let status =
-        riot_api::probe_riot_api_key(&state.riot_web_client, &state.riot_limiter, &auth, &region)
-            .await;
+    let fallback_riot_id = resolve_candidate_riot_id(&state);
+    let status = riot_api::probe_riot_api_key(
+        &state.riot_web_client,
+        &state.riot_limiter,
+        &auth,
+        &region,
+        fallback_riot_id.as_deref(),
+    )
+    .await;
     Ok(status)
 }
 

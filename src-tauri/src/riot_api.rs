@@ -275,23 +275,66 @@ pub struct ApiKeyHealthStatus {
     pub checked_at: String,
 }
 
+pub fn extract_riot_status_message(body: &str) -> Option<String> {
+    let val: Value = serde_json::from_str(body).ok()?;
+    let msg = val.pointer("/status/message")?.as_str()?;
+    let cleaned: String = msg
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let trimmed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if trimmed.is_empty() {
+        None
+    } else if trimmed.chars().count() > 180 {
+        Some(trimmed.chars().take(180).collect())
+    } else {
+        Some(trimmed)
+    }
+}
+
+pub fn is_valid_riot_id_format(raw: &str) -> bool {
+    let Some((game_name, tag_line)) = raw.trim().split_once('#') else {
+        return false;
+    };
+    !game_name.trim().is_empty() && !tag_line.trim().is_empty()
+}
+
+pub fn is_unencrypted_lcu_uuid(puuid: &str) -> bool {
+    let trimmed = puuid.trim();
+    trimmed.is_empty() || trimmed.len() < 48
+}
+
 /// Pure classification of Status-V4 probe HTTP responses for testability.
 pub fn classify_probe_status(
     status_code: u16,
     retry_after: Option<u64>,
     platform_code: &str,
     checked_at: String,
+    detail: Option<&str>,
 ) -> ApiKeyHealthStatus {
+    let detail_suffix = detail
+        .map(|d| format!(" Riot detail: {d}."))
+        .unwrap_or_default();
     if (200..300).contains(&status_code) {
         ApiKeyHealthStatus {
             status: "valid".to_string(),
             message: format!("Riot API key verified on {platform_code}."),
             checked_at,
         }
-    } else if status_code == 401 || status_code == 403 {
+    } else if status_code == 401 {
         ApiKeyHealthStatus {
             status: "expired".to_string(),
-            message: "Riot API key rejected (401/403). Personal development keys expire every 24 hours — refresh in Settings.".to_string(),
+            message: format!(
+                "Riot API key rejected (HTTP 401). Verify the RGAPI key copied from your Riot Developer Portal.{detail_suffix}"
+            ),
+            checked_at,
+        }
+    } else if status_code == 403 {
+        ApiKeyHealthStatus {
+            status: "expired".to_string(),
+            message: format!(
+                "Riot API key rejected (HTTP 403). Development keys expire every 24h; approved Personal keys do not expire unless regenerated or revoked in the Riot Developer Portal.{detail_suffix}"
+            ),
             checked_at,
         }
     } else if status_code == 429 {
@@ -304,19 +347,20 @@ pub fn classify_probe_status(
     } else {
         ApiKeyHealthStatus {
             status: "offline".to_string(),
-            message: format!("Riot Status-V4 returned HTTP {status_code}."),
+            message: format!("Riot Status-V4 returned HTTP {status_code}.{detail_suffix}"),
             checked_at,
         }
     }
 }
 
 /// Probes the stored Riot API key or proxy against Status-V4 (`/lol/status/v4/platform-data`)
-/// to distinguish valid auth from expired/invalid (401/403), rate-limited (429), or offline states.
+/// and optionally verifies Account-V1 when Status-V4 returns 403 and a Riot ID is configured.
 pub async fn probe_riot_api_key(
     client: &Client,
     limiter: &RiotRateLimiter,
     auth: &RiotAuth,
     region: &str,
+    fallback_riot_id: Option<&str>,
 ) -> ApiKeyHealthStatus {
     let checked_at = chrono::Utc::now().to_rfc3339();
     if let RiotAuth::ApiKey(key) = auth {
@@ -366,9 +410,65 @@ pub async fn probe_riot_api_key(
     {
         Ok(res) => {
             let status_code = res.status().as_u16();
-            limiter.observe_headers("status-v4", res.headers()).await;
-            let retry = parse_retry_after_seconds(res.headers());
-            classify_probe_status(status_code, retry, platform.as_code(), checked_at)
+            let headers = res.headers().clone();
+            limiter.observe_headers("status-v4", &headers).await;
+            let retry = parse_retry_after_seconds(&headers);
+            let detail = if (200..300).contains(&status_code) {
+                None
+            } else {
+                let body = res.text().await.unwrap_or_default();
+                extract_riot_status_message(&body)
+            };
+
+            if status_code == 403 {
+                if let Some(rid) = fallback_riot_id.filter(|s| is_valid_riot_id_format(s)) {
+                    let puuid_probe =
+                        resolve_encrypted_puuid_by_riot_id(client, limiter, auth, rid, region)
+                            .await;
+                    match puuid_probe {
+                        Ok(_) => {
+                            return ApiKeyHealthStatus {
+                                status: "valid".to_string(),
+                                message: format!(
+                                    "Riot API key verified via Account-V1 on {}.",
+                                    platform.as_code()
+                                ),
+                                checked_at,
+                            };
+                        }
+                        Err(AppError::RateLimited { retry_after_secs }) => {
+                            return ApiKeyHealthStatus {
+                                status: "rate_limited".to_string(),
+                                message: format!(
+                                    "Riot API rate limit active (429). Retry in {retry_after_secs}s."
+                                ),
+                                checked_at,
+                            };
+                        }
+                        Err(AppError::RiotHttp { status: 404, .. })
+                            if matches!(auth, RiotAuth::ApiKey(_)) =>
+                        {
+                            return ApiKeyHealthStatus {
+                                status: "valid".to_string(),
+                                message: format!(
+                                    "Riot API key accepted on Account-V1 (Riot ID \"{}\" not found).",
+                                    rid.trim()
+                                ),
+                                checked_at,
+                            };
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+
+            classify_probe_status(
+                status_code,
+                retry,
+                platform.as_code(),
+                checked_at,
+                detail.as_deref(),
+            )
         }
         Err(err) => ApiKeyHealthStatus {
             status: "offline".to_string(),
@@ -457,14 +557,20 @@ pub async fn riot_get_json<T: for<'de> Deserialize<'de>>(
         }
 
         if status == 401 || status == 403 {
-            return Err(AppError::Unauthorized);
+            let body = res.text().await.unwrap_or_default();
+            let detail = extract_riot_status_message(&body);
+            let empty_ts = String::new();
+            let det = detail.as_deref();
+            let classified = classify_probe_status(status, None, "Riot API", empty_ts, det);
+            return Err(AppError::Unauthorized(classified.message));
         }
 
         if !res.status().is_success() {
-            return Err(AppError::RiotApi(format!(
-                "Riot API request failed (HTTP {})",
-                res.status()
-            )));
+            let body = res.text().await.unwrap_or_default();
+            let detail = extract_riot_status_message(&body)
+                .map(|m| format!(" — {m}"))
+                .unwrap_or_default();
+            return Err(AppError::RiotHttp { status, detail });
         }
 
         return res
@@ -512,6 +618,33 @@ struct MasteryDto {
     champion_id: i64,
 }
 
+pub async fn resolve_encrypted_puuid_by_riot_id(
+    client: &Client,
+    limiter: &RiotRateLimiter,
+    auth: &RiotAuth,
+    riot_id: &str,
+    region: &str,
+) -> AppResult<String> {
+    let platform = parse_platform(region)?;
+    let (game_name, tag_line) = riot_id.split_once('#').ok_or_else(|| {
+        AppError::RiotApi("Riot ID must be formatted as GameName#TagLine".to_string())
+    })?;
+    if game_name.trim().is_empty() || tag_line.trim().is_empty() {
+        return Err(AppError::RiotApi(
+            "Both GameName and TagLine must be non-empty (GameName#TagLine)".to_string(),
+        ));
+    }
+    let account_route = platform.account_regional_route();
+    let account_url = format!(
+        "https://{account_route}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{}/{}",
+        urlencoding_segment(game_name),
+        urlencoding_segment(tag_line)
+    );
+    let account: AccountDto =
+        riot_get_json(client, limiter, "account-v1", &account_url, auth).await?;
+    Ok(account.puuid)
+}
+
 pub async fn fetch_summoner_profile(
     client: &Client,
     limiter: &RiotRateLimiter,
@@ -553,7 +686,9 @@ pub async fn fetch_summoner_profile(
     let entries: Vec<LeagueEntryDto> =
         match riot_get_json(client, limiter, "league-v4", &league_url, auth).await {
             Ok(val) => val,
-            Err(err @ (AppError::RateLimited { .. } | AppError::Unauthorized)) => return Err(err),
+            Err(err @ (AppError::RateLimited { .. } | AppError::Unauthorized(_))) => {
+                return Err(err)
+            }
             Err(_) => vec![],
         };
 
@@ -567,7 +702,9 @@ pub async fn fetch_summoner_profile(
     let masteries: Vec<MasteryDto> =
         match riot_get_json(client, limiter, "mastery-v4", &mastery_url, auth).await {
             Ok(val) => val,
-            Err(err @ (AppError::RateLimited { .. } | AppError::Unauthorized)) => return Err(err),
+            Err(err @ (AppError::RateLimited { .. } | AppError::Unauthorized(_))) => {
+                return Err(err)
+            }
             Err(_) => vec![],
         };
 
@@ -951,24 +1088,33 @@ mod tests {
     fn classifies_probe_status_codes() {
         let now = "2026-11-27T00:00:00Z".to_string();
         assert_eq!(
-            classify_probe_status(200, None, "EUW1", now.clone()).status,
+            classify_probe_status(200, None, "EUW1", now.clone(), None).status,
             "valid"
         );
-        assert_eq!(
-            classify_probe_status(401, None, "EUW1", now.clone()).status,
-            "expired"
-        );
-        assert_eq!(
-            classify_probe_status(403, None, "EUW1", now.clone()).status,
-            "expired"
-        );
-        let rate = classify_probe_status(429, Some(12), "EUW1", now.clone());
+        let err_401 = classify_probe_status(401, None, "EUW1", now.clone(), Some("Unauthorized"));
+        assert_eq!(err_401.status, "expired");
+        assert!(err_401.message.contains("HTTP 401"));
+        let err_403 = classify_probe_status(403, None, "EUW1", now.clone(), Some("Forbidden"));
+        assert_eq!(err_403.status, "expired");
+        assert!(err_403.message.contains("Personal keys do not expire"));
+        let rate = classify_probe_status(429, Some(12), "EUW1", now.clone(), None);
         assert_eq!(rate.status, "rate_limited");
         assert!(rate.message.contains("12s"));
         assert_eq!(
-            classify_probe_status(503, None, "EUW1", now).status,
+            classify_probe_status(503, None, "EUW1", now, None).status,
             "offline"
         );
+        assert_eq!(
+            extract_riot_status_message(r#"{"status":{"message":"Forbidden","status_code":403}}"#)
+                .as_deref(),
+            Some("Forbidden")
+        );
+        assert!(is_unencrypted_lcu_uuid(
+            "123e4567-e89b-12d3-a456-426614174000"
+        ));
+        assert!(!is_unencrypted_lcu_uuid(
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567"
+        ));
     }
 
     #[test]

@@ -1020,15 +1020,37 @@ pub fn list_lp_history(conn: &Connection, limit: usize) -> AppResult<Vec<LpHisto
     Ok(out)
 }
 
-pub fn save_riot_api_key(api_key: &str) -> AppResult<()> {
-    let trimmed = api_key.trim();
-    if trimmed.is_empty() {
+pub fn sanitize_riot_api_key(raw: &str) -> AppResult<String> {
+    let cleaned: String = raw
+        .chars()
+        .filter(|&c| {
+            !c.is_whitespace()
+                && !c.is_control()
+                && !matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')
+        })
+        .collect();
+    if cleaned.is_empty() {
         return Err(AppError::Credential("API key cannot be empty".to_string()));
     }
+    if !cleaned.bytes().all(|b| (0x21..=0x7E).contains(&b)) {
+        return Err(AppError::Credential(
+            "Riot API key must contain printable ASCII characters only".to_string(),
+        ));
+    }
+    if !cleaned.starts_with("RGAPI-") || cleaned.len() < 16 {
+        return Err(AppError::Credential(
+            "Invalid Riot API key format (expected RGAPI-...)".to_string(),
+        ));
+    }
+    Ok(cleaned)
+}
+
+pub fn save_riot_api_key(api_key: &str) -> AppResult<()> {
+    let cleaned = sanitize_riot_api_key(api_key)?;
     let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER)
         .map_err(|e| AppError::Credential(e.to_string()))?;
     entry
-        .set_password(trimmed)
+        .set_password(&cleaned)
         .map_err(|e| AppError::Credential(e.to_string()))?;
     Ok(())
 }
@@ -1036,15 +1058,16 @@ pub fn save_riot_api_key(api_key: &str) -> AppResult<()> {
 pub fn load_riot_api_key() -> AppResult<String> {
     let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER)
         .map_err(|e| AppError::Credential(e.to_string()))?;
-    entry
+    let raw = entry
         .get_password()
-        .map_err(|e| AppError::Credential(format!("No Riot API key configured: {e}")))
+        .map_err(|e| AppError::Credential(format!("No Riot API key configured: {e}")))?;
+    sanitize_riot_api_key(&raw)
 }
 
 pub fn has_riot_api_key() -> bool {
     Entry::new(KEYRING_SERVICE, KEYRING_USER)
         .and_then(|e| e.get_password())
-        .map(|k| !k.trim().is_empty())
+        .map(|k| sanitize_riot_api_key(&k).is_ok())
         .unwrap_or(false)
 }
 
@@ -1343,6 +1366,16 @@ mod tests {
 
         let cleared = set_focus_goal(&mut conn, "g2").expect("unfocus g2");
         assert!(cleared.iter().all(|g| !g.is_focus_goal));
+    }
+
+    #[test]
+    fn sanitizes_riot_api_keys_and_rejects_malformed_inputs() {
+        let cleaned = sanitize_riot_api_key("\u{FEFF} RGAPI-ebfdd279-7797-492a-8aa5\u{200B}\n")
+            .expect("valid key");
+        assert_eq!(cleaned, "RGAPI-ebfdd279-7797-492a-8aa5");
+        assert!(sanitize_riot_api_key("").is_err());
+        assert!(sanitize_riot_api_key("not-a-riot-key").is_err());
+        assert!(sanitize_riot_api_key("RGAPI-short").is_err());
     }
 
     #[test]

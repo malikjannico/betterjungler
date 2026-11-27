@@ -15,10 +15,11 @@ pub enum AppError {
     #[error("Riot API error: {0}")]
     RiotApi(String),
 
-    #[error(
-        "Riot API key rejected (401/403). Personal keys expire every 24h — refresh in Settings."
-    )]
-    Unauthorized,
+    #[error("Riot API request failed (HTTP {status}){detail}")]
+    RiotHttp { status: u16, detail: String },
+
+    #[error("{0}")]
+    Unauthorized(String),
 
     #[error("Riot API rate limit hit (429). Retry after {retry_after_secs}s.")]
     RateLimited { retry_after_secs: u64 },

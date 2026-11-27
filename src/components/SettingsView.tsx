@@ -304,18 +304,45 @@ export function SettingsView({
     }
     try {
       const ok = await saveRiotApiKey(apiKeyInput.trim());
-      if (ok) {
-        const updated = { ...draft, hasApiKey: true };
-        setDraft(updated);
-        await saveSettings(updated);
-        onSettingsChanged(updated);
-        setApiKeyInput('');
+      if (!ok) return;
+      const updated = { ...settings, hasApiKey: true };
+      setDraft((prev) => ({ ...prev, hasApiKey: true }));
+      await saveSettings(updated);
+      onSettingsChanged(updated);
+      setApiKeyInput('');
+
+      if (updated.riotApiProxyUrl?.trim()) {
+        setStatusMessage(
+          'Riot API Key stored in Windows Credential Manager (HTTPS Proxy URL is active, so live requests route through your proxy).'
+        );
+        return;
+      }
+
+      try {
         const health = await checkRiotApiKeyHealth(updated.region);
         onApiKeyHealthChanged(health);
-        setStatusMessage(
-          health.status === 'valid'
-            ? `Riot API Key stored & verified on ${updated.region}.`
-            : `Riot API Key stored in Windows Credential Manager (${health.message}).`
+        if (health.status === 'valid') {
+          setStatusMessage(`Riot API Key stored. ${health.message}`);
+          const parts = updated.riotId.trim().split('#');
+          if (parts.length === 2 && Boolean(parts[0]?.trim()) && Boolean(parts[1]?.trim())) {
+            void fetchSummonerProfile(updated.riotId.trim(), updated.region)
+              .then(onProfileLoaded)
+              .catch(() => {});
+          }
+        } else if (health.status === 'expired') {
+          setStatusMessage(
+            'Riot API Key stored in Windows Credential Manager; verification returned 401/403 (see details below).'
+          );
+        } else {
+          setErrorMessage(
+            `Riot API Key stored in Windows Credential Manager, but live probe failed: ${health.message}`
+          );
+        }
+      } catch (probeErr) {
+        setErrorMessage(
+          `Riot API Key stored in Windows Credential Manager, but verification check failed: ${
+            probeErr instanceof Error ? probeErr.message : 'Unknown error'
+          }`
         );
       }
     } catch (err) {
@@ -484,7 +511,7 @@ export function SettingsView({
               {apiKeyHealth?.status === 'valid'
                 ? 'Verified Active'
                 : apiKeyHealth?.status === 'expired'
-                  ? 'Expired / Invalid (401/403)'
+                  ? 'Key Rejected (401/403)'
                   : apiKeyHealth?.status === 'rate_limited'
                     ? 'Rate Limited (429)'
                     : draft.riotApiProxyUrl?.trim() && !proxyValidationError
