@@ -118,6 +118,8 @@ export interface SummonerProfileSummary {
 
 export interface AppRuntimeState {
   phase: GamePhase;
+  gameflowPhase?: string;
+  canInstallUpdate?: boolean;
   lcuConnected: boolean;
   liveClientConnected: boolean;
   champSelect: LcuChampSelectSession | null;

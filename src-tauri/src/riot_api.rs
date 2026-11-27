@@ -152,6 +152,104 @@ pub struct SummonerProfileSummary {
     pub top_mastery_champion_ids: Vec<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyHealthStatus {
+    pub status: String,
+    pub message: String,
+    pub checked_at: String,
+}
+
+/// Pure classification of Status-V4 probe HTTP responses for testability.
+pub fn classify_probe_status(
+    status_code: u16,
+    retry_after: Option<u64>,
+    platform_code: &str,
+    checked_at: String,
+) -> ApiKeyHealthStatus {
+    if (200..300).contains(&status_code) {
+        ApiKeyHealthStatus {
+            status: "valid".to_string(),
+            message: format!("Riot API key verified on {platform_code}."),
+            checked_at,
+        }
+    } else if status_code == 401 || status_code == 403 {
+        ApiKeyHealthStatus {
+            status: "expired".to_string(),
+            message: "Riot API key rejected (401/403). Personal development keys expire every 24 hours — refresh in Settings.".to_string(),
+            checked_at,
+        }
+    } else if status_code == 429 {
+        let retry = retry_after.unwrap_or(5);
+        ApiKeyHealthStatus {
+            status: "rate_limited".to_string(),
+            message: format!("Riot API rate limit active (429). Retry in {retry}s."),
+            checked_at,
+        }
+    } else {
+        ApiKeyHealthStatus {
+            status: "offline".to_string(),
+            message: format!("Riot Status-V4 returned HTTP {status_code}."),
+            checked_at,
+        }
+    }
+}
+
+/// Probes the stored Riot API key against Status-V4 (`/lol/status/v4/platform-data`)
+/// to distinguish valid keys from expired/invalid (401/403), rate-limited (429), or offline states.
+pub async fn probe_riot_api_key(
+    client: &Client,
+    limiter: &RiotRateLimiter,
+    api_key: &str,
+    region: &str,
+) -> ApiKeyHealthStatus {
+    let checked_at = chrono::Utc::now().to_rfc3339();
+    if api_key.trim().is_empty() {
+        return ApiKeyHealthStatus {
+            status: "missing".to_string(),
+            message: "No Riot API key saved. Paste your key in Settings to sync live Riot data."
+                .to_string(),
+            checked_at,
+        };
+    }
+
+    let platform = match parse_platform(region) {
+        Ok(p) => p,
+        Err(err) => {
+            return ApiKeyHealthStatus {
+                status: "offline".to_string(),
+                message: err.to_string(),
+                checked_at,
+            };
+        }
+    };
+
+    limiter.acquire("status-v4").await;
+    let url = format!(
+        "https://{}.api.riotgames.com/lol/status/v4/platform-data",
+        platform.as_host()
+    );
+
+    match client
+        .get(&url)
+        .header("X-Riot-Token", api_key.trim())
+        .send()
+        .await
+    {
+        Ok(res) => {
+            let status_code = res.status().as_u16();
+            limiter.observe_headers("status-v4", res.headers()).await;
+            let retry = parse_retry_after_seconds(res.headers());
+            classify_probe_status(status_code, retry, platform.as_code(), checked_at)
+        }
+        Err(err) => ApiKeyHealthStatus {
+            status: "offline".to_string(),
+            message: format!("Unable to reach Riot API: {err}"),
+            checked_at,
+        },
+    }
+}
+
 /// Builds a strict standard-TLS HTTP client with redirects disabled to prevent header leakage.
 pub fn build_riot_web_client() -> AppResult<Client> {
     Client::builder()
@@ -424,12 +522,7 @@ pub async fn fetch_match_detail_and_timeline(
     let timeline_json: Value =
         riot_get_json(client, limiter, "match-v5-timeline", &timeline_url, api_key).await?;
 
-    Ok(normalize_match_v5_detail(
-        safe_match_id,
-        puuid,
-        &match_json,
-        &timeline_json,
-    ))
+    normalize_match_v5_detail(safe_match_id, puuid, &match_json, &timeline_json)
 }
 
 pub fn normalize_match_v5_detail(
@@ -437,7 +530,7 @@ pub fn normalize_match_v5_detail(
     puuid: &str,
     match_json: &Value,
     timeline_json: &Value,
-) -> Value {
+) -> AppResult<Value> {
     let info = &match_json["info"];
     let empty_vec = vec![];
     let participants = info["participants"].as_array().unwrap_or(&empty_vec);
@@ -445,19 +538,19 @@ pub fn normalize_match_v5_detail(
     let player = participants
         .iter()
         .find(|p| p["puuid"].as_str() == Some(puuid))
-        .or_else(|| participants.first());
+        .ok_or_else(|| {
+            AppError::RiotApi(format!(
+                "Target PUUID was not found in Match-V5 detail for {match_id}"
+            ))
+        })?;
 
-    let player_pid = player
-        .and_then(|p| p["participantId"].as_i64())
-        .unwrap_or(1);
-    let my_team_id = player.and_then(|p| p["teamId"].as_i64()).unwrap_or(100);
+    let player_pid = player["participantId"].as_i64().unwrap_or(1);
+    let my_team_id = player["teamId"].as_i64().unwrap_or(100);
 
     let enemy_jg = participants.iter().find(|p| {
         p["teamId"].as_i64() != Some(my_team_id) && p["teamPosition"].as_str() == Some("JUNGLE")
     });
-    let enemy_jg_pid = enemy_jg
-        .and_then(|p| p["participantId"].as_i64())
-        .unwrap_or(0);
+    let enemy_jg_pid: Option<i64> = enemy_jg.and_then(|p| p["participantId"].as_i64());
 
     let team_kills: i64 = participants
         .iter()
@@ -492,23 +585,32 @@ pub fn normalize_match_v5_detail(
                 .unwrap_or(idx as i64);
             let pf = &frame["participantFrames"];
             let p_key = player_pid.to_string();
-            let e_key = enemy_jg_pid.to_string();
             let p_frame = &pf[&p_key];
-            let e_frame = &pf[&e_key];
+            let e_frame = enemy_jg_pid.map(|eid| &pf[&eid.to_string()]);
 
             if p_frame.is_object() {
+                let p_gold = p_frame["totalGold"].as_i64().unwrap_or(0);
+                let p_xp = p_frame["xp"].as_i64().unwrap_or(0);
                 let cs = p_frame["minionsKilled"].as_i64().unwrap_or(0)
                     + p_frame["jungleMinionsKilled"].as_i64().unwrap_or(0);
-                let e_cs = e_frame["minionsKilled"].as_i64().unwrap_or(0)
-                    + e_frame["jungleMinionsKilled"].as_i64().unwrap_or(0);
 
-                let enemy_jg_pos = if e_frame["position"].is_object() {
-                    json!({
-                        "x": e_frame["position"]["x"].as_i64().unwrap_or(7435),
-                        "y": e_frame["position"]["y"].as_i64().unwrap_or(7435)
-                    })
-                } else {
-                    Value::Null
+                let (e_gold, e_xp, e_cs, enemy_jg_pos) = match e_frame.filter(|ef| ef.is_object()) {
+                    Some(ef) => {
+                        let eg = ef["totalGold"].as_i64().unwrap_or(p_gold);
+                        let ex = ef["xp"].as_i64().unwrap_or(p_xp);
+                        let ec = ef["minionsKilled"].as_i64().unwrap_or(0)
+                            + ef["jungleMinionsKilled"].as_i64().unwrap_or(0);
+                        let pos = if ef["position"].is_object() {
+                            json!({
+                                "x": ef["position"]["x"].as_i64().unwrap_or(7435),
+                                "y": ef["position"]["y"].as_i64().unwrap_or(7435)
+                            })
+                        } else {
+                            Value::Null
+                        };
+                        (eg, ex, ec, pos)
+                    }
+                    None => (p_gold, p_xp, cs, Value::Null),
                 };
 
                 frames_out.push(json!({
@@ -518,11 +620,11 @@ pub fn normalize_match_v5_detail(
                         "y": p_frame["position"]["y"].as_i64().unwrap_or(7435)
                     },
                     "enemyJunglerPosition": enemy_jg_pos,
-                    "totalGold": p_frame["totalGold"].as_i64().unwrap_or(0),
-                    "xp": p_frame["xp"].as_i64().unwrap_or(0),
+                    "totalGold": p_gold,
+                    "xp": p_xp,
                     "cs": cs,
-                    "enemyJunglerGold": e_frame["totalGold"].as_i64().unwrap_or(0),
-                    "enemyJunglerXp": e_frame["xp"].as_i64().unwrap_or(0),
+                    "enemyJunglerGold": e_gold,
+                    "enemyJunglerXp": e_xp,
                     "enemyJunglerCs": e_cs
                 }));
             }
@@ -564,43 +666,39 @@ pub fn normalize_match_v5_detail(
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
     let items: Vec<i64> = (0..=6)
-        .filter_map(|slot| player.and_then(|p| p[format!("item{slot}")].as_i64()))
+        .filter_map(|slot| player[format!("item{slot}")].as_i64())
         .filter(|&id| id > 0)
         .collect();
 
-    let cs_total = player
-        .map(|p| {
-            p["totalMinionsKilled"].as_i64().unwrap_or(0)
-                + p["neutralMinionsKilled"].as_i64().unwrap_or(0)
-        })
-        .unwrap_or(0);
+    let cs_total = player["totalMinionsKilled"].as_i64().unwrap_or(0)
+        + player["neutralMinionsKilled"].as_i64().unwrap_or(0);
 
-    json!({
+    Ok(json!({
         "matchId": match_id,
         "playedAt": played_at,
         "durationSeconds": info["gameDuration"].as_i64().unwrap_or(1800),
         "patch": info["gameVersion"].as_str().unwrap_or("16.1"),
         "queueId": info["queueId"].as_i64().unwrap_or(420),
-        "win": player.and_then(|p| p["win"].as_bool()).unwrap_or(false),
+        "win": player["win"].as_bool().unwrap_or(false),
         "mapSide": if my_team_id == 200 { "red" } else { "blue" },
         "playerParticipantId": player_pid,
-        "championId": player.and_then(|p| p["championId"].as_i64()).unwrap_or(0),
-        "championName": player.and_then(|p| p["championName"].as_str()).unwrap_or("Jungler"),
+        "championId": player["championId"].as_i64().unwrap_or(0),
+        "championName": player["championName"].as_str().unwrap_or("Jungler"),
         "enemyJunglerChampionId": enemy_jg.and_then(|p| p["championId"].as_i64()).unwrap_or(0),
-        "enemyJunglerName": enemy_jg.and_then(|p| p["championName"].as_str()).unwrap_or("Enemy Jungler"),
-        "kills": player.and_then(|p| p["kills"].as_i64()).unwrap_or(0),
-        "deaths": player.and_then(|p| p["deaths"].as_i64()).unwrap_or(0),
-        "assists": player.and_then(|p| p["assists"].as_i64()).unwrap_or(0),
+        "enemyJunglerName": enemy_jg.and_then(|p| p["championName"].as_str()).unwrap_or("Unknown"),
+        "kills": player["kills"].as_i64().unwrap_or(0),
+        "deaths": player["deaths"].as_i64().unwrap_or(0),
+        "assists": player["assists"].as_i64().unwrap_or(0),
         "cs": cs_total,
-        "visionScore": player.and_then(|p| p["visionScore"].as_i64()).unwrap_or(0),
-        "controlWardsBought": player.and_then(|p| p["visionWardsBoughtInGame"].as_i64()).unwrap_or(0),
+        "visionScore": player["visionScore"].as_i64().unwrap_or(0),
+        "controlWardsBought": player["visionWardsBoughtInGame"].as_i64().unwrap_or(0),
         "teamKills": team_kills,
         "teamObjectives": count_team_objectives(my_team_id),
         "enemyObjectives": count_team_objectives(if my_team_id == 100 { 200 } else { 100 }),
         "items": items,
         "frames": frames_out,
         "events": events_out
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -656,7 +754,8 @@ mod tests {
             }
         });
 
-        let out = normalize_match_v5_detail("EUW1_999", "p-ally", &match_json, &timeline_json);
+        let out = normalize_match_v5_detail("EUW1_999", "p-ally", &match_json, &timeline_json)
+            .expect("target participant should normalize");
         assert_eq!(out["frames"][0]["minute"], 10);
         assert_eq!(out["frames"][0]["enemyJunglerPosition"]["x"], 10000);
         assert_eq!(out["teamObjectives"], 4); // 2 dragons + 1 baron + 1 voidgrub cluster
@@ -664,9 +763,54 @@ mod tests {
     }
 
     #[test]
+    fn errors_when_target_puuid_is_missing_and_avoids_zero_enemy_gold_when_no_enemy_jg() {
+        let match_json = json!({
+            "info": {
+                "gameCreation": 1730000000000_i64,
+                "participants": [
+                    { "participantId": 2, "puuid": "p-ally", "teamId": 100, "teamPosition": "JUNGLE", "championId": 234, "championName": "Viego", "win": true }
+                ]
+            }
+        });
+        let timeline_json = json!({
+            "info": {
+                "frames": [
+                    {
+                        "timestamp": 600000,
+                        "participantFrames": {
+                            "2": { "position": { "x": 4000, "y": 5000 }, "totalGold": 3500, "xp": 4100 }
+                        }
+                    }
+                ]
+            }
+        });
+
+        assert!(
+            normalize_match_v5_detail("EUW1_999", "p-missing", &match_json, &timeline_json).is_err()
+        );
+        let out = normalize_match_v5_detail("EUW1_999", "p-ally", &match_json, &timeline_json)
+            .expect("missing enemy jg should still normalize");
+        assert!(out["frames"][0]["enemyJunglerPosition"].is_null());
+        assert_eq!(out["frames"][0]["enemyJunglerGold"], 3500);
+        assert_eq!(out["enemyJunglerName"], "Unknown");
+    }
+
+    #[test]
     fn parses_retry_after_header() {
         let mut headers = HeaderMap::new();
         headers.insert("retry-after", HeaderValue::from_static("15"));
         assert_eq!(parse_retry_after_seconds(&headers), Some(15));
+    }
+
+    #[test]
+    fn classifies_probe_status_codes() {
+        let now = "2026-11-27T00:00:00Z".to_string();
+        assert_eq!(classify_probe_status(200, None, "EUW1", now.clone()).status, "valid");
+        assert_eq!(classify_probe_status(401, None, "EUW1", now.clone()).status, "expired");
+        assert_eq!(classify_probe_status(403, None, "EUW1", now.clone()).status, "expired");
+        let rate = classify_probe_status(429, Some(12), "EUW1", now.clone());
+        assert_eq!(rate.status, "rate_limited");
+        assert!(rate.message.contains("12s"));
+        assert_eq!(classify_probe_status(503, None, "EUW1", now).status, "offline");
     }
 }

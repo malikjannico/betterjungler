@@ -29,6 +29,9 @@ pub enum AppError {
 
     #[error("Overlay error: {0}")]
     Overlay(String),
+
+    #[error("Updater error: {0}")]
+    Updater(String),
 }
 
 impl Serialize for AppError {

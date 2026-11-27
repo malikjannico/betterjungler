@@ -72,9 +72,16 @@ export function GoldXpDiffChart({
         <div className="flex items-center gap-3 text-[11px]">
           <span className="text-slate-400">
             Peak Lead:{' '}
-            <strong className="tabular-nums text-emerald-300">
-              +{peakMetricLead}
-              {metric === 'goldDiff' ? 'g' : ' XP'}
+            <strong
+              className={`tabular-nums ${
+                peakMetricLead > 0 ? 'text-emerald-300' : 'text-slate-300'
+              }`}
+            >
+              {peakMetricLead > 0
+                ? `+${peakMetricLead}${metric === 'goldDiff' ? 'g' : ' XP'}`
+                : metric === 'goldDiff'
+                  ? '0g'
+                  : '0 XP'}
             </strong>
           </span>
 
@@ -122,19 +129,18 @@ export function GoldXpDiffChart({
         onKeyDown={(e) => {
           const selectIndex = (idx: number) => {
             e.preventDefault();
-            setInternalIdx(idx);
-            onSelectMinute?.(coords[idx]!.pt.minute);
+            const clamped = Math.max(0, Math.min(coords.length - 1, idx));
+            setInternalIdx(clamped);
+            onSelectMinute?.(coords[clamped]!.pt.minute);
           };
-          if (
-            (e.key === 'ArrowRight' || e.key === 'ArrowUp') &&
-            controlledIdx + 1 < coords.length
-          ) {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
             selectIndex(controlledIdx + 1);
-          } else if (
-            (e.key === 'ArrowLeft' || e.key === 'ArrowDown') &&
-            controlledIdx > 0
-          ) {
+          } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
             selectIndex(controlledIdx - 1);
+          } else if (e.key === 'PageUp') {
+            selectIndex(controlledIdx + 5);
+          } else if (e.key === 'PageDown') {
+            selectIndex(controlledIdx - 5);
           } else if (e.key === 'Home') {
             selectIndex(0);
           } else if (e.key === 'End') {
@@ -224,7 +230,8 @@ export function GoldXpDiffChart({
 
       <div className="mt-2 flex flex-wrap items-center justify-between text-[11px] text-slate-400">
         <span>
-          Minute <strong className="text-white">{activeCoord.pt.minute}:00</strong> · Gold{' '}
+          Minute{' '}
+          <strong className="tabular-nums text-white">{activeCoord.pt.minute}:00</strong> · Gold{' '}
           <strong
             className={`tabular-nums ${
               activeCoord.pt.goldDiff >= 0 ? 'text-emerald-300' : 'text-rose-300'

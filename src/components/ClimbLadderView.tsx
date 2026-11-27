@@ -70,9 +70,10 @@ export function ClimbLadderView({
     [summaries, targetDivision]
   );
 
+  const hasMatches = summaries.length > 0;
   const syncedGoals = useMemo(
-    () => syncGoalsWithRollingProgress(goals, evaluation.comparisons),
-    [goals, evaluation.comparisons]
+    () => syncGoalsWithRollingProgress(goals, evaluation.comparisons, hasMatches),
+    [goals, evaluation.comparisons, hasMatches]
   );
 
   async function handlePinSuggested(goal: ClimbGoal) {
@@ -326,7 +327,11 @@ export function ClimbLadderView({
             ) : (
               <div className="divide-y divide-white/[0.06]">
                 {syncedGoals.map((goal) => {
-                  const isAutoMet = isGoalTargetMet(goal, evaluation.comparisons);
+                  const isAutoMet = isGoalTargetMet(
+                    goal,
+                    evaluation.comparisons,
+                    hasMatches
+                  );
                   return (
                     <div
                       key={goal.id}
@@ -335,14 +340,14 @@ export function ClimbLadderView({
                       <button
                         type="button"
                         aria-pressed={goal.status === 'completed'}
-                        disabled={isAutoMet}
-                        title={
-                          isAutoMet
-                            ? 'Target automatically satisfied by rolling 15-game KPIs'
-                            : undefined
-                        }
-                        onClick={() => void handleToggleGoalStatus(goal)}
-                        className="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
+                        aria-disabled={isAutoMet ? true : undefined}
+                        aria-describedby={isAutoMet ? `auto-met-${goal.id}` : undefined}
+                        onClick={() => {
+                          if (!isAutoMet) void handleToggleGoalStatus(goal);
+                        }}
+                        className={`flex min-w-0 items-center gap-2.5 text-left ${
+                          isAutoMet ? 'cursor-default' : ''
+                        }`}
                       >
                         <span
                           className={`h-3 w-3 shrink-0 rounded-full border ${
@@ -363,7 +368,10 @@ export function ClimbLadderView({
                               {goal.title}
                             </span>
                             {isAutoMet && (
-                              <span className="shrink-0 rounded-full border border-emerald-400/35 bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
+                              <span
+                                id={`auto-met-${goal.id}`}
+                                className="shrink-0 rounded-full border border-emerald-400/35 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200"
+                              >
                                 Auto-met
                               </span>
                             )}

@@ -9,10 +9,13 @@ import {
   Minus,
   Settings,
   SlidersHorizontal,
+  Sparkles,
   Swords,
   TrendingUp,
   X,
 } from 'lucide-react';
+import pkg from '../package.json';
+import changelogRaw from '../CHANGELOG.md?raw';
 import { ChampSelectView } from './components/ChampSelectView';
 import { ClimbLadderView } from './components/ClimbLadderView';
 import { CompactHudBar } from './components/CompactHudBar';
@@ -21,6 +24,7 @@ import { PostGameReviewView } from './components/PostGameReviewView';
 import { SettingsView } from './components/SettingsView';
 import { WinConditionView } from './components/WinConditionView';
 import { findJungleChampionById, findJungleChampionByName } from './data/jungleKnowledgePack';
+import { parseChangelog } from './domain/changelogParser';
 import {
   computeAdaptiveBuild,
   computeMacroGuidance,
@@ -45,11 +49,15 @@ import {
   syncFullDdragonCatalog,
 } from './services/ddragonService';
 import {
+  checkForAppUpdate,
+  checkRiotApiKeyHealth,
   deleteClimbGoal,
+  getAppMeta,
   getAppState,
   getCachedMatches,
   getCachedMetaSnapshot,
   getLcuProfile,
+  installAppUpdate,
   isTauriEnvironment,
   loadClimbGoals,
   loadLpHistory,
@@ -63,12 +71,15 @@ import {
 } from './services/tauriBridge';
 import type {
   ActiveTab,
+  ApiKeyHealthStatus,
+  AppMetaInfo,
   ClimbGoal,
   DemoScenarioId,
   HighEloMetaSnapshot,
   HudCorner,
   LpHistoryPoint,
   OverlayMode,
+  UpdateCheckResult,
   UserSettings,
 } from './types/coaching';
 import type {
@@ -175,6 +186,24 @@ export function App() {
   });
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [legalOpen, setLegalOpen] = useState(false);
+  const [apiKeyHealth, setApiKeyHealth] = useState<ApiKeyHealthStatus | null>(null);
+  const [appMeta, setAppMeta] = useState<AppMetaInfo>({
+    version: pkg.version,
+    commitSha: 'local',
+    logDir: '',
+  });
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('betterjungler_dismissed_update');
+    } catch {
+      return null;
+    }
+  });
+  const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   const simSelectRef = useRef<HTMLSelectElement | null>(null);
   const simPopoverRef = useRef<HTMLDivElement | null>(null);
   const simButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -184,8 +213,39 @@ export function App() {
   useEffect(() => {
     let active = true;
     void loadSettings().then((s) => {
-      if (active) setSettings(s);
+      if (!active) return;
+      setSettings(s);
+      if (isTauri && s.hasApiKey) {
+        void checkRiotApiKeyHealth(s.region)
+          .then((h) => {
+            if (active) setApiKeyHealth(h);
+          })
+          .catch(() => {});
+      }
     });
+    void getAppMeta()
+      .then((meta) => {
+        if (!active) return;
+        setAppMeta(meta);
+        try {
+          const lastSeenKey = 'betterjungler_last_seen_version';
+          const lastSeen = localStorage.getItem(lastSeenKey);
+          if (lastSeen && lastSeen !== meta.version) {
+            setWhatsNewVersion(meta.version);
+          } else if (!lastSeen) {
+            localStorage.setItem(lastSeenKey, meta.version);
+          }
+        } catch {
+          // Ignore storage errors in restricted environments
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setUpdateError(
+            err instanceof Error ? err.message : 'Unable to load app metadata.'
+          );
+        }
+      });
     const resolvePatch = isTauri
       ? syncDdragonPatch().catch(() => fetchLatestPatchVersion())
       : fetchLatestPatchVersion();
@@ -204,6 +264,9 @@ export function App() {
       if (!active || !state) return;
       lastPhaseRef.current = state.phase;
       setLiveState(state);
+      if (isTauri && state.phase !== 'idle') {
+        setDemoScenario('idle');
+      }
       if (state.summonerProfile) {
         setSummonerProfile(state.summonerProfile);
       }
@@ -224,6 +287,9 @@ export function App() {
     const unsubPromise = subscribeGameState(
       (state) => {
         setLiveState(state);
+        if (isTauri && state.phase !== 'idle') {
+          setDemoScenario('idle');
+        }
         if (state.summonerProfile) {
           setSummonerProfile(state.summonerProfile);
         }
@@ -380,6 +446,88 @@ export function App() {
       toMatchSummaryRecord(m, analyzePostGameMatch(m, settings.targetDivision))
     );
   }, [demoScenario, matches, settings.targetDivision]);
+
+  const canInstallUpdateSafely =
+    runtimeState.canInstallUpdate ??
+    (runtimeState.phase !== 'champ_select' &&
+      runtimeState.phase !== 'loading' &&
+      runtimeState.phase !== 'in_game' &&
+      !runtimeState.liveClientConnected &&
+      (runtimeState.gameflowPhase === 'None' ||
+        runtimeState.gameflowPhase === 'Lobby' ||
+        runtimeState.gameflowPhase === 'EndOfGame'));
+
+  const safeUpdateRef = useRef(canInstallUpdateSafely);
+  useEffect(() => {
+    safeUpdateRef.current = canInstallUpdateSafely;
+  }, [canInstallUpdateSafely]);
+
+  async function handleCheckUpdate() {
+    setCheckingUpdate(true);
+    setUpdateError(null);
+    try {
+      const res = await checkForAppUpdate();
+      setUpdateInfo(res);
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : 'Unable to check for updates.');
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!canInstallUpdateSafely) return;
+    setInstallingUpdate(true);
+    setUpdateError(null);
+    try {
+      await installAppUpdate();
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : 'Unable to install update.');
+    } finally {
+      setInstallingUpdate(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isTauri) return;
+    const runIdleCheck = () => {
+      if (!safeUpdateRef.current) return;
+      void checkForAppUpdate()
+        .then((res) => setUpdateInfo(res))
+        .catch(() => {});
+    };
+    const bootTimer = window.setTimeout(runIdleCheck, 30_000);
+    const periodicTimer = window.setInterval(runIdleCheck, 6 * 60 * 60 * 1000);
+    return () => {
+      window.clearTimeout(bootTimer);
+      window.clearInterval(periodicTimer);
+    };
+  }, [isTauri]);
+
+  function handleDismissWhatsNew() {
+    if (!whatsNewVersion) return;
+    try {
+      localStorage.setItem('betterjungler_last_seen_version', whatsNewVersion);
+    } catch {
+      // ignore
+    }
+    setWhatsNewVersion(null);
+  }
+
+  function handleDismissUpdatePill(version: string) {
+    setDismissedUpdateVersion(version);
+    try {
+      localStorage.setItem('betterjungler_dismissed_update', version);
+    } catch {
+      // ignore
+    }
+  }
+
+  const whatsNewEntry = useMemo(() => {
+    if (!whatsNewVersion) return null;
+    const parsed = parseChangelog(changelogRaw);
+    return parsed.find((entry) => entry.version === whatsNewVersion) ?? null;
+  }, [whatsNewVersion]);
 
   async function toggleOverlayMode(next: OverlayMode) {
     setMode(next);
@@ -628,6 +776,29 @@ export function App() {
                 </span>
                 <kbd className="font-mono text-[10px] text-slate-400">Ctrl+K</kbd>
               </button>
+
+              {updateInfo?.available &&
+                updateInfo.latestVersion &&
+                canInstallUpdateSafely &&
+                dismissedUpdateVersion !== updateInfo.latestVersion && (
+                  <div className="flex items-center gap-1 rounded-lg border border-emerald-400/30 bg-emerald-500/12 px-2.5 py-1.5 text-[11px] text-emerald-200">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('settings')}
+                      className="flex-1 truncate text-left font-medium hover:underline"
+                    >
+                      Update v{updateInfo.latestVersion}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Dismiss update notification"
+                      onClick={() => handleDismissUpdatePill(updateInfo.latestVersion!)}
+                      className="text-emerald-300/80 hover:text-white"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
             </div>
           </div>
         </aside>
@@ -673,6 +844,51 @@ export function App() {
 
           {/* Scrollable Tab Workspace */}
           <main className="hud-scroll flex-1 overflow-y-auto px-6 py-5">
+          {apiKeyHealth &&
+            (apiKeyHealth.status === 'expired' || apiKeyHealth.status === 'rate_limited') &&
+            activeTab !== 'settings' && (
+              <div
+                role="alert"
+                className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-200"
+              >
+                <span>{apiKeyHealth.message}</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('settings')}
+                  className="lg-btn-glass shrink-0 px-2.5 py-1 text-[11px] font-semibold text-white"
+                >
+                  Open Settings
+                </button>
+              </div>
+            )}
+
+          {whatsNewEntry && canInstallUpdateSafely && (
+            <div className="lg-inset mb-4 flex items-start justify-between gap-3 p-3.5 text-xs">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 font-semibold text-white">
+                  <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
+                  <span>What&apos;s New in v{whatsNewEntry.version}</span>
+                </div>
+                <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-slate-300">
+                  {whatsNewEntry.sections
+                    .flatMap((s) => s.items)
+                    .slice(0, 3)
+                    .map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                </ul>
+              </div>
+              <button
+                type="button"
+                aria-label="Dismiss What's New"
+                onClick={handleDismissWhatsNew}
+                className="rounded-md p-1 text-slate-400 hover:bg-white/[0.08] hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           <div key={activeTab} className="lg-view-enter">
             {activeTab === 'champ_select' && (
               <ChampSelectView
@@ -707,6 +923,7 @@ export function App() {
                 matches={matches}
                 targetDivision={settings.targetDivision}
                 patchVersion={patchVersion}
+                appVersion={appMeta.version}
                 aiConfig={settings.aiCoach}
                 canSyncLive={canSyncLive}
                 onSyncMatches={handleSyncMatches}
@@ -733,12 +950,23 @@ export function App() {
                 settings={settings}
                 patchVersion={patchVersion}
                 catalogCounts={catalogCounts}
+                apiKeyHealth={apiKeyHealth}
+                appMeta={appMeta}
+                updateInfo={updateInfo}
+                checkingUpdate={checkingUpdate}
+                installingUpdate={installingUpdate}
+                updateError={updateError}
+                canInstallUpdateSafely={canInstallUpdateSafely}
+                isTauri={isTauri}
                 onSettingsChanged={setSettings}
                 onProfileLoaded={handleProfileLoaded}
                 onPatchSynced={(patch, counts) => {
                   setPatchVersion(patch);
                   if (counts) setCatalogCounts(counts);
                 }}
+                onApiKeyHealthChanged={setApiKeyHealth}
+                onCheckUpdate={handleCheckUpdate}
+                onInstallUpdate={handleInstallUpdate}
               />
             )}
           </div>

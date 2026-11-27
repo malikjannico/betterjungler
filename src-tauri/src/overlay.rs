@@ -54,6 +54,8 @@ impl OverlayController {
             .ok_or_else(|| AppError::Overlay("Main overlay window not found".to_string()))?;
 
         if compact {
+            let _ = window.show();
+            let _ = window.unminimize();
             if !was_compact {
                 if let Ok(pos) = window.outer_position() {
                     if let Ok(mut guard) = self.expanded_pos.lock() {
@@ -71,6 +73,8 @@ impl OverlayController {
                 .set_ignore_cursor_events(true)
                 .map_err(|e| AppError::Overlay(e.to_string()))?;
         } else {
+            let _ = window.show();
+            let _ = window.unminimize();
             window
                 .set_ignore_cursor_events(false)
                 .map_err(|e| AppError::Overlay(e.to_string()))?;
@@ -176,9 +180,13 @@ pub fn setup_overlay_controls(
         .map_err(|e| AppError::Overlay(e.to_string()))?;
 
     let ctrl_tray = controller;
+    let tooltip = format!(
+        "BetterJungler v{} — Toggle HUD via Hotkey",
+        env!("CARGO_PKG_VERSION")
+    );
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("BetterJungler — Toggle HUD via Hotkey")
+        .tooltip(tooltip)
         .on_menu_event(move |handle, event| match event.id().as_ref() {
             "expand" => {
                 let _ = ctrl_tray.set_mode(handle, false);

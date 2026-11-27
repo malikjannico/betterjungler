@@ -90,6 +90,7 @@ describe('BetterJungler App Integration', () => {
         reader.readAsText(exportedBlob!);
       });
       expect(exportedText).toContain('"schemaVersion": 1');
+      expect(exportedText).toContain('"appVersion": "0.2.0"');
       expect(exportedText).not.toContain('puuid');
       expect(exportedText).not.toContain('summonerName');
       expect(exportedText).not.toContain('riotId');
@@ -163,5 +164,32 @@ describe('BetterJungler App Integration', () => {
     expect(
       screen.getByText(/BetterJungler isn't endorsed by Riot Games/i)
     ).toBeInTheDocument();
+  });
+
+  it('shows What\'s New banner after upgrade only when idle and renders About & Changelog in Settings', async () => {
+    localStorage.setItem('betterjungler_last_seen_version', '0.1.0');
+    try {
+      await renderAppAndFlush();
+      // Browser demo starts in champ_select -> What's New waits safely until idle
+      expect(screen.queryByText(/What's New in v0\.2\.0/i)).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Simulator/i }));
+      fireEvent.change(screen.getByLabelText('Simulation scenario'), {
+        target: { value: 'idle' },
+      });
+
+      expect(screen.getByText(/What's New in v0\.2\.0/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: "Dismiss What's New" }));
+      expect(screen.queryByText(/What's New in v0\.2\.0/i)).not.toBeInTheDocument();
+      expect(localStorage.getItem('betterjungler_last_seen_version')).toBe('0.2.0');
+
+      fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
+      expect(screen.getByText(/About & Automatic Updates/i)).toBeInTheDocument();
+      expect(screen.getByText('v0.2.0')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /View Changelog/i }));
+      expect(screen.getByText(/Tauri v2 Auto-Updater with In-Game Safety Gate/i)).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('betterjungler_last_seen_version');
+    }
   });
 });

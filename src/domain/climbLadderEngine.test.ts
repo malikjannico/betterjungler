@@ -68,5 +68,12 @@ describe('climbLadderEngine', () => {
     const deathGoal = synced.find((g) => g.id === 'g-deaths');
     expect(csGoal?.status).toBe('completed');
     expect(deathGoal?.status).toBe('active');
+
+    const frozenWithoutMatches = syncGoalsWithRollingProgress(
+      [csGoal!].map((g) => ({ ...g, status: 'active' as const })),
+      evaluation.comparisons,
+      false
+    );
+    expect(frozenWithoutMatches[0]?.status).toBe('active');
   });
 });

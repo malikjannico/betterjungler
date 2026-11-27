@@ -70,9 +70,9 @@ export const KPI_META: Record<
 
 export function isGoalTargetMet(
   goal: ClimbGoal,
-  comparisons: DivisionBenchmarkComparison[]
+  comparisons: DivisionBenchmarkComparison[],
+  hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure')
 ): boolean {
-  const hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure');
   if (!hasMatches) return false;
   const matchComp = comparisons.find((c) => c.metric === goal.metric);
   if (!matchComp) return false;
@@ -83,13 +83,13 @@ export function isGoalTargetMet(
 
 export function syncGoalsWithRollingProgress(
   goals: ClimbGoal[],
-  comparisons: DivisionBenchmarkComparison[]
+  comparisons: DivisionBenchmarkComparison[],
+  hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure')
 ): ClimbGoal[] {
-  const hasMatches = comparisons.some((c) => c.gapText !== 'Sync matches to measure');
   return goals.map((goal) => {
     const matchComp = comparisons.find((c) => c.metric === goal.metric);
     if (!matchComp || !hasMatches) return goal;
-    const met = isGoalTargetMet(goal, comparisons);
+    const met = isGoalTargetMet(goal, comparisons, hasMatches);
     return {
       ...goal,
       currentValue: matchComp.currentValue,

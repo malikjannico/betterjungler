@@ -464,3 +464,29 @@ export interface HighEloMetaSnapshot {
   updatedAt: string;
   champions: HighEloChampStat[];
 }
+
+export interface ApiKeyHealthStatus {
+  status: 'valid' | 'missing' | 'expired' | 'rate_limited' | 'offline';
+  message: string;
+  checkedAt: string;
+}
+
+export interface AppMetaInfo {
+  version: string;
+  commitSha: string;
+  logDir: string;
+}
+
+export interface UpdateCheckResult {
+  available: boolean;
+  currentVersion: string;
+  latestVersion?: string | null;
+  body?: string | null;
+  date?: string | null;
+}
+
+export interface ChangelogEntry {
+  version: string;
+  date: string;
+  sections: Array<{ title: string; items: string[] }>;
+}

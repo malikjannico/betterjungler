@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { syncFullDdragonCatalog } from '../services/ddragonService';
 import {
+  checkRiotApiKeyHealth,
   fetchSummonerProfile,
   saveAiApiKey,
   saveRiotApiKey,
@@ -10,20 +11,35 @@ import {
 } from '../services/tauriBridge';
 import type {
   AiProvider,
+  ApiKeyHealthStatus,
+  AppMetaInfo,
   HudCorner,
   OverlayHotkeyPreset,
+  UpdateCheckResult,
   UserSettings,
 } from '../types/coaching';
 import type { SummonerProfileSummary } from '../types/riot';
+import { AboutUpdatesSection } from './AboutUpdatesSection';
 import { GlassSurface } from './GlassSurface';
 
 interface SettingsViewProps {
   settings: UserSettings;
   patchVersion: string;
   catalogCounts: { champions: number; items: number };
+  apiKeyHealth: ApiKeyHealthStatus | null;
+  appMeta: AppMetaInfo;
+  updateInfo: UpdateCheckResult | null;
+  checkingUpdate: boolean;
+  installingUpdate: boolean;
+  updateError: string | null;
+  canInstallUpdateSafely: boolean;
+  isTauri: boolean;
   onSettingsChanged: (next: UserSettings) => void;
   onProfileLoaded: (profile: SummonerProfileSummary) => void;
   onPatchSynced: (patch: string, counts?: { champions: number; items: number }) => void;
+  onApiKeyHealthChanged: (health: ApiKeyHealthStatus) => void;
+  onCheckUpdate: () => Promise<void>;
+  onInstallUpdate: () => Promise<void>;
 }
 
 const REGIONS = [
@@ -66,9 +82,20 @@ export function SettingsView({
   settings,
   patchVersion,
   catalogCounts,
+  apiKeyHealth,
+  appMeta,
+  updateInfo,
+  checkingUpdate,
+  installingUpdate,
+  updateError,
+  canInstallUpdateSafely,
+  isTauri,
   onSettingsChanged,
   onProfileLoaded,
   onPatchSynced,
+  onApiKeyHealthChanged,
+  onCheckUpdate,
+  onInstallUpdate,
 }: SettingsViewProps) {
   const [draft, setDraft] = useState<UserSettings>(settings);
   const [apiKeyInput, setApiKeyInput] = useState('');
@@ -108,7 +135,13 @@ export function SettingsView({
         await saveSettings(updated);
         onSettingsChanged(updated);
         setApiKeyInput('');
-        setStatusMessage('Riot API Key stored in Windows Credential Manager.');
+        const health = await checkRiotApiKeyHealth(updated.region);
+        onApiKeyHealthChanged(health);
+        setStatusMessage(
+          health.status === 'valid'
+            ? `Riot API Key stored & verified on ${updated.region}.`
+            : `Riot API Key stored in Windows Credential Manager (${health.message}).`
+        );
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to store Riot API key.');
@@ -251,18 +284,40 @@ export function SettingsView({
         </GlassSurface>
 
         <GlassSurface className="space-y-3.5 p-5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               Riot API Key &amp; Data Dragon
             </h2>
             <span
               className={`text-[11px] font-medium ${
-                draft.hasApiKey ? 'text-emerald-300' : 'text-amber-300'
+                apiKeyHealth?.status === 'expired'
+                  ? 'text-rose-300'
+                  : apiKeyHealth?.status === 'rate_limited'
+                    ? 'text-amber-300'
+                    : apiKeyHealth?.status === 'valid'
+                      ? 'text-emerald-300'
+                      : draft.hasApiKey
+                        ? 'text-slate-300'
+                        : 'text-amber-300'
               }`}
             >
-              {draft.hasApiKey ? 'Key Stored Securely' : 'No Key Saved'}
+              {apiKeyHealth?.status === 'valid'
+                ? 'Verified Active'
+                : apiKeyHealth?.status === 'expired'
+                  ? 'Expired / Invalid (401/403)'
+                  : apiKeyHealth?.status === 'rate_limited'
+                    ? 'Rate Limited (429)'
+                    : draft.hasApiKey
+                      ? 'Key Stored (Unverified)'
+                      : 'No Key Saved'}
             </span>
           </div>
+
+          {apiKeyHealth && apiKeyHealth.status === 'expired' && (
+            <p className="rounded-lg border border-rose-400/35 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+              {apiKeyHealth.message}
+            </p>
+          )}
 
           <label className="block text-xs">
             <span className="text-slate-300">
@@ -487,6 +542,18 @@ export function SettingsView({
           )}
         </div>
       </GlassSurface>
+
+      <AboutUpdatesSection
+        appMeta={appMeta}
+        updateInfo={updateInfo}
+        checkingUpdate={checkingUpdate}
+        installingUpdate={installingUpdate}
+        updateError={updateError}
+        canInstallUpdateSafely={canInstallUpdateSafely}
+        isTauri={isTauri}
+        onCheckUpdate={onCheckUpdate}
+        onInstallUpdate={onInstallUpdate}
+      />
 
       {statusMessage && (
         <div className="lg-inset px-3.5 py-2 text-xs text-emerald-300">

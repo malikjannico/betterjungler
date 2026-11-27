@@ -134,7 +134,11 @@ export function analyzePostGameMatch(
   const markers: TimelineMapMarker[] = [];
 
   match.events.forEach((ev, index) => {
-    if (!ev.position || typeof ev.position.x !== 'number' || typeof ev.position.y !== 'number') {
+    if (
+      !ev.position ||
+      !Number.isFinite(ev.position.x) ||
+      !Number.isFinite(ev.position.y)
+    ) {
       return;
     }
     const { x, y } = normalizeRiotCoordinate(ev.position.x, ev.position.y);

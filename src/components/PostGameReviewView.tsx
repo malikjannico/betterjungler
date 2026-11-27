@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import pkg from '../../package.json';
 import { synthesizeDemoPostGameDebrief } from '../domain/aiCoachFallback';
 import { formatClock } from '../domain/liveCoachEngine';
 import { analyzePostGameMatch } from '../domain/postGameReviewEngine';
@@ -13,6 +14,7 @@ interface PostGameReviewViewProps {
   matches: MatchV5Detail[];
   targetDivision: string;
   patchVersion: string;
+  appVersion?: string;
   aiConfig: AiCoachConfig;
   canSyncLive: boolean;
   onSyncMatches: () => Promise<void>;
@@ -22,6 +24,7 @@ export function PostGameReviewView({
   matches,
   targetDivision,
   patchVersion,
+  appVersion = pkg.version,
   aiConfig,
   canSyncLive,
   onSyncMatches,
@@ -35,7 +38,10 @@ export function PostGameReviewView({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
+  const [exportFeedback, setExportFeedback] = useState<{
+    kind: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const selectedMatch =
     matches.find((m) => m.matchId === selectedMatchId) ?? matches[0] ?? null;
@@ -49,6 +55,7 @@ export function PostGameReviewView({
     if (!report) return;
     const payload = {
       schemaVersion: 1,
+      appVersion,
       exportedAt: new Date().toISOString(),
       matchId: report.matchId,
       championName: report.championName,
@@ -89,11 +96,12 @@ export function PostGameReviewView({
           anchor.remove();
         }
       }
-      setExportFeedback(`Exported ${filename}`);
+      setExportFeedback({ kind: 'success', message: `Exported ${filename}` });
     } catch (err) {
-      setExportFeedback(
-        err instanceof Error ? err.message : 'Unable to export review JSON'
-      );
+      setExportFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Unable to export review JSON',
+      });
     }
   }
 
@@ -238,8 +246,15 @@ export function PostGameReviewView({
       </div>
 
       {exportFeedback && (
-        <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-          {exportFeedback}
+        <p
+          role={exportFeedback.kind === 'error' ? 'alert' : 'status'}
+          className={`rounded-lg border px-3 py-2 text-xs ${
+            exportFeedback.kind === 'error'
+              ? 'border-rose-400/35 bg-rose-500/10 text-rose-200'
+              : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+          }`}
+        >
+          {exportFeedback.message}
         </p>
       )}
 

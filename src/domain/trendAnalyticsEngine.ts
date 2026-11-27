@@ -111,8 +111,8 @@ export function aggregateDeathHeatmap(
         ev.type !== 'CHAMPION_KILL' ||
         ev.victimId !== match.playerParticipantId ||
         !ev.position ||
-        typeof ev.position.x !== 'number' ||
-        typeof ev.position.y !== 'number'
+        !Number.isFinite(ev.position.x) ||
+        !Number.isFinite(ev.position.y)
       ) {
         return;
       }

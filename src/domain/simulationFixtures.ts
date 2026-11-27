@@ -409,6 +409,8 @@ export function getDemoRuntimeState(scenario: DemoScenarioId): AppRuntimeState {
     case 'champ_select':
       return {
         phase: 'champ_select',
+        gameflowPhase: 'ChampSelect',
+        canInstallUpdate: false,
         lcuConnected: true,
         liveClientConnected: false,
         champSelect: DEMO_CHAMP_SELECT,
@@ -430,6 +432,8 @@ export function getDemoRuntimeState(scenario: DemoScenarioId): AppRuntimeState {
     case 'loading':
       return {
         phase: 'loading',
+        gameflowPhase: 'GameStart',
+        canInstallUpdate: false,
         lcuConnected: true,
         liveClientConnected: false,
         champSelect: DEMO_LOADING_CHAMP_SELECT,
@@ -440,6 +444,8 @@ export function getDemoRuntimeState(scenario: DemoScenarioId): AppRuntimeState {
     case 'in_game_early':
       return {
         phase: 'in_game',
+        gameflowPhase: 'InProgress',
+        canInstallUpdate: false,
         lcuConnected: true,
         liveClientConnected: true,
         champSelect: DEMO_LOADING_CHAMP_SELECT,
@@ -450,6 +456,8 @@ export function getDemoRuntimeState(scenario: DemoScenarioId): AppRuntimeState {
     case 'in_game_mid':
       return {
         phase: 'in_game',
+        gameflowPhase: 'InProgress',
+        canInstallUpdate: false,
         lcuConnected: true,
         liveClientConnected: true,
         champSelect: DEMO_LOADING_CHAMP_SELECT,
@@ -460,6 +468,8 @@ export function getDemoRuntimeState(scenario: DemoScenarioId): AppRuntimeState {
     case 'in_game_full_build':
       return {
         phase: 'in_game',
+        gameflowPhase: 'InProgress',
+        canInstallUpdate: false,
         lcuConnected: true,
         liveClientConnected: true,
         champSelect: DEMO_LOADING_CHAMP_SELECT,
@@ -471,6 +481,8 @@ export function getDemoRuntimeState(scenario: DemoScenarioId): AppRuntimeState {
     default:
       return {
         phase: 'idle',
+        gameflowPhase: 'None',
+        canInstallUpdate: true,
         lcuConnected: false,
         liveClientConnected: false,
         champSelect: null,

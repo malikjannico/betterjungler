@@ -1,15 +1,19 @@
+import pkg from '../../package.json';
 import {
   DEMO_HIGH_ELO_SNAPSHOT,
   DEMO_LP_HISTORY,
   DEMO_POST_GAME_MATCHES,
 } from '../domain/postGameFixtures';
 import type {
+  ApiKeyHealthStatus,
+  AppMetaInfo,
   ClimbGoal,
   HighEloMetaSnapshot,
   HudCorner,
   LpHistoryPoint,
   OverlayMode,
   RunePageSpec,
+  UpdateCheckResult,
   UserSettings,
 } from '../types/coaching';
 import type {
@@ -294,4 +298,50 @@ export async function subscribeGameState(
     unlistenState();
     unlistenMode();
   };
+}
+
+export async function checkRiotApiKeyHealth(
+  region: string
+): Promise<ApiKeyHealthStatus> {
+  if (!isTauriEnvironment()) {
+    return {
+      status: 'missing',
+      message: 'Browser demo mode — personal Riot API keys run inside the Windows app.',
+      checkedAt: new Date().toISOString(),
+    };
+  }
+  return invokeTauri<ApiKeyHealthStatus>('check_riot_api_key_health', { region });
+}
+
+export async function getAppMeta(): Promise<AppMetaInfo> {
+  if (!isTauriEnvironment()) {
+    return {
+      version: pkg.version,
+      commitSha: 'local',
+      logDir: '%LOCALAPPDATA%\\dev.betterjungler.app\\logs',
+    };
+  }
+  return invokeTauri<AppMetaInfo>('get_app_meta');
+}
+
+export async function openLogsFolder(): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invokeTauri<void>('open_logs_folder');
+}
+
+export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
+  if (!isTauriEnvironment()) {
+    return {
+      available: false,
+      currentVersion: pkg.version,
+    };
+  }
+  return invokeTauri<UpdateCheckResult>('check_update');
+}
+
+export async function installAppUpdate(): Promise<string> {
+  if (!isTauriEnvironment()) {
+    return 'Demo mode: updates install inside the Windows desktop app.';
+  }
+  return invokeTauri<string>('install_update');
 }

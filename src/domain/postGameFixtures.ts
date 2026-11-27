@@ -174,6 +174,6 @@ export const DEMO_LP_HISTORY: LpHistoryPoint[] = [
   { timestamp: '2026-11-24T22:00:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 20, absoluteLp: 1520, win: true },
   { timestamp: '2026-11-25T19:45:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 2, absoluteLp: 1502, win: false },
   { timestamp: '2026-11-25T21:10:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 28, absoluteLp: 1528, win: true },
-  { timestamp: '2026-11-26T18:10:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 41, absoluteLp: 1541, win: false },
+  { timestamp: '2026-11-26T18:10:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 41, absoluteLp: 1541, win: true },
   { timestamp: '2026-11-26T19:40:00Z', tier: 'GOLD', rank: 'II', leaguePoints: 64, absoluteLp: 1564, win: true },
 ];

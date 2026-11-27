@@ -436,6 +436,36 @@ pub async fn fetch_champ_select_session(
     Ok(Some(parse_raw_champ_select_session(raw, queue_id, &party_ids)))
 }
 
+/// Polls `/lol-gameflow/v1/gameflow-phase` over pinned loopback TLS.
+pub async fn fetch_gameflow_phase(
+    client: &Client,
+    creds: &LockfileCredentials,
+) -> AppResult<String> {
+    let auth = auth_header(creds);
+    let url = assert_loopback_url(&format!(
+        "{}://127.0.0.1:{}/lol-gameflow/v1/gameflow-phase",
+        creds.protocol, creds.port
+    ))?;
+
+    let res = client
+        .get(url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .map_err(|e| AppError::Lcu(e.to_string()))?;
+
+    if !res.status().is_success() {
+        return Err(AppError::Lcu(format!(
+            "LCU gameflow-phase HTTP {}",
+            res.status()
+        )));
+    }
+
+    res.json::<String>()
+        .await
+        .map_err(|e| AppError::Lcu(e.to_string()))
+}
+
 /// Reads the local player's summoner & ranked profile from LCU without requiring a Riot API key.
 pub async fn fetch_lcu_profile(
     client: &Client,

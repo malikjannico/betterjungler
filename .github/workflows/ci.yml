@@ -17,6 +17,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node scripts/check-version.mjs
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test
@@ -25,17 +26,29 @@ jobs:
   rust-tauri:
     name: Rust & Tauri Backend (Fmt, Clippy, Test)
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - working-directory: src-tauri
+        run: cargo fmt --all -- --check
+      - working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - working-directory: src-tauri
+        shell: pwsh
+        run: |
+          if (Test-Path Cargo.lock) {
+            cargo test --workspace --locked
+          } else {
+            cargo test --workspace
+          }

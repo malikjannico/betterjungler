@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*.*.*'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,24 +28,50 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Verify Frontend
+      - name: Verify Version Sync & Frontend
         run: |
           npm ci
+          node scripts/check-version.mjs
           npm run typecheck
           npm run lint
           npm run test
+          npm run build
 
-      - name: Verify Rust Tests
+      - name: Verify Rust Format, Clippy & Tests
         working-directory: src-tauri
-        run: cargo test
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          if (Test-Path Cargo.lock) {
+            cargo test --locked
+          } else {
+            cargo test
+          }
 
-      - name: Build Windows NSIS Installer
+      - name: Extract Release Notes from CHANGELOG.md
+        id: notes
+        shell: pwsh
+        run: |
+          node scripts/extract-changelog.mjs --out "$env:RUNNER_TEMP/release-notes.md"
+          $body = Get-Content "$env:RUNNER_TEMP/release-notes.md" -Raw
+          $delim = "EOF_$([guid]::NewGuid().ToString('N'))"
+          "RELEASE_BODY<<$delim" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $body | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$delim" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Signed Windows NSIS Installer & Updater Manifest
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          BETTERJUNGLER_COMMIT_SHA: ${{ github.sha }}
         with:
-          tagName: v__VERSION__
-          releaseName: 'BetterJungler v__VERSION__'
-          releaseBody: 'Windows Desktop HUD Overlay & Jungle Companion release.'
+          tagName: ${{ github.ref_name }}
+          releaseName: 'BetterJungler ${{ github.ref_name }}'
+          releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true

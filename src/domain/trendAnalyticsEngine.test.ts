@@ -29,7 +29,7 @@ describe('trendAnalyticsEngine', () => {
     const summary = computeLpDeltaSummary(DEMO_LP_HISTORY);
 
     expect(summary.netLpChange).toBe(122);
-    expect(summary.streakText).toBe('1W streak');
+    expect(summary.streakText).toBe('3W streak');
     expect(summary.currentLabel).toContain('GOLD II');
   });
 });

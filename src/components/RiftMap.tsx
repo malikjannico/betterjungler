@@ -311,6 +311,7 @@ function ReplayRiftMap({
   markers,
 }: ReplayModeProps) {
   const maxMinute = Math.max(1, Math.ceil(durationSeconds / 60));
+  const minMinute = Math.min(1, pathPoints[0]?.minute ?? 1);
   const [showPath, setShowPath] = useState(true);
   const [showEnemyGhost, setShowEnemyGhost] = useState(false);
   const [showCombat, setShowCombat] = useState(true);
@@ -319,7 +320,7 @@ function ReplayRiftMap({
     (markers.find((m) => m.kind === 'pre_obj_death') ?? markers[0])?.id ?? null
   );
 
-  const effectiveCutoff = Math.min(Math.max(1, activeMinute), maxMinute);
+  const effectiveCutoff = Math.min(Math.max(minMinute, activeMinute), maxMinute);
 
   const visiblePath = useMemo(
     () => pathPoints.filter((p) => p.minute <= effectiveCutoff),
@@ -427,7 +428,7 @@ function ReplayRiftMap({
         <input
           type="range"
           aria-label="Timeline minute cutoff"
-          min={1}
+          min={minMinute}
           max={maxMinute}
           value={effectiveCutoff}
           onChange={(e) => onChangeMinute(Number(e.target.value))}
@@ -498,7 +499,7 @@ function ReplayRiftMap({
                 aria-label={marker.label}
                 onClick={() => {
                   setSelectedMarkerId(marker.id);
-                  onChangeMinute(Math.max(1, marker.minute));
+                  onChangeMinute(Math.max(minMinute, marker.minute));
                 }}
                 style={{
                   left: `${toMapPercent(marker.x)}%`,
@@ -551,7 +552,7 @@ function ReplayRiftMap({
                 type="button"
                 onClick={() => {
                   setSelectedMarkerId(m.id);
-                  onChangeMinute(Math.max(1, m.minute));
+                  onChangeMinute(Math.max(minMinute, m.minute));
                 }}
                 className={`flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-[11px] transition motion-reduce:transition-none ${
                   selectedMarker?.id === m.id

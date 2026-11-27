@@ -7,27 +7,34 @@ mod overlay;
 mod rate_limiter;
 mod riot_api;
 mod storage;
+mod updater;
 
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tracing_subscriber::EnvFilter;
 
 use crate::error::{AppError, AppResult};
 use crate::lcu::{RunePageSpec, SanitizedChampSelectSession};
 use crate::live_client::LiveClientPollResult;
 use crate::overlay::OverlayController;
 use crate::rate_limiter::RiotRateLimiter;
-use crate::riot_api::SummonerProfileSummary;
+use crate::riot_api::{ApiKeyHealthStatus, SummonerProfileSummary};
 use crate::storage::{tier_rank_to_absolute_lp, ClimbGoalRecord, LpHistoryRecord, UserSettings};
+use crate::updater::{AppMetaInfo, UpdateCheckResult};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppRuntimeState {
     pub phase: String,
+    pub gameflow_phase: String,
+    pub can_install_update: bool,
     pub lcu_connected: bool,
     pub live_client_connected: bool,
     pub champ_select: Option<SanitizedChampSelectSession>,
@@ -40,6 +47,8 @@ impl Default for AppRuntimeState {
     fn default() -> Self {
         Self {
             phase: "idle".to_string(),
+            gameflow_phase: "None".to_string(),
+            can_install_update: true,
             lcu_connected: false,
             live_client_connected: false,
             champ_select: None,
@@ -65,6 +74,8 @@ struct SharedState {
     ai_client: reqwest::Client,
     riot_limiter: Arc<RiotRateLimiter>,
     install_path: Arc<RwLock<String>>,
+    live_miss_streak: Arc<AtomicU8>,
+    log_dir: PathBuf,
 }
 
 #[tauri::command]
@@ -288,8 +299,8 @@ async fn sync_recent_matches(
 
         let played_at = detail["playedAt"]
             .as_str()
-            .unwrap_or("2026-11-26T00:00:00Z")
-            .to_string();
+            .map(ToString::to_string)
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         let summary_stub = serde_json::json!({
             "matchId": match_id,
             "playedAt": played_at,
@@ -451,6 +462,92 @@ fn get_lp_history(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<LpHistory
     storage::list_lp_history(&conn, 20)
 }
 
+#[tauri::command]
+async fn check_riot_api_key_health(
+    state: State<'_, Arc<SharedState>>,
+    region: String,
+) -> AppResult<ApiKeyHealthStatus> {
+    if !storage::has_riot_api_key() {
+        return Ok(ApiKeyHealthStatus {
+            status: "missing".to_string(),
+            message: "No Riot API key saved. Paste your key in Settings to sync live Riot data."
+                .to_string(),
+            checked_at: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+    let api_key = storage::load_riot_api_key()?;
+    let status = riot_api::probe_riot_api_key(
+        &state.riot_web_client,
+        &state.riot_limiter,
+        &api_key,
+        &region,
+    )
+    .await;
+    Ok(status)
+}
+
+#[tauri::command]
+fn get_app_meta(state: State<'_, Arc<SharedState>>) -> AppMetaInfo {
+    updater::build_app_meta(&state.log_dir.to_string_lossy())
+}
+
+#[tauri::command]
+fn open_logs_folder(state: State<'_, Arc<SharedState>>) -> AppResult<()> {
+    std::fs::create_dir_all(&state.log_dir).map_err(|e| AppError::Storage(e.to_string()))?;
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&state.log_dir)
+            .spawn()
+            .map_err(|e| AppError::Overlay(e.to_string()))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        tracing::info!(
+            log_dir = %state.log_dir.display(),
+            "Open logs folder requested on non-Windows host"
+        );
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn check_update(app: AppHandle) -> AppResult<UpdateCheckResult> {
+    updater::check_for_update(&app).await
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle, state: State<'_, Arc<SharedState>>) -> AppResult<String> {
+    let shared = state.inner().clone();
+    updater::download_and_install_update(&app, move || {
+        let rt = shared
+            .runtime
+            .lock()
+            .map_err(|e| AppError::Updater(e.to_string()))?;
+        let misses = shared.live_miss_streak.load(Ordering::SeqCst);
+        if !updater::is_safe_to_install_update(
+            &rt.phase,
+            &rt.gameflow_phase,
+            rt.live_client_connected,
+            misses,
+        ) {
+            return Err(AppError::Updater(
+                "Cannot install update while League Champ Select or an active match is running."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    })
+    .await
+}
+
+fn is_terminal_post_game_flow(gameflow: &str) -> bool {
+    matches!(
+        gameflow,
+        "WaitingForStats" | "PreEndOfGame" | "EndOfGame" | "Lobby" | "None"
+    )
+}
+
 fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(1800));
@@ -468,13 +565,17 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
             let lcu_creds = lcu::discover_lockfile(&install_path);
             let lcu_connected = lcu_creds.is_some();
 
-            let champ_select = if let Some(ref creds) = lcu_creds {
-                lcu::fetch_champ_select_session(&shared.loopback_client, creds)
+            let (champ_select, gameflow_phase) = if let Some(ref creds) = lcu_creds {
+                let gf = lcu::fetch_gameflow_phase(&shared.loopback_client, creds)
+                    .await
+                    .unwrap_or_else(|_| "Unknown".to_string());
+                let cs = lcu::fetch_champ_select_session(&shared.loopback_client, creds)
                     .await
                     .ok()
-                    .flatten()
+                    .flatten();
+                (cs, gf)
             } else {
-                None
+                (None, "None".to_string())
             };
 
             let updated_snapshot = {
@@ -483,43 +584,74 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                     Err(_) => continue,
                 };
                 rt.lcu_connected = lcu_connected;
+                rt.gameflow_phase = gameflow_phase.clone();
 
                 match live_result {
                     LiveClientPollResult::Active(payload) => {
                         post_game_latch_ticks = 0;
+                        shared.live_miss_streak.store(0, Ordering::SeqCst);
                         rt.phase = "in_game".to_string();
                         rt.live_client_connected = true;
                         rt.live_game = Some(payload);
                     }
                     LiveClientPollResult::Loading => {
                         post_game_latch_ticks = 0;
+                        shared.live_miss_streak.store(0, Ordering::SeqCst);
                         rt.phase = "loading".to_string();
                         rt.live_client_connected = true;
                         rt.live_game = None;
                     }
                     LiveClientPollResult::NotInGame => {
+                        let misses = shared
+                            .live_miss_streak
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |prev| {
+                                Some(prev.saturating_add(1))
+                            })
+                            .unwrap_or(255)
+                            .saturating_add(1);
                         let was_in_game = rt.phase == "in_game";
-                        rt.live_client_connected = false;
-                        rt.live_game = None;
-                        if let Some(cs) = champ_select {
-                            post_game_latch_ticks = 0;
-                            rt.phase = "champ_select".to_string();
-                            rt.champ_select = Some(cs);
+                        let should_keep_in_game = was_in_game
+                            && misses < 3
+                            && !is_terminal_post_game_flow(&gameflow_phase);
+
+                        if should_keep_in_game {
+                            rt.live_client_connected = false;
+                            // Hold in_game state cleanly across transient single-poll timeouts
                         } else {
-                            // Clear stale champ select immediately on dodge / exit
-                            rt.champ_select = None;
-                            if was_in_game {
-                                post_game_latch_ticks = 10;
-                                rt.phase = "post_game".to_string();
-                            } else if post_game_latch_ticks > 0 {
-                                post_game_latch_ticks -= 1;
-                                rt.phase = "post_game".to_string();
+                            rt.live_client_connected = false;
+                            rt.live_game = None;
+                            if let Some(cs) = champ_select {
+                                post_game_latch_ticks = 0;
+                                rt.phase = "champ_select".to_string();
+                                rt.champ_select = Some(cs);
                             } else {
-                                rt.phase = "idle".to_string();
+                                // Clear stale champ select immediately on dodge / exit
+                                rt.champ_select = None;
+                                if was_in_game
+                                    || matches!(
+                                        gameflow_phase.as_str(),
+                                        "EndOfGame" | "PreEndOfGame" | "WaitingForStats"
+                                    )
+                                {
+                                    post_game_latch_ticks = 10;
+                                    rt.phase = "post_game".to_string();
+                                } else if post_game_latch_ticks > 0 {
+                                    post_game_latch_ticks -= 1;
+                                    rt.phase = "post_game".to_string();
+                                } else {
+                                    rt.phase = "idle".to_string();
+                                }
                             }
                         }
                     }
                 }
+                let misses = shared.live_miss_streak.load(Ordering::SeqCst);
+                rt.can_install_update = updater::is_safe_to_install_update(
+                    &rt.phase,
+                    &rt.gameflow_phase,
+                    rt.live_client_connected,
+                    misses,
+                );
                 rt.clone()
             };
 
@@ -528,15 +660,62 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
     });
 }
 
+fn init_file_logging(log_dir: &std::path::Path) {
+    let _ = std::fs::create_dir_all(log_dir);
+    let log_file = log_dir.join("betterjungler.log");
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("betterjungler_lib=info,betterjungler=info,warn"));
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+    {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_writer(Mutex::new(file))
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .try_init();
+    }
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        "BetterJungler desktop started"
+    );
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
             let app_dir = app
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("betterjungler"));
+            let log_dir = app_dir.join("logs");
+            init_file_logging(&log_dir);
+
             let db_path = app_dir.join("betterjungler.db");
             let conn = storage::init_database(&db_path)?;
             let loopback_client = lcu::build_loopback_client()?;
@@ -551,7 +730,7 @@ pub fn run() {
                 overlay_ctrl.clone(),
                 &initial_settings.overlay_hotkey,
             ) {
-                tracing::warn!(error = %err, "Failed to register initial overlay hotkey; continuing without global shortcut");
+                tracing::warn!(error = %err, "Failed to register initial overlay hotkey; continuing with tray controls");
             }
 
             let shared = Arc::new(SharedState {
@@ -563,6 +742,8 @@ pub fn run() {
                 ai_client,
                 riot_limiter: Arc::new(RiotRateLimiter::with_default_pacing()),
                 install_path: Arc::new(RwLock::new(initial_settings.lol_install_path)),
+                live_miss_streak: Arc::new(AtomicU8::new(0)),
+                log_dir,
             });
 
             app.manage(shared.clone());
@@ -589,7 +770,12 @@ pub fn run() {
             save_ai_api_key,
             generate_ai_debrief,
             update_overlay_preferences,
-            get_lp_history
+            get_lp_history,
+            check_riot_api_key_health,
+            get_app_meta,
+            open_logs_folder,
+            check_update,
+            install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running BetterJungler");
