@@ -47,8 +47,8 @@ impl Default for AppRuntimeState {
     fn default() -> Self {
         Self {
             phase: "idle".to_string(),
-            gameflow_phase: "None".to_string(),
-            can_install_update: true,
+            gameflow_phase: "Unknown".to_string(),
+            can_install_update: false,
             lcu_connected: false,
             live_client_connected: false,
             champ_select: None,
@@ -107,15 +107,29 @@ fn get_settings(state: State<'_, Arc<SharedState>>) -> AppResult<UserSettings> {
 }
 
 #[tauri::command]
-fn save_settings(state: State<'_, Arc<SharedState>>, settings: UserSettings) -> AppResult<()> {
-    if let Ok(mut path_guard) = state.install_path.write() {
-        *path_guard = settings.lol_install_path.clone();
-    }
+fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings) -> AppResult<()> {
     let conn = state
         .db
         .lock()
         .map_err(|e| AppError::Storage(e.to_string()))?;
-    storage::save_settings(&conn, &settings)
+    // Window bounds & overlay state are owned by dedicated handlers; preserve stored values
+    if let Ok(existing) = storage::load_settings(&conn) {
+        settings.window_width = existing.window_width;
+        settings.window_height = existing.window_height;
+        settings.window_x = existing.window_x;
+        settings.window_y = existing.window_y;
+        settings.hud_corner = existing.hud_corner;
+        settings.overlay_hotkey = existing.overlay_hotkey;
+        settings.hud_opacity = existing.hud_opacity;
+        settings.hud_scale = existing.hud_scale;
+        settings.hud_monitor = existing.hud_monitor;
+        settings.minimap_side = existing.minimap_side;
+    }
+    storage::save_settings(&conn, &settings)?;
+    if let Ok(mut path_guard) = state.install_path.write() {
+        *path_guard = settings.lol_install_path.clone();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -442,15 +456,77 @@ async fn generate_ai_debrief(
     ai_coach::generate_ai_debrief(&state.ai_client, &config, api_key, &context).await
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn update_overlay_preferences(
     app: AppHandle,
     state: State<'_, Arc<SharedState>>,
     hud_corner: String,
     overlay_hotkey: String,
+    hud_opacity: Option<u8>,
+    hud_scale: Option<u16>,
+    hud_monitor: Option<String>,
+    minimap_side: Option<String>,
 ) -> AppResult<()> {
-    state.overlay.set_corner(&hud_corner);
-    state.overlay.rebind_hotkey(&app, &overlay_hotkey)
+    let existing_hotkey = {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        storage::load_settings(&conn)
+            .map(|s| s.overlay_hotkey)
+            .unwrap_or_else(|_| "Alt+J".to_string())
+    };
+    let active_hotkey = state.overlay.active_hotkey();
+    let hotkey_changed = active_hotkey.as_deref() != Some(overlay_hotkey.trim());
+    if hotkey_changed {
+        state.overlay.rebind_hotkey(&app, &overlay_hotkey)?;
+    }
+
+    let save_res = (|| -> AppResult<UserSettings> {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut settings = storage::load_settings(&conn).unwrap_or_default();
+        settings.hud_corner = hud_corner;
+        settings.overlay_hotkey = overlay_hotkey;
+        if let Some(op) = hud_opacity {
+            settings.hud_opacity = op.clamp(50, 100);
+        }
+        if let Some(sc) = hud_scale {
+            settings.hud_scale = overlay::normalize_hud_scale(sc);
+        }
+        if let Some(mon) = hud_monitor {
+            settings.hud_monitor = mon;
+        }
+        if let Some(side) = minimap_side {
+            settings.minimap_side = side;
+        }
+        storage::save_settings(&conn, &settings)?;
+        Ok(settings)
+    })();
+
+    let saved = match save_res {
+        Ok(s) => s,
+        Err(err) => {
+            if hotkey_changed {
+                let _ = state.overlay.rebind_hotkey(&app, &existing_hotkey);
+            }
+            return Err(err);
+        }
+    };
+
+    state.overlay.apply_preferences(
+        Some(&app),
+        &saved.hud_corner,
+        &saved.overlay_hotkey,
+        saved.hud_opacity,
+        saved.hud_scale,
+        &saved.hud_monitor,
+        &saved.minimap_side,
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -701,9 +777,39 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
-            if window.label() == "main" {
-                if let WindowEvent::CloseRequested { api, .. } = event {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "hud" {
                     api.prevent_close();
+                    let shared = window.state::<Arc<SharedState>>();
+                    shared.overlay.mark_hud_hidden();
+                    let _ = window.hide();
+                    let _ = window.app_handle().emit("overlay-mode-changed", "expanded");
+                    return;
+                }
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let minimized = window.is_minimized().unwrap_or(false);
+                    let maximized = window.is_maximized().unwrap_or(false);
+                    if !minimized && !maximized {
+                        let win_bounds = (window.inner_size(), window.outer_position());
+                        if let (Ok(size), Ok(pos)) = win_bounds {
+                            let scale = window.scale_factor().unwrap_or(1.0);
+                            let w = f64::from(size.width) / scale;
+                            let h = f64::from(size.height) / scale;
+                            if w >= 960.0 && h >= 680.0 && pos.x > -10_000 && pos.y > -10_000 {
+                                let shared = window.state::<Arc<SharedState>>();
+                                if let Ok(conn) = shared.db.lock() {
+                                    if let Ok(mut s) = storage::load_settings(&conn) {
+                                        s.window_width = Some(w);
+                                        s.window_height = Some(h);
+                                        s.window_x = Some(pos.x);
+                                        s.window_y = Some(pos.y);
+                                        let _ = storage::save_settings(&conn, &s);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let _ = window.hide();
                 }
             }
@@ -723,14 +829,54 @@ pub fn run() {
             let ai_client = ai_coach::build_ai_client()?;
             let overlay_ctrl = OverlayController::default();
             let initial_settings = storage::load_settings(&conn).unwrap_or_default();
-            overlay_ctrl.set_corner(&initial_settings.hud_corner);
+            overlay_ctrl.apply_preferences(
+                None,
+                &initial_settings.hud_corner,
+                &initial_settings.overlay_hotkey,
+                initial_settings.hud_opacity,
+                initial_settings.hud_scale,
+                &initial_settings.hud_monitor,
+                &initial_settings.minimap_side,
+            );
+
+            let saved_dims = (
+                initial_settings.window_width,
+                initial_settings.window_height,
+            );
+            if let (Some(w), Some(h)) = saved_dims {
+                if let Some(main_win) = app.get_webview_window("main") {
+                    if w >= 960.0 && h >= 680.0 {
+                        let _ = main_win.set_size(tauri::LogicalSize::new(w, h));
+                    }
+                    let saved_pos = (initial_settings.window_x, initial_settings.window_y);
+                    if let (Some(px), Some(py)) = saved_pos {
+                        let in_bounds = app
+                            .available_monitors()
+                            .map(|monitors| {
+                                monitors.into_iter().any(|m| {
+                                    let mp = m.position();
+                                    let ms = m.size();
+                                    (mp.x - 100..mp.x + ms.width as i32).contains(&px)
+                                        && (mp.y - 40..mp.y + ms.height as i32).contains(&py)
+                                })
+                            })
+                            .unwrap_or(false);
+                        if in_bounds {
+                            let _ = main_win.set_position(tauri::PhysicalPosition::new(px, py));
+                        }
+                    }
+                }
+            }
 
             if let Err(err) = overlay::setup_overlay_controls(
                 app.handle(),
                 overlay_ctrl.clone(),
                 &initial_settings.overlay_hotkey,
             ) {
-                tracing::warn!(error = %err, "Failed to register initial overlay hotkey; continuing with tray controls");
+                tracing::warn!(
+                    error = %err,
+                    "Failed to register initial overlay hotkey; continuing with tray controls"
+                );
             }
 
             let shared = Arc::new(SharedState {

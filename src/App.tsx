@@ -19,6 +19,7 @@ import changelogRaw from '../CHANGELOG.md?raw';
 import { ChampSelectView } from './components/ChampSelectView';
 import { ClimbLadderView } from './components/ClimbLadderView';
 import { CompactHudBar } from './components/CompactHudBar';
+import { FirstRunChecklist } from './components/FirstRunChecklist';
 import { LiveCoachView } from './components/LiveCoachView';
 import { PostGameReviewView } from './components/PostGameReviewView';
 import { SettingsView } from './components/SettingsView';
@@ -204,6 +205,14 @@ export function App() {
     }
   });
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
+  const [checklistDismissed, setChecklistDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('betterjungler_checklist_dismissed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [hasTestedHud, setHasTestedHud] = useState(false);
   const simSelectRef = useRef<HTMLSelectElement | null>(null);
   const simPopoverRef = useRef<HTMLDivElement | null>(null);
   const simButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -301,7 +310,12 @@ export function App() {
           else if (state.phase === 'post_game') setActiveTab('post_game');
         }
       },
-      (mode) => setMode(mode)
+      (mode) => {
+        setMode(mode);
+        if (mode === 'compact') {
+          setHasTestedHud(true);
+        }
+      }
     );
 
     return () => {
@@ -530,8 +544,23 @@ export function App() {
   }, [whatsNewVersion]);
 
   async function toggleOverlayMode(next: OverlayMode) {
+    const prevMode = overlayMode;
+    setHasTestedHud(true);
     setMode(next);
-    await setOverlayMode(next);
+    try {
+      await setOverlayMode(next);
+    } catch {
+      setMode(prevMode);
+    }
+  }
+
+  function handleDismissChecklist() {
+    setChecklistDismissed(true);
+    try {
+      localStorage.setItem('betterjungler_checklist_dismissed', '1');
+    } catch {
+      // ignore
+    }
   }
 
   function handleScenarioChange(nextScenario: DemoScenarioId) {
@@ -589,30 +618,21 @@ export function App() {
     (o) => o.status === 'live' || o.status === 'prep_vision'
   );
 
-  if (overlayMode === 'compact') {
-    if (isTauri) {
-      return (
-        <div style={hudStyle} className="h-full w-full">
-          <CompactHudBar
-            phase={runtimeState.phase}
-            gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
-            objectives={objectives}
-            buildPlan={buildPlan}
-            topCue={macroCues[0] ?? null}
-            hotkey={settings.overlayHotkey}
-            clickThrough
-            onExpand={() => void toggleOverlayMode('expanded')}
-          />
-        </div>
-      );
-    }
-
+  // Two-window Tauri architecture keeps `main` intact while toggling the dedicated `hud` window.
+  // Non-Tauri browser Simulator keeps the full-viewport compact preview for easy testing.
+  if (overlayMode === 'compact' && !isTauri) {
+    const scaleFactor = (settings.hudScale ?? 100) / 100;
     return (
       <div
         style={hudStyle}
         className={`flex min-h-full p-4 lg-canvas-browser ${cornerAlignmentClasses(settings.hudCorner)}`}
       >
-        <div className="h-[212px] w-[412px]">
+        <div
+          style={{
+            width: Math.round(440 * scaleFactor),
+            height: Math.round(248 * scaleFactor),
+          }}
+        >
           <CompactHudBar
             phase={runtimeState.phase}
             gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
@@ -620,6 +640,7 @@ export function App() {
             buildPlan={buildPlan}
             topCue={macroCues[0] ?? null}
             hotkey={settings.overlayHotkey}
+            scalePercent={settings.hudScale ?? 100}
             onExpand={() => void toggleOverlayMode('expanded')}
           />
         </div>
@@ -752,10 +773,12 @@ export function App() {
             <div className="grid grid-cols-1 gap-1.5">
               <button
                 type="button"
-                onClick={() => void toggleOverlayMode('compact')}
+                onClick={() =>
+                  void toggleOverlayMode(overlayMode === 'compact' ? 'expanded' : 'compact')
+                }
                 className="lg-btn-glass flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-medium text-slate-200"
               >
-                <span>Compact HUD</span>
+                <span>{overlayMode === 'compact' ? 'Hide HUD' : 'Compact HUD'}</span>
                 <kbd className="font-mono text-[10px] text-slate-400">
                   {settings.overlayHotkey}
                 </kbd>
@@ -805,6 +828,21 @@ export function App() {
 
         {/* Main Workspace Canvas */}
         <div className="relative flex min-w-0 flex-1 flex-col">
+          {/* Full-width top window drag strip */}
+          <div
+            data-tauri-drag-region
+            className="flex h-8 shrink-0 cursor-grab items-center justify-between border-b border-white/[0.06] px-6 text-[11px] text-slate-400 select-none active:cursor-grabbing"
+          >
+            <span className="pointer-events-none truncate">
+              {playerChampionName !== 'Unassigned'
+                ? `${playerChampionName} · ${resolvedMapSide.toUpperCase()} Side`
+                : 'Ready for League Client'}
+            </span>
+            <span className="pointer-events-none hidden tabular-nums text-[10px] text-slate-500 sm:inline">
+              HUD Scale {settings.hudScale ?? 100}% · {settings.hudCorner}
+            </span>
+          </div>
+
           {/* Simulator Popover (Hidden until triggered or Ctrl+K) */}
           {simulatorOpen && (
             <div
@@ -887,6 +925,17 @@ export function App() {
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
+          )}
+
+          {runtimeState.phase === 'idle' && !checklistDismissed && activeTab !== 'settings' && (
+            <FirstRunChecklist
+              hasVerifiedKey={apiKeyHealth?.status === 'valid'}
+              hasTestedHud={hasTestedHud}
+              overlayHotkey={settings.overlayHotkey}
+              onOpenSettings={() => setActiveTab('settings')}
+              onTestHud={() => void toggleOverlayMode('compact')}
+              onDismiss={handleDismissChecklist}
+            />
           )}
 
           <div key={activeTab} className="lg-view-enter">

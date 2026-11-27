@@ -282,6 +282,9 @@ export type HudCorner =
   | 'bottom-left';
 
 export type OverlayHotkeyPreset = 'Alt+J' | 'Alt+B' | 'Ctrl+Shift+J' | 'F8';
+export type HudScalePercent = 100 | 125 | 150;
+export type HudMonitorTarget = 'primary' | 'active';
+export type MinimapSide = 'right' | 'left';
 
 export interface AiCoachConfig {
   provider: AiProvider;
@@ -297,6 +300,13 @@ export interface UserSettings {
   overlayHotkey: OverlayHotkeyPreset | string;
   hudCorner: HudCorner;
   hudOpacity: number;
+  hudScale?: HudScalePercent;
+  hudMonitor?: HudMonitorTarget;
+  minimapSide?: MinimapSide;
+  windowWidth?: number | null;
+  windowHeight?: number | null;
+  windowX?: number | null;
+  windowY?: number | null;
   targetDivision: string;
   hasApiKey: boolean;
   aiCoach: AiCoachConfig;

@@ -2,6 +2,17 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [0.3.0] - 2026-11-27
+
+### Added
+- **Dedicated Two-Window HUD & Windows 11 Mica**: Split the click-through tactical HUD into an independent lightweight `hud.html` window while upgrading the main desktop companion to Windows 11 Mica (`alwaysOnTop: false`), with separate Vite chunks under `500 kB`.
+- **HUD Scale, Minimap Side & Monitor Selection**: Added `100% / 125% / 150%` HUD scale presets, Left/Right LoL minimap side docking, Primary/Active monitor placement, persisted window geometry, and immediate opacity/ergonomics saving.
+- **First-Run Setup Checklist**: Added a dismissible idle onboarding checklist verifying Riot API key health, Borderless/Windowed video mode guidance, and HUD hotkey testing.
+
+### Changed
+- **HUD Legibility Overhaul**: Raised compact HUD minimum typography to `12px`, promoted the Next Objective countdown to the primary visual anchor, and expanded macro cues to clean 2-line wrapping.
+- **Main Chrome & Atomic Hotkey Rebind**: Made the full main top strip draggable and made global shortcut rebinding atomic so the previous hotkey stays active if a new binding fails.
+
 ## [0.2.0] - 2026-11-27
 
 ### Added

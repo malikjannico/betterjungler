@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { syncFullDdragonCatalog } from '../services/ddragonService';
 import {
   checkRiotApiKeyHealth,
   fetchSummonerProfile,
+  isTauriEnvironment,
   saveAiApiKey,
   saveRiotApiKey,
   saveSettings,
@@ -14,6 +15,9 @@ import type {
   ApiKeyHealthStatus,
   AppMetaInfo,
   HudCorner,
+  HudMonitorTarget,
+  HudScalePercent,
+  MinimapSide,
   OverlayHotkeyPreset,
   UpdateCheckResult,
   UserSettings,
@@ -103,21 +107,126 @@ export function SettingsView({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const prevSettingsRef = useRef<UserSettings>(settings);
+  const persistedOverlayRef = useRef<
+    Pick<
+      UserSettings,
+      'hudCorner' | 'overlayHotkey' | 'hudOpacity' | 'hudScale' | 'hudMonitor' | 'minimapSide'
+    >
+  >({
+    hudCorner: settings.hudCorner,
+    overlayHotkey: settings.overlayHotkey,
+    hudOpacity: settings.hudOpacity,
+    hudScale: settings.hudScale,
+    hudMonitor: settings.hudMonitor,
+    minimapSide: settings.minimapSide,
+  });
+
   useEffect(() => {
-    setDraft(settings);
+    const prev = prevSettingsRef.current;
+    setDraft((cur) => ({
+      ...settings,
+      riotId: cur.riotId !== prev.riotId ? cur.riotId : settings.riotId,
+      region: cur.region !== prev.region ? cur.region : settings.region,
+      lolInstallPath:
+        cur.lolInstallPath !== prev.lolInstallPath
+          ? cur.lolInstallPath
+          : settings.lolInstallPath,
+      targetDivision:
+        cur.targetDivision !== prev.targetDivision
+          ? cur.targetDivision
+          : settings.targetDivision,
+      aiCoach:
+        cur.aiCoach.provider !== prev.aiCoach.provider ||
+        cur.aiCoach.model !== prev.aiCoach.model ||
+        cur.aiCoach.endpoint !== prev.aiCoach.endpoint
+          ? { ...cur.aiCoach, hasApiKey: settings.aiCoach.hasApiKey }
+          : settings.aiCoach,
+    }));
+    prevSettingsRef.current = settings;
   }, [settings]);
 
   async function handleSaveSettings() {
     setErrorMessage(null);
     setStatusMessage(null);
     try {
+      await updateOverlayPreferences(draft.hudCorner, draft.overlayHotkey, {
+        hudOpacity: draft.hudOpacity,
+        hudScale: draft.hudScale ?? 100,
+        hudMonitor: draft.hudMonitor ?? 'primary',
+        minimapSide: draft.minimapSide ?? 'right',
+      });
       await saveSettings(draft);
-      await updateOverlayPreferences(draft.hudCorner, draft.overlayHotkey);
+      persistedOverlayRef.current = {
+        hudCorner: draft.hudCorner,
+        overlayHotkey: draft.overlayHotkey,
+        hudOpacity: draft.hudOpacity,
+        hudScale: draft.hudScale,
+        hudMonitor: draft.hudMonitor,
+        minimapSide: draft.minimapSide,
+      };
       onSettingsChanged(draft);
       setStatusMessage('Preferences & Overlay Ergonomics saved.');
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to save preferences.');
     }
+  }
+
+  function handleImmediateOverlayPatch(
+    patch: Partial<
+      Pick<
+        UserSettings,
+        'hudCorner' | 'overlayHotkey' | 'hudOpacity' | 'hudScale' | 'hudMonitor' | 'minimapSide'
+      >
+    >,
+    persistNow = true
+  ) {
+    // Apply overlay change without committing unsaved Riot ID / install path edits
+    const nextOverlaySettings: UserSettings = { ...settings, ...patch };
+    setDraft((prev) => ({ ...prev, ...patch }));
+    onSettingsChanged(nextOverlaySettings);
+    if (!persistNow) return;
+
+    const persistSuccessSnapshot = {
+      hudCorner: nextOverlaySettings.hudCorner,
+      overlayHotkey: nextOverlaySettings.overlayHotkey,
+      hudOpacity: nextOverlaySettings.hudOpacity,
+      hudScale: nextOverlaySettings.hudScale,
+      hudMonitor: nextOverlaySettings.hudMonitor,
+      minimapSide: nextOverlaySettings.minimapSide,
+    };
+
+    if (!isTauriEnvironment()) {
+      void saveSettings(nextOverlaySettings)
+        .then(() => {
+          persistedOverlayRef.current = persistSuccessSnapshot;
+        })
+        .catch(() => {});
+      return;
+    }
+
+    void updateOverlayPreferences(
+      nextOverlaySettings.hudCorner,
+      nextOverlaySettings.overlayHotkey,
+      {
+        hudOpacity: nextOverlaySettings.hudOpacity,
+        hudScale: nextOverlaySettings.hudScale ?? 100,
+        hudMonitor: nextOverlaySettings.hudMonitor ?? 'primary',
+        minimapSide: nextOverlaySettings.minimapSide ?? 'right',
+      }
+    )
+      .then(() => {
+        persistedOverlayRef.current = persistSuccessSnapshot;
+      })
+      .catch((err) => {
+        // Revert to last persisted overlay settings (including live slider drags)
+        const rollback = persistedOverlayRef.current;
+        setDraft((prev) => ({ ...prev, ...rollback }));
+        onSettingsChanged({ ...settings, ...rollback });
+        setErrorMessage(
+          err instanceof Error ? err.message : 'Failed to update overlay preferences.'
+        );
+      });
   }
 
   async function handleSaveApiKey() {
@@ -368,15 +477,11 @@ export function SettingsView({
                 <select
                   aria-label="Compact HUD Corner"
                   value={draft.hudCorner}
-                  onChange={(e) => {
-                    const next = { ...draft, hudCorner: e.target.value as HudCorner };
-                    setDraft(next);
-                    onSettingsChanged(next);
-                    void saveSettings(next).catch(() => {});
-                    void updateOverlayPreferences(next.hudCorner, next.overlayHotkey).catch((err) =>
-                      setErrorMessage(err instanceof Error ? err.message : 'Failed to apply HUD corner.')
-                    );
-                  }}
+                  onChange={(e) =>
+                    handleImmediateOverlayPatch({
+                      hudCorner: e.target.value as HudCorner,
+                    })
+                  }
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
                 >
                   {HUD_CORNERS.map((c) => (
@@ -392,15 +497,9 @@ export function SettingsView({
                 <select
                   aria-label="Global Hotkey"
                   value={draft.overlayHotkey}
-                  onChange={(e) => {
-                    const next = { ...draft, overlayHotkey: e.target.value };
-                    setDraft(next);
-                    onSettingsChanged(next);
-                    void saveSettings(next).catch(() => {});
-                    void updateOverlayPreferences(next.hudCorner, next.overlayHotkey).catch((err) =>
-                      setErrorMessage(err instanceof Error ? err.message : 'Failed to rebind hotkey.')
-                    );
-                  }}
+                  onChange={(e) =>
+                    handleImmediateOverlayPatch({ overlayHotkey: e.target.value })
+                  }
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
                 >
                   {HOTKEY_PRESETS.map((k) => (
@@ -412,6 +511,58 @@ export function SettingsView({
               </label>
 
               <label className="block text-[11px]">
+                <span className="text-slate-400">HUD Scale</span>
+                <select
+                  aria-label="HUD Scale"
+                  value={draft.hudScale ?? 100}
+                  onChange={(e) =>
+                    handleImmediateOverlayPatch({
+                      hudScale: Number(e.target.value) as HudScalePercent,
+                    })
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
+                >
+                  <option value={100} className="bg-zinc-900">100% (Standard)</option>
+                  <option value={125} className="bg-zinc-900">125% (1440p Comfortable)</option>
+                  <option value={150} className="bg-zinc-900">150% (Large / High-DPI)</option>
+                </select>
+              </label>
+
+              <label className="block text-[11px]">
+                <span className="text-slate-400">In-Game Minimap Side</span>
+                <select
+                  aria-label="In-Game Minimap Side"
+                  value={draft.minimapSide ?? 'right'}
+                  onChange={(e) =>
+                    handleImmediateOverlayPatch({
+                      minimapSide: e.target.value as MinimapSide,
+                    })
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
+                >
+                  <option value="right" className="bg-zinc-900">Right (Default LoL)</option>
+                  <option value="left" className="bg-zinc-900">Left (Flipped Minimap)</option>
+                </select>
+              </label>
+
+              <label className="block text-[11px]">
+                <span className="text-slate-400">HUD Monitor Target</span>
+                <select
+                  aria-label="HUD Monitor Target"
+                  value={draft.hudMonitor ?? 'primary'}
+                  onChange={(e) =>
+                    handleImmediateOverlayPatch({
+                      hudMonitor: e.target.value as HudMonitorTarget,
+                    })
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
+                >
+                  <option value="primary" className="bg-zinc-900">Primary Display (League)</option>
+                  <option value="active" className="bg-zinc-900">Same Display as App</option>
+                </select>
+              </label>
+
+              <label className="block text-[11px]">
                 <span className="text-slate-400">HUD Opacity ({draft.hudOpacity}%)</span>
                 <input
                   type="range"
@@ -419,11 +570,22 @@ export function SettingsView({
                   min={50}
                   max={100}
                   value={draft.hudOpacity}
-                  onChange={(e) => {
-                    const next = { ...draft, hudOpacity: Number(e.target.value) };
-                    setDraft(next);
-                    onSettingsChanged(next);
-                  }}
+                  onChange={(e) =>
+                    handleImmediateOverlayPatch(
+                      { hudOpacity: Number(e.target.value) },
+                      false
+                    )
+                  }
+                  onPointerUp={(e) =>
+                    handleImmediateOverlayPatch({
+                      hudOpacity: Number(e.currentTarget.value),
+                    })
+                  }
+                  onKeyUp={(e) =>
+                    handleImmediateOverlayPatch({
+                      hudOpacity: Number(e.currentTarget.value),
+                    })
+                  }
                   className="mt-2 w-full accent-white"
                 />
               </label>

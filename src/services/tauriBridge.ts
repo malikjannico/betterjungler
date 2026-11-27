@@ -1,16 +1,14 @@
 import pkg from '../../package.json';
-import {
-  DEMO_HIGH_ELO_SNAPSHOT,
-  DEMO_LP_HISTORY,
-  DEMO_POST_GAME_MATCHES,
-} from '../domain/postGameFixtures';
 import type {
   ApiKeyHealthStatus,
   AppMetaInfo,
   ClimbGoal,
   HighEloMetaSnapshot,
   HudCorner,
+  HudMonitorTarget,
+  HudScalePercent,
   LpHistoryPoint,
+  MinimapSide,
   OverlayMode,
   RunePageSpec,
   UpdateCheckResult,
@@ -39,6 +37,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   overlayHotkey: 'Alt+J',
   hudCorner: 'beside-minimap',
   hudOpacity: 92,
+  hudScale: 100,
+  hudMonitor: 'primary',
+  minimapSide: 'right',
   targetDivision: 'PLATINUM IV',
   hasApiKey: false,
   aiCoach: {
@@ -80,17 +81,50 @@ export async function setOverlayMode(mode: OverlayMode): Promise<void> {
 
 export async function updateOverlayPreferences(
   hudCorner: HudCorner,
-  overlayHotkey: string
+  overlayHotkey: string,
+  extra?: {
+    hudOpacity?: number;
+    hudScale?: HudScalePercent;
+    hudMonitor?: HudMonitorTarget;
+    minimapSide?: MinimapSide;
+  }
 ): Promise<void> {
   if (!isTauriEnvironment()) return;
   await invokeTauri<void>('update_overlay_preferences', {
     hudCorner,
     overlayHotkey,
+    hudOpacity: extra?.hudOpacity ?? null,
+    hudScale: extra?.hudScale ?? null,
+    hudMonitor: extra?.hudMonitor ?? null,
+    minimapSide: extra?.minimapSide ?? null,
   });
+}
+
+export interface HudPreferencesEvent {
+  hudCorner: HudCorner;
+  overlayHotkey: string;
+  hudOpacity: number;
+  hudScale: HudScalePercent;
+  hudMonitor: HudMonitorTarget;
+  minimapSide: MinimapSide;
+}
+
+export async function subscribeHudPreferences(
+  onPrefs: (prefs: HudPreferencesEvent) => void
+): Promise<() => void> {
+  if (!isTauriEnvironment()) return () => {};
+  const { listen } = await import('@tauri-apps/api/event');
+  const unlisten = await listen<HudPreferencesEvent>('hud-preferences-changed', (e) => {
+    onPrefs(e.payload);
+  });
+  return () => {
+    unlisten();
+  };
 }
 
 export async function loadLpHistory(): Promise<LpHistoryPoint[]> {
   if (!isTauriEnvironment()) {
+    const { DEMO_LP_HISTORY } = await import('../domain/postGameFixtures');
     return DEMO_LP_HISTORY;
   }
   return invokeTauri<LpHistoryPoint[]>('get_lp_history');
@@ -194,6 +228,7 @@ export async function syncRecentMatches(
   count = 8
 ): Promise<MatchV5Detail[]> {
   if (!isTauriEnvironment()) {
+    const { DEMO_POST_GAME_MATCHES } = await import('../domain/postGameFixtures');
     return DEMO_POST_GAME_MATCHES;
   }
   return invokeTauri<MatchV5Detail[]>('sync_recent_matches', {
@@ -205,6 +240,7 @@ export async function syncRecentMatches(
 
 export async function getCachedMatches(puuid?: string): Promise<MatchV5Detail[]> {
   if (!isTauriEnvironment()) {
+    const { DEMO_POST_GAME_MATCHES } = await import('../domain/postGameFixtures');
     return DEMO_POST_GAME_MATCHES;
   }
   return invokeTauri<MatchV5Detail[]>('get_cached_matches', {
@@ -249,6 +285,7 @@ export async function deleteClimbGoal(goalId: string): Promise<void> {
 
 export async function getCachedMetaSnapshot(): Promise<HighEloMetaSnapshot | null> {
   if (!isTauriEnvironment()) {
+    const { DEMO_HIGH_ELO_SNAPSHOT } = await import('../domain/postGameFixtures');
     return DEMO_HIGH_ELO_SNAPSHOT;
   }
   return invokeTauri<HighEloMetaSnapshot | null>('get_cached_meta_snapshot');
@@ -260,6 +297,7 @@ export async function refreshHighEloMeta(
   patch?: string
 ): Promise<HighEloMetaSnapshot> {
   if (!isTauriEnvironment()) {
+    const { DEMO_HIGH_ELO_SNAPSHOT } = await import('../domain/postGameFixtures');
     return {
       ...DEMO_HIGH_ELO_SNAPSHOT,
       region: region.toUpperCase(),

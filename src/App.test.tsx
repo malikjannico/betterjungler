@@ -90,7 +90,7 @@ describe('BetterJungler App Integration', () => {
         reader.readAsText(exportedBlob!);
       });
       expect(exportedText).toContain('"schemaVersion": 1');
-      expect(exportedText).toContain('"appVersion": "0.2.0"');
+      expect(exportedText).toContain('"appVersion": "0.3.0"');
       expect(exportedText).not.toContain('puuid');
       expect(exportedText).not.toContain('summonerName');
       expect(exportedText).not.toContain('riotId');
@@ -178,16 +178,27 @@ describe('BetterJungler App Integration', () => {
         target: { value: 'idle' },
       });
 
-      expect(screen.getByText(/What's New in v0\.2\.0/i)).toBeInTheDocument();
+      expect(screen.getByText(/What's New in v0\.3\.0/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: "Dismiss What's New" }));
-      expect(screen.queryByText(/What's New in v0\.2\.0/i)).not.toBeInTheDocument();
-      expect(localStorage.getItem('betterjungler_last_seen_version')).toBe('0.2.0');
+      expect(screen.queryByText(/What's New in v0\.3\.0/i)).not.toBeInTheDocument();
+      expect(localStorage.getItem('betterjungler_last_seen_version')).toBe('0.3.0');
+
+      expect(screen.getByText(/First-Run Windows Setup/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss setup checklist' }));
+      expect(screen.queryByText(/First-Run Windows Setup/i)).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
       expect(screen.getByText(/About & Automatic Updates/i)).toBeInTheDocument();
-      expect(screen.getByText('v0.2.0')).toBeInTheDocument();
+      expect(screen.getByText('v0.3.0')).toBeInTheDocument();
+
+      // Verify changing HUD scale does not wipe unsaved Riot ID edits
+      const riotIdInput = screen.getByLabelText(/Riot ID/i) as HTMLInputElement;
+      fireEvent.change(riotIdInput, { target: { value: 'UnsavedSmurf#EUW' } });
+      fireEvent.change(screen.getByLabelText('HUD Scale'), { target: { value: '125' } });
+      expect(riotIdInput.value).toBe('UnsavedSmurf#EUW');
+      expect(screen.getByLabelText('In-Game Minimap Side')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /View Changelog/i }));
-      expect(screen.getByText(/Tauri v2 Auto-Updater with In-Game Safety Gate/i)).toBeInTheDocument();
+      expect(screen.getByText(/Dedicated Two-Window HUD & Windows 11 Mica/i)).toBeInTheDocument();
     } finally {
       localStorage.removeItem('betterjungler_last_seen_version');
     }

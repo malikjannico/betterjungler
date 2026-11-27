@@ -36,6 +36,18 @@ fn default_hud_corner() -> String {
     "beside-minimap".to_string()
 }
 
+fn default_hud_scale() -> u16 {
+    100
+}
+
+fn default_hud_monitor() -> String {
+    "primary".to_string()
+}
+
+fn default_minimap_side() -> String {
+    "right".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSettings {
@@ -46,6 +58,20 @@ pub struct UserSettings {
     #[serde(default = "default_hud_corner")]
     pub hud_corner: String,
     pub hud_opacity: u8,
+    #[serde(default = "default_hud_scale")]
+    pub hud_scale: u16,
+    #[serde(default = "default_hud_monitor")]
+    pub hud_monitor: String,
+    #[serde(default = "default_minimap_side")]
+    pub minimap_side: String,
+    #[serde(default)]
+    pub window_width: Option<f64>,
+    #[serde(default)]
+    pub window_height: Option<f64>,
+    #[serde(default)]
+    pub window_x: Option<i32>,
+    #[serde(default)]
+    pub window_y: Option<i32>,
     pub target_division: String,
     pub has_api_key: bool,
     #[serde(default)]
@@ -61,6 +87,13 @@ impl Default for UserSettings {
             overlay_hotkey: "Alt+J".to_string(),
             hud_corner: default_hud_corner(),
             hud_opacity: 92,
+            hud_scale: default_hud_scale(),
+            hud_monitor: default_hud_monitor(),
+            minimap_side: default_minimap_side(),
+            window_width: None,
+            window_height: None,
+            window_x: None,
+            window_y: None,
             target_division: "PLATINUM IV".to_string(),
             has_api_key: false,
             ai_coach: AiCoachConfig::default(),

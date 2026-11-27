@@ -22,11 +22,26 @@
         "decorations": false,
         "transparent": true,
         "windowEffects": {
-          "effects": ["acrylic"]
+          "effects": ["mica", "acrylic"]
         },
-        "alwaysOnTop": true,
+        "alwaysOnTop": false,
         "skipTaskbar": false,
         "center": true
+      },
+      {
+        "label": "hud",
+        "title": "BetterJungler HUD",
+        "url": "hud.html",
+        "width": 440,
+        "height": 248,
+        "visible": false,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focusable": false,
+        "shadow": false
       }
     ],
     "security": {

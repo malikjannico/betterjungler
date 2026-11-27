@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hud",
+  "description": "Least-privilege capability for the click-through BetterJungler HUD window",
+  "windows": ["hud"],
+  "permissions": [
+    "core:default",
+    "allow-get-app-state",
+    "allow-get-settings",
+    "allow-set-overlay-mode"
+  ]
+}
