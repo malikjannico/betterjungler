@@ -319,6 +319,7 @@ export interface LpHistoryPoint {
   leaguePoints: number;
   absoluteLp: number;
   win: boolean;
+  matchId?: string;
 }
 
 export interface DdragonChampionLite {
@@ -388,6 +389,8 @@ export interface ReviewFinding {
 export interface PostGameKpis {
   csPerMin: number;
   csAt4: number;
+  csAt5?: number;
+  csAt10?: number;
   goldDiffAt10: number;
   goldDiffAt15: number;
   xpDiffAt15: number;
@@ -457,6 +460,7 @@ export interface ClimbGoal {
   status: 'active' | 'completed';
   source: 'auto' | 'custom';
   createdAt: string;
+  isFocusGoal?: boolean;
 }
 
 export interface HighEloChampStat {

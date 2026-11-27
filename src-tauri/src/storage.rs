@@ -110,6 +110,8 @@ pub struct LpHistoryRecord {
     pub league_points: i32,
     pub absolute_lp: i32,
     pub win: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +128,8 @@ pub struct ClimbGoalRecord {
     pub status: String,
     pub source: String,
     pub created_at: String,
+    #[serde(default)]
+    pub is_focus_goal: bool,
 }
 
 pub fn init_database(db_path: &Path) -> AppResult<Connection> {
@@ -201,11 +205,13 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             rank TEXT NOT NULL,
             league_points INTEGER NOT NULL,
             absolute_lp INTEGER NOT NULL,
-            win INTEGER NOT NULL
+            win INTEGER NOT NULL,
+            match_id TEXT
         );
         "#,
     )
     .map_err(|e| AppError::Storage(e.to_string()))?;
+    let _ = conn.execute("ALTER TABLE lp_history ADD COLUMN match_id TEXT", []);
     Ok(())
 }
 
@@ -439,10 +445,20 @@ pub fn tier_rank_to_absolute_lp(tier: &str, rank: &str, lp: i32) -> i32 {
     tier_base + div_offset + lp
 }
 
+pub fn has_lp_snapshot_for_match(conn: &Connection, match_id: &str) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM lp_history WHERE match_id = ?1)",
+        params![match_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|v| v != 0)
+    .unwrap_or(false)
+}
+
 pub fn get_latest_lp_snapshot(conn: &Connection) -> AppResult<Option<LpHistoryRecord>> {
     let mut stmt = conn
         .prepare(
-            "SELECT timestamp, tier, rank, league_points, absolute_lp, win
+            "SELECT timestamp, tier, rank, league_points, absolute_lp, win, match_id
              FROM lp_history ORDER BY id DESC LIMIT 1",
         )
         .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -455,6 +471,7 @@ pub fn get_latest_lp_snapshot(conn: &Connection) -> AppResult<Option<LpHistoryRe
                 league_points: row.get(3)?,
                 absolute_lp: row.get(4)?,
                 win: row.get::<_, i64>(5)? != 0,
+                match_id: row.get(6)?,
             })
         })
         .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -467,15 +484,17 @@ pub fn get_latest_lp_snapshot(conn: &Connection) -> AppResult<Option<LpHistoryRe
 
 pub fn append_lp_snapshot(conn: &Connection, rec: &LpHistoryRecord) -> AppResult<()> {
     conn.execute(
-        "INSERT INTO lp_history (timestamp, tier, rank, league_points, absolute_lp, win)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO lp_history (
+            timestamp, tier, rank, league_points, absolute_lp, win, match_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             rec.timestamp,
             rec.tier,
             rec.rank,
             rec.league_points,
             rec.absolute_lp,
-            if rec.win { 1 } else { 0 }
+            if rec.win { 1 } else { 0 },
+            rec.match_id
         ],
     )
     .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -485,7 +504,7 @@ pub fn append_lp_snapshot(conn: &Connection, rec: &LpHistoryRecord) -> AppResult
 pub fn list_lp_history(conn: &Connection, limit: usize) -> AppResult<Vec<LpHistoryRecord>> {
     let mut stmt = conn
         .prepare(
-            "SELECT timestamp, tier, rank, league_points, absolute_lp, win
+            "SELECT timestamp, tier, rank, league_points, absolute_lp, win, match_id
              FROM lp_history ORDER BY id DESC LIMIT ?1",
         )
         .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -499,6 +518,7 @@ pub fn list_lp_history(conn: &Connection, limit: usize) -> AppResult<Vec<LpHisto
                 league_points: row.get(3)?,
                 absolute_lp: row.get(4)?,
                 win: row.get::<_, i64>(5)? != 0,
+                match_id: row.get(6)?,
             })
         })
         .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -607,6 +627,7 @@ mod tests {
             status: "active".to_string(),
             source: "auto".to_string(),
             created_at: "2026-11-26T20:00:00Z".to_string(),
+            is_focus_goal: false,
         };
 
         upsert_climb_goal(&conn, &goal).expect("upsert goal");
@@ -614,7 +635,25 @@ mod tests {
         assert_eq!(goals.len(), 1);
         assert_eq!(goals[0].title, "Hit 6.6 CS/min");
 
+        // Pre-v0.4.0 JSON rows without isFocusGoal must deserialize safely with default false
+        conn.execute(
+            "INSERT INTO climb_goals_v2 (id, payload, updated_at) VALUES (?1, ?2, ?3)",
+            params![
+                "legacy-goal",
+                r#"{"id":"legacy-goal","targetDivision":"GOLD IV","metric":"csPerMin","title":"Legacy Goal","targetValue":6.0,"currentValue":5.5,"unit":"CS/m","lowerIsBetter":false,"status":"active","source":"custom","createdAt":"2026-11-26T10:00:00Z"}"#,
+                "2026-11-26T10:00:00Z"
+            ],
+        )
+        .expect("insert legacy goal");
+        let with_legacy = list_climb_goals(&conn).expect("list with legacy");
+        let legacy = with_legacy
+            .iter()
+            .find(|g| g.id == "legacy-goal")
+            .expect("legacy goal present");
+        assert!(!legacy.is_focus_goal);
+
         delete_climb_goal(&conn, "goal-1").expect("delete goal");
+        delete_climb_goal(&conn, "legacy-goal").expect("delete legacy goal");
         assert!(list_climb_goals(&conn).expect("list empty").is_empty());
 
         let snap = serde_json::json!({ "patch": "16.1", "sampleMatches": 12 });
@@ -629,6 +668,7 @@ mod tests {
             league_points: 64,
             absolute_lp: tier_rank_to_absolute_lp("GOLD", "II", 64),
             win: true,
+            match_id: Some("EUW1_TEST".to_string()),
         };
         assert_eq!(lp.absolute_lp, 1464);
         append_lp_snapshot(&conn, &lp).expect("append lp");

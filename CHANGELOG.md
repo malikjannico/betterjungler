@@ -2,6 +2,14 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [0.4.0] - 2026-11-27
+
+### Added
+- **Automated Post-Game Sync & LP Tracking**: Automatically fetches your latest Match-V5 game and updates LP direction using actual win/loss data when transitioning into End of Game, with a **"Last Game Takeaway"** summary banner.
+- **1-Per-Game Match Focus Goal**: Pin one active KPI as your **Match Focus**, surfacing it during Champ Select and Win Plan and grading `PASS` / `MISS` automatically in Post-Game Review.
+- **1-Second Match Clock Interpolation**: Smoothly advances the Live Coach and HUD clock every second between 1.8s Live Client polls and pauses automatically on game stalls.
+- **Personal Win-Rate Draft Weighting & Early Tempo KPIs**: Factors your rolling personal jungle win rate (`>= 3` games) into Champ Select scores, auto-follows your hovered/locked pick with off-role notices, adds `CS @5` and `CS @10` benchmarks, and shows a calm 3-loss Session Stop-Loss indicator.
+
 ## [0.3.0] - 2026-11-27
 
 ### Added

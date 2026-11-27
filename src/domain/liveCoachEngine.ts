@@ -594,11 +594,12 @@ export function computeMacroGuidance(
   // 1. Objective & Vision cue
   const topObjective = objectives[0];
   if (topObjective && (topObjective.status === 'prep_vision' || topObjective.status === 'live')) {
+    const secs = Math.max(0, Math.round(topObjective.secondsRemaining));
     cues.push({
       id: 'obj-setup',
       category: 'objective',
       priority: 'urgent',
-      title: `${topObjective.name} (${topObjective.status === 'live' ? 'LIVE' : `in ${topObjective.secondsRemaining}s`})`,
+      title: `${topObjective.name} (${topObjective.status === 'live' ? 'LIVE' : `in ${secs}s`})`,
       detail: topObjective.actionText,
     });
   }

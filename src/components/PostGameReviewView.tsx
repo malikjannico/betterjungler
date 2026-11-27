@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import pkg from '../../package.json';
 import { synthesizeDemoPostGameDebrief } from '../domain/aiCoachFallback';
+import { evaluateFocusGoalAgainstMatch } from '../domain/climbLadderEngine';
 import { formatClock } from '../domain/liveCoachEngine';
 import { analyzePostGameMatch } from '../domain/postGameReviewEngine';
 import { generateAiDebrief } from '../services/tauriBridge';
-import type { AiCoachConfig } from '../types/coaching';
+import type { AiCoachConfig, ClimbGoal } from '../types/coaching';
 import type { MatchV5Detail } from '../types/riot';
 import { GlassSurface } from './GlassSurface';
 import { GoldXpDiffChart } from './GoldXpDiffChart';
@@ -17,6 +18,9 @@ interface PostGameReviewViewProps {
   appVersion?: string;
   aiConfig: AiCoachConfig;
   canSyncLive: boolean;
+  focusGoal?: ClimbGoal | null;
+  lastAutoSyncedMatchId?: string | null;
+  autoSyncNotice?: string | null;
   onSyncMatches: () => Promise<void>;
 }
 
@@ -27,29 +31,73 @@ export function PostGameReviewView({
   appVersion = pkg.version,
   aiConfig,
   canSyncLive,
+  focusGoal,
+  lastAutoSyncedMatchId,
+  autoSyncNotice,
   onSyncMatches,
 }: PostGameReviewViewProps) {
-  const [selectedMatchId, setSelectedMatchId] = useState<string>(
-    matches[0]?.matchId ?? ''
-  );
-  const [activeMinute, setActiveMinute] = useState<number | null>(null);
+  const [selection, setSelection] = useState<{
+    manualId: string | null;
+    seenAutoSyncId: string | null;
+  }>({
+    manualId: null,
+    seenAutoSyncId: lastAutoSyncedMatchId ?? null,
+  });
+  const [activeMinuteState, setActiveMinuteState] = useState<{
+    matchId: string;
+    minute: number | null;
+  }>({ matchId: '', minute: null });
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiDebrief, setAiDebrief] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [exportFeedback, setExportFeedback] = useState<{
+  const [aiDebriefState, setAiDebriefState] = useState<{
+    matchId: string;
+    text: string | null;
+  }>({ matchId: '', text: null });
+  const [aiErrorState, setAiErrorState] = useState<{
+    matchId: string;
+    message: string | null;
+  }>({ matchId: '', message: null });
+  const [exportFeedbackState, setExportFeedbackState] = useState<{
+    matchId: string;
     kind: 'success' | 'error';
     message: string;
   } | null>(null);
 
+  const followAutoSync =
+    Boolean(lastAutoSyncedMatchId) &&
+    lastAutoSyncedMatchId !== selection.seenAutoSyncId &&
+    matches.some((m) => m.matchId === lastAutoSyncedMatchId);
+
+  const effectiveSelectedId = followAutoSync
+    ? lastAutoSyncedMatchId!
+    : (selection.manualId ?? matches[0]?.matchId ?? '');
+
   const selectedMatch =
-    matches.find((m) => m.matchId === selectedMatchId) ?? matches[0] ?? null;
+    matches.find((m) => m.matchId === effectiveSelectedId) ?? matches[0] ?? null;
+
+  const activeMinute =
+    selectedMatch && activeMinuteState.matchId === selectedMatch.matchId
+      ? activeMinuteState.minute
+      : null;
+  const aiDebrief =
+    selectedMatch && aiDebriefState.matchId === selectedMatch.matchId ? aiDebriefState.text : null;
+  const aiError =
+    selectedMatch && aiErrorState.matchId === selectedMatch.matchId ? aiErrorState.message : null;
+  const exportFeedback =
+    selectedMatch && exportFeedbackState?.matchId === selectedMatch.matchId
+      ? exportFeedbackState
+      : null;
 
   const report = useMemo(() => {
     if (!selectedMatch) return null;
     return analyzePostGameMatch(selectedMatch, targetDivision);
   }, [selectedMatch, targetDivision]);
+
+  const focusGoalResult = useMemo(() => {
+    if (!focusGoal || !report) return null;
+    return evaluateFocusGoalAgainstMatch(focusGoal, report.kpis);
+  }, [focusGoal, report]);
 
   function handleExportReview() {
     if (!report) return;
@@ -96,9 +144,14 @@ export function PostGameReviewView({
           anchor.remove();
         }
       }
-      setExportFeedback({ kind: 'success', message: `Exported ${filename}` });
+      setExportFeedbackState({
+        matchId: report.matchId,
+        kind: 'success',
+        message: `Exported ${filename}`,
+      });
     } catch (err) {
-      setExportFeedback({
+      setExportFeedbackState({
+        matchId: report.matchId,
         kind: 'error',
         message: err instanceof Error ? err.message : 'Unable to export review JSON',
       });
@@ -119,8 +172,9 @@ export function PostGameReviewView({
 
   async function handleGenerateAiDebrief() {
     if (!report) return;
+    const requestMatchId = report.matchId;
     setAiLoading(true);
-    setAiError(null);
+    setAiErrorState({ matchId: requestMatchId, message: null });
     const context = JSON.stringify({
       champion: report.championName,
       enemyJungler: report.enemyJunglerName,
@@ -134,12 +188,18 @@ export function PostGameReviewView({
 
     try {
       const response = await generateAiDebrief(context);
-      setAiDebrief(response);
+      setAiDebriefState({ matchId: requestMatchId, text: response });
     } catch (err) {
       if (err instanceof Error && err.message === 'DEMO_FALLBACK') {
-        setAiDebrief(synthesizeDemoPostGameDebrief(report));
+        setAiDebriefState({
+          matchId: requestMatchId,
+          text: synthesizeDemoPostGameDebrief(report),
+        });
       } else {
-        setAiError(err instanceof Error ? err.message : 'AI Debrief failed.');
+        setAiErrorState({
+          matchId: requestMatchId,
+          message: err instanceof Error ? err.message : 'AI Debrief failed.',
+        });
       }
     } finally {
       setAiLoading(false);
@@ -193,11 +253,14 @@ export function PostGameReviewView({
                 type="button"
                 aria-pressed={active}
                 onClick={() => {
-                  setSelectedMatchId(m.matchId);
-                  setActiveMinute(Math.max(1, Math.ceil(m.durationSeconds / 60)));
-                  setAiDebrief(null);
-                  setAiError(null);
-                  setExportFeedback(null);
+                  setSelection({
+                    manualId: m.matchId,
+                    seenAutoSyncId: lastAutoSyncedMatchId ?? null,
+                  });
+                  setActiveMinuteState({
+                    matchId: m.matchId,
+                    minute: Math.max(1, Math.ceil(m.durationSeconds / 60)),
+                  });
                 }}
                 className={`rounded-full px-3 py-1 text-left text-xs transition ${
                   active
@@ -264,6 +327,57 @@ export function PostGameReviewView({
         </p>
       )}
 
+      {autoSyncNotice && !syncError && (
+        <p
+          role="status"
+          className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+        >
+          {autoSyncNotice}
+        </p>
+      )}
+
+      {/* Last Game Takeaway & Focus Goal Grading */}
+      <GlassSurface className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs">
+        <div className="space-y-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+              Last Game Takeaway
+            </span>
+            {selectedMatch.matchId === lastAutoSyncedMatchId && (
+              <span className="rounded-full border border-emerald-400/35 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-200">
+                Auto-Synced
+              </span>
+            )}
+          </div>
+          <p className="text-slate-200">
+            {report.mistakes[0]?.detail ??
+              report.improvements[0]?.detail ??
+              report.highlights[0]?.detail ??
+              'Solid jungle fundamentals across objective setups.'}
+          </p>
+        </div>
+
+        {focusGoal && focusGoalResult && (
+          <div className="flex items-center gap-2 rounded-lg border border-white/12 bg-white/[0.04] px-3 py-1.5">
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                focusGoalResult.passed
+                  ? 'bg-emerald-500/20 text-emerald-200'
+                  : 'bg-rose-500/20 text-rose-200'
+              }`}
+            >
+              Focus {focusGoalResult.passed ? 'PASS' : 'MISS'}
+            </span>
+            <div className="text-[11px]">
+              <div className="font-medium text-white">{focusGoal.title}</div>
+              <div className="tabular-nums text-[10px] text-slate-400">
+                {focusGoalResult.deltaLabel}
+              </div>
+            </div>
+          </div>
+        )}
+      </GlassSurface>
+
       {/* Match Header + Grade + KPIs */}
       <GlassSurface className="p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -293,9 +407,13 @@ export function PostGameReviewView({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-7">
           {[
             { label: 'CS / Min', value: String(report.kpis.csPerMin) },
+            {
+              label: 'CS @5 / @10',
+              value: `${report.kpis.csAt5 ?? 'n/a'} / ${report.kpis.csAt10 ?? 'n/a'}`,
+            },
             {
               label: 'Gold Diff @15',
               value: `${report.kpis.goldDiffAt15 >= 0 ? '+' : ''}${report.kpis.goldDiffAt15}g`,
@@ -322,7 +440,9 @@ export function PostGameReviewView({
         key={`chart-${selectedMatch.matchId}`}
         match={selectedMatch}
         activeMinute={activeMinute ?? Math.max(1, Math.ceil(selectedMatch.durationSeconds / 60))}
-        onSelectMinute={setActiveMinute}
+        onSelectMinute={(minute) =>
+          setActiveMinuteState({ matchId: selectedMatch.matchId, minute })
+        }
       />
 
       <PostGameTimelineMap
@@ -333,7 +453,9 @@ export function PostGameReviewView({
         enemyPathPoints={report.enemyPathPoints}
         markers={report.markers}
         activeMinute={activeMinute ?? Math.max(1, Math.ceil(selectedMatch.durationSeconds / 60))}
-        onChangeMinute={setActiveMinute}
+        onChangeMinute={(minute) =>
+          setActiveMinuteState({ matchId: selectedMatch.matchId, minute })
+        }
       />
 
       {/* What You Did Good / Mistakes / Where to Improve */}

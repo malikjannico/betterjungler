@@ -113,6 +113,11 @@ export function analyzeTeamComposition(championIds: number[]): TeamCompAnalysis 
   };
 }
 
+export interface PersonalChampRecord {
+  games: number;
+  wins: number;
+}
+
 export interface RecommendJungleInput {
   allyChampionIds: number[];
   enemyChampionIds: number[];
@@ -120,6 +125,25 @@ export interface RecommendJungleInput {
   enemyJunglerId?: number;
   masteryChampionIds?: number[];
   highEloMeta?: HighEloMetaSnapshot | null;
+  personalStats?: Record<number, PersonalChampRecord>;
+}
+
+/**
+ * Aggregates personal ranked wins and games per champion from cached Match-V5 history.
+ */
+export function computePersonalChampStats(
+  matches: ReadonlyArray<{ championId: number; win: boolean }>
+): Record<number, PersonalChampRecord> {
+  const map: Record<number, PersonalChampRecord> = {};
+  for (const m of matches) {
+    if (!m.championId || m.championId <= 0) continue;
+    const prev = map[m.championId] ?? { games: 0, wins: 0 };
+    map[m.championId] = {
+      games: prev.games + 1,
+      wins: prev.wins + (m.win ? 1 : 0),
+    };
+  }
+  return map;
 }
 
 export function inferEnemyJunglerId(
@@ -243,10 +267,21 @@ export function recommendJunglePicks(
       reasons.push(`Strong combo synergy with ${matchedSynergies.length} ally pick(s)`);
     }
 
-    // 5. Personal Mastery Bonus (0..8)
-    const masteryPoints = masterySet.has(jungler.championId) ? 8 : 0;
+    // 5. Personal Mastery & Rolling Win-Rate Bias (-6..+16)
+    let masteryPoints = masterySet.has(jungler.championId) ? 8 : 0;
     if (masteryPoints > 0) {
       reasons.push('Matches one of your highest-mastery junglers');
+    }
+    const personalRecord = input.personalStats?.[jungler.championId];
+    if (personalRecord && personalRecord.games >= 3) {
+      const wr = (personalRecord.wins / personalRecord.games) * 100;
+      const wrDelta = Math.max(-6, Math.min(8, Math.round((wr - 50) / 5)));
+      masteryPoints += wrDelta;
+      if (wr >= 55) {
+        reasons.push(`Your ${Math.round(wr)}% WR (${personalRecord.games}G)`);
+      } else if (wr < 42) {
+        warnings.push(`Low personal WR: ${Math.round(wr)}% (${personalRecord.games}G)`);
+      }
     }
 
     if (reasons.length === 0) {

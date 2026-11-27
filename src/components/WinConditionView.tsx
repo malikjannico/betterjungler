@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { synthesizeDemoWinConBrief } from '../domain/aiCoachFallback';
 import { generateAiDebrief } from '../services/tauriBridge';
-import type { AiCoachConfig, WinConditionPlan } from '../types/coaching';
+import type { AiCoachConfig, ClimbGoal, WinConditionPlan } from '../types/coaching';
 import type { MapSide } from '../types/riot';
 import { GlassSurface } from './GlassSurface';
 import { SummonersRiftMap } from './SummonersRiftMap';
@@ -12,6 +12,7 @@ interface WinConditionViewProps {
   championName: string;
   patchVersion: string;
   aiConfig: AiCoachConfig;
+  focusGoal?: ClimbGoal | null;
 }
 
 export function WinConditionView({
@@ -20,6 +21,7 @@ export function WinConditionView({
   championName,
   patchVersion,
   aiConfig,
+  focusGoal,
 }: WinConditionViewProps) {
   const [routeSelection, setRouteSelection] = useState<{
     recommendedId: string;
@@ -65,6 +67,21 @@ export function WinConditionView({
 
   return (
     <div className="space-y-4">
+      {focusGoal && (
+        <div className="lg-inset flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-sky-400/35 bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-200">
+              Match Focus
+            </span>
+            <span className="font-medium text-white">{focusGoal.title}</span>
+          </div>
+          <span className="tabular-nums text-[11px] text-slate-400">
+            Target {focusGoal.lowerIsBetter ? '≤' : '≥'} {focusGoal.targetValue}
+            {focusGoal.unit ? ` ${focusGoal.unit}` : ''}
+          </span>
+        </div>
+      )}
+
       {/* Hairline-Divided Win Conditions */}
       <GlassSurface className="p-5">
         <div className="grid gap-6 md:grid-cols-2">

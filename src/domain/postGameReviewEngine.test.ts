@@ -18,6 +18,8 @@ describe('postGameReviewEngine', () => {
     const report = analyzePostGameMatch(winMatch, 'PLATINUM IV');
 
     expect(report.kpis.preObjectiveDeaths).toBe(0);
+    expect(report.kpis.csAt5).toBeGreaterThan(0);
+    expect(report.kpis.csAt10).toBeGreaterThan(report.kpis.csAt5!);
     expect(report.kpis.goldDiffAt15).toBeGreaterThan(500);
     expect(report.kpis.objectiveSharePct).toBe(75);
     expect(['S', 'A']).toContain(report.grade);

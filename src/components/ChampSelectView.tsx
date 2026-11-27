@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import {
   SUMMONER_SPELL_INFO,
+  findJungleChampionById,
   getChampionMeta,
   validateRunePage,
 } from '../data/jungleKnowledgePack';
 import {
+  type PersonalChampRecord,
   analyzeTeamComposition,
   inferEnemyJunglerId,
   recommendJunglePicks,
@@ -12,7 +14,11 @@ import {
 } from '../domain/champSelectEngine';
 import { getChampionIconUrl } from '../services/ddragonService';
 import { applyRunesAndSpells } from '../services/tauriBridge';
-import type { HighEloMetaSnapshot } from '../types/coaching';
+import type {
+  ChampSelectRecommendation,
+  ClimbGoal,
+  HighEloMetaSnapshot,
+} from '../types/coaching';
 import type { LcuChampSelectSession, SummonerProfileSummary } from '../types/riot';
 import { GlassSurface } from './GlassSurface';
 
@@ -21,6 +27,8 @@ interface ChampSelectViewProps {
   patchVersion: string;
   summonerProfile: SummonerProfileSummary | null;
   highEloMeta: HighEloMetaSnapshot | null;
+  personalStats?: Record<number, PersonalChampRecord>;
+  focusGoal?: ClimbGoal | null;
 }
 
 export function ChampSelectView({
@@ -28,8 +36,13 @@ export function ChampSelectView({
   patchVersion,
   summonerProfile,
   highEloMeta,
+  personalStats,
+  focusGoal,
 }: ChampSelectViewProps) {
-  const [selectedChampionId, setSelectedChampionId] = useState<number | null>(null);
+  const [manualOverride, setManualOverride] = useState<{
+    championId: number;
+    sessionKey: string;
+  } | null>(null);
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
 
@@ -37,6 +50,18 @@ export function ChampSelectView({
     () => (session ? sanitizeChampSelectSession(session) : null),
     [session]
   );
+
+  const localSlot = useMemo(
+    () => sanitized?.myTeam.find((s) => s.isLocalPlayer) ?? null,
+    [sanitized]
+  );
+  const sessionKey = sanitized
+    ? `${sanitized.mapSide}:${localSlot?.cellId ?? -1}:${localSlot?.championId ?? 0}`
+    : 'none';
+  const selectedChampionId =
+    manualOverride && manualOverride.sessionKey === sessionKey
+      ? manualOverride.championId
+      : null;
 
   const allyIds = useMemo(
     () =>
@@ -70,14 +95,42 @@ export function ChampSelectView({
         enemyJunglerId,
         masteryChampionIds: summonerProfile?.topMasteryChampionIds,
         highEloMeta,
+        personalStats,
       }),
-    [allyIds, enemyIds, bannedIds, enemyJunglerId, summonerProfile, highEloMeta]
+    [allyIds, enemyIds, bannedIds, enemyJunglerId, summonerProfile, highEloMeta, personalStats]
   );
+
+  const hoveredRec: ChampSelectRecommendation | undefined = useMemo(() => {
+    if (!localSlot || localSlot.championId <= 0) return undefined;
+    const inTop = recommendations.find((r) => r.champion.championId === localSlot.championId);
+    if (inTop) return inTop;
+    const poolMatch = findJungleChampionById(localSlot.championId);
+    if (!poolMatch) return undefined;
+    return {
+      champion: poolMatch,
+      totalScore: poolMatch.metaScore,
+      breakdown: { meta: 30, teamNeed: 15, matchup: 9, synergy: 5, mastery: 0 },
+      reasons: [`Currently hovered/locked (${poolMatch.name})`],
+      warnings: [],
+    };
+  }, [localSlot, recommendations]);
 
   const activePick =
     recommendations.find((r) => r.champion.championId === selectedChampionId) ??
+    hoveredRec ??
     recommendations[0] ??
     null;
+
+  const isUnmappedHover =
+    selectedChampionId === null &&
+    localSlot !== null &&
+    localSlot.championId > 0 &&
+    !hoveredRec;
+
+  const isOffRole =
+    localSlot !== null &&
+    localSlot.assignedPosition !== 'jungle' &&
+    localSlot.assignedPosition !== 'unknown';
 
   async function handleApplyRunesAndSpells() {
     if (!activePick) return;
@@ -126,6 +179,30 @@ export function ChampSelectView({
           </span>
         )}
       </div>
+
+      {(focusGoal || isOffRole) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {focusGoal && (
+            <div className="lg-inset flex items-center gap-2 px-3 py-1.5 text-[11px] text-slate-200">
+              <span className="font-semibold text-sky-300">Match Focus:</span>
+              <span>{focusGoal.title}</span>
+              <span className="tabular-nums text-slate-400">
+                (Target {focusGoal.lowerIsBetter ? '≤' : '≥'} {focusGoal.targetValue}
+                {focusGoal.unit ? ` ${focusGoal.unit}` : ''})
+              </span>
+            </div>
+          )}
+          {isOffRole && localSlot && (
+            <div
+              role="status"
+              className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-200"
+            >
+              Assigned position: <span className="font-semibold uppercase">{localSlot.assignedPosition}</span>{' '}
+              — swap or adjust jungle draft recommendations accordingly.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Hairline-Divided Draft Summary */}
       {sanitized && (
@@ -237,7 +314,10 @@ export function ChampSelectView({
                   key={rec.champion.championId}
                   type="button"
                   onClick={() => {
-                    setSelectedChampionId(rec.champion.championId);
+                    setManualOverride({
+                      championId: rec.champion.championId,
+                      sessionKey,
+                    });
                     setApplyStatus(null);
                   }}
                   className={`w-full rounded-[12px] border p-3 text-left transition-all duration-200 active:scale-[0.99] ${
@@ -360,12 +440,19 @@ export function ChampSelectView({
             </div>
 
             <div className="mt-4 space-y-2 border-t border-white/[0.07] pt-3.5">
+              {isUnmappedHover && (
+                <p className="text-center text-[11px] text-amber-300">
+                  Your hovered champion is outside the 32-jungler playbook; click a card to apply
+                  specific runes.
+                </p>
+              )}
               <button
                 type="button"
+                disabled={isUnmappedHover}
                 onClick={handleApplyRunesAndSpells}
-                className="lg-btn-primary w-full px-4 py-2.5 text-xs font-bold"
+                className="lg-btn-primary w-full px-4 py-2.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Apply Runes &amp; Spells to LoL Client
+                Apply {activePick.champion.name} Runes &amp; Spells to LoL Client
               </button>
               {applyStatus && (
                 <p className="text-center text-[11px] font-medium text-emerald-300">

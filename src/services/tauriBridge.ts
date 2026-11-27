@@ -202,7 +202,9 @@ export async function saveAiApiKey(apiKey: string): Promise<boolean> {
 
 export async function fetchSummonerProfile(
   riotId: string,
-  region: string
+  region: string,
+  recentWin?: boolean,
+  matchId?: string
 ): Promise<SummonerProfileSummary> {
   if (!isTauriEnvironment()) {
     throw new Error(
@@ -212,6 +214,8 @@ export async function fetchSummonerProfile(
   return invokeTauri<SummonerProfileSummary>('fetch_summoner_profile', {
     riotId,
     region,
+    recentWin: recentWin ?? null,
+    matchId: matchId ?? null,
   });
 }
 

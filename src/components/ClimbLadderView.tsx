@@ -5,6 +5,7 @@ import {
   KPI_META,
   evaluateDivisionProgress,
   isGoalTargetMet,
+  isSessionTilting,
   syncGoalsWithRollingProgress,
 } from '../domain/climbLadderEngine';
 import type {
@@ -33,6 +34,7 @@ interface ClimbLadderViewProps {
   canSyncLive: boolean;
   onUpsertGoal: (goal: ClimbGoal) => Promise<void>;
   onDeleteGoal: (goalId: string) => Promise<void>;
+  onSetFocusGoal?: (goalId: string) => Promise<void>;
   onRefreshHighElo: () => Promise<void>;
 }
 
@@ -57,6 +59,7 @@ export function ClimbLadderView({
   canSyncLive,
   onUpsertGoal,
   onDeleteGoal,
+  onSetFocusGoal,
   onRefreshHighElo,
 }: ClimbLadderViewProps) {
   const [customMetric, setCustomMetric] = useState<JungleKpiKey>('csPerMin');
@@ -71,6 +74,7 @@ export function ClimbLadderView({
   );
 
   const hasMatches = summaries.length > 0;
+  const sessionTilting = useMemo(() => isSessionTilting(matches), [matches]);
   const syncedGoals = useMemo(
     () => syncGoalsWithRollingProgress(goals, evaluation.comparisons, hasMatches),
     [goals, evaluation.comparisons, hasMatches]
@@ -131,6 +135,19 @@ export function ClimbLadderView({
 
   return (
     <div className="space-y-4">
+      {sessionTilting && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-100"
+        >
+          <span>
+            <strong className="font-semibold">Session Stop-Loss Guard:</strong> 3 consecutive
+            ranked losses detected. Consider a 10-minute reset and review your pre-objective deaths
+            before queueing again.
+          </span>
+        </div>
+      )}
+
       {/* Division Climb Header */}
       <GlassSurface className="p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -381,14 +398,30 @@ export function ClimbLadderView({
                           </span>
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete goal ${goal.title}`}
-                        onClick={() => void onDeleteGoal(goal.id)}
-                        className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-rose-400"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {onSetFocusGoal && (
+                          <button
+                            type="button"
+                            aria-pressed={Boolean(goal.isFocusGoal)}
+                            onClick={() => void onSetFocusGoal(goal.id)}
+                            className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium transition ${
+                              goal.isFocusGoal
+                                ? 'border-sky-400/45 bg-sky-500/20 text-sky-200'
+                                : 'border-white/15 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]'
+                            }`}
+                          >
+                            {goal.isFocusGoal ? 'Match Focus' : 'Set as Match Focus'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          aria-label={`Delete goal ${goal.title}`}
+                          onClick={() => void onDeleteGoal(goal.id)}
+                          className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-rose-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}

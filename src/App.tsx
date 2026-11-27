@@ -25,7 +25,9 @@ import { PostGameReviewView } from './components/PostGameReviewView';
 import { SettingsView } from './components/SettingsView';
 import { WinConditionView } from './components/WinConditionView';
 import { findJungleChampionById, findJungleChampionByName } from './data/jungleKnowledgePack';
+import { computePersonalChampStats } from './domain/champSelectEngine';
 import { parseChangelog } from './domain/changelogParser';
+import { setSingleFocusGoal } from './domain/climbLadderEngine';
 import {
   computeAdaptiveBuild,
   computeMacroGuidance,
@@ -45,6 +47,7 @@ import {
   getDemoRuntimeState,
 } from './domain/simulationFixtures';
 import { generateWinConditionPlan } from './domain/winConditionEngine';
+import { useInterpolatedGameTime } from './hooks/useInterpolatedGameTime';
 import {
   fetchLatestPatchVersion,
   syncFullDdragonCatalog,
@@ -53,6 +56,7 @@ import {
   checkForAppUpdate,
   checkRiotApiKeyHealth,
   deleteClimbGoal,
+  fetchSummonerProfile,
   getAppMeta,
   getAppState,
   getCachedMatches,
@@ -213,11 +217,17 @@ export function App() {
     }
   });
   const [hasTestedHud, setHasTestedHud] = useState(false);
+  const [lastAutoSyncedMatchId, setLastAutoSyncedMatchId] = useState<string | null>(null);
+  const [autoSyncNotice, setAutoSyncNotice] = useState<string | null>(null);
+  const [autoPostGameToken, setAutoPostGameToken] = useState(0);
   const simSelectRef = useRef<HTMLSelectElement | null>(null);
   const simPopoverRef = useRef<HTMLDivElement | null>(null);
   const simButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const lastPhaseRef = useRef<GamePhase | null>(null);
+  const hadActiveMatchRef = useRef(false);
+  const inEndOfGameCycleRef = useRef(false);
+  const endOfGameAtMsRef = useRef<number>(0);
 
   useEffect(() => {
     let active = true;
@@ -301,6 +311,23 @@ export function App() {
         }
         if (state.summonerProfile) {
           setSummonerProfile(state.summonerProfile);
+        }
+        if (state.phase === 'loading' || state.phase === 'in_game') {
+          hadActiveMatchRef.current = true;
+          inEndOfGameCycleRef.current = false;
+        } else if (state.phase === 'idle' && state.gameflowPhase !== 'EndOfGame') {
+          hadActiveMatchRef.current = false;
+          inEndOfGameCycleRef.current = false;
+        }
+        const isEndState =
+          state.phase === 'post_game' ||
+          (hadActiveMatchRef.current && state.gameflowPhase === 'EndOfGame');
+        if (isEndState && !inEndOfGameCycleRef.current) {
+          inEndOfGameCycleRef.current = true;
+          hadActiveMatchRef.current = false;
+          endOfGameAtMsRef.current = Date.now();
+          setAutoPostGameToken((t) => t + 1);
+          setActiveTab('post_game');
         }
         if (state.phase !== lastPhaseRef.current) {
           lastPhaseRef.current = state.phase;
@@ -430,14 +457,33 @@ export function App() {
     return demoScenario === 'idle' ? 'Unassigned' : 'Viego';
   }, [effectiveChampSelect, runtimeState.liveGame, demoScenario]);
 
+  const interpolatedGameTime = useInterpolatedGameTime(
+    runtimeState.liveGame?.gameData.gameTime ?? 0,
+    runtimeState.phase === 'in_game' && Boolean(runtimeState.liveGame)
+  );
+
+  const interpolatedLiveGame = useMemo(
+    () =>
+      runtimeState.liveGame
+        ? {
+            ...runtimeState.liveGame,
+            gameData: {
+              ...runtimeState.liveGame.gameData,
+              gameTime: interpolatedGameTime,
+            },
+          }
+        : null,
+    [runtimeState.liveGame, interpolatedGameTime]
+  );
+
   const objectives = useMemo(() => {
-    if (!runtimeState.liveGame) return [];
+    if (!interpolatedLiveGame) return [];
     return computeObjectiveWindows(
-      runtimeState.liveGame.gameData.gameTime,
-      runtimeState.liveGame.events.Events,
-      runtimeState.liveGame.allPlayers
+      interpolatedLiveGame.gameData.gameTime,
+      interpolatedLiveGame.events.Events,
+      interpolatedLiveGame.allPlayers
     );
-  }, [runtimeState.liveGame]);
+  }, [interpolatedLiveGame]);
 
   const buildPlan = useMemo(() => {
     if (!runtimeState.liveGame) return null;
@@ -446,11 +492,125 @@ export function App() {
   }, [runtimeState.liveGame, playerChampionName]);
 
   const macroCues = useMemo(() => {
-    if (!runtimeState.liveGame) return [];
-    return computeMacroGuidance(runtimeState.liveGame, winPlan, objectives);
-  }, [runtimeState.liveGame, winPlan, objectives]);
+    if (!interpolatedLiveGame) return [];
+    return computeMacroGuidance(interpolatedLiveGame, winPlan, objectives);
+  }, [interpolatedLiveGame, winPlan, objectives]);
 
   const effectiveProfile = summonerProfile ?? runtimeState.summonerProfile;
+
+  const focusGoal = useMemo(
+    () =>
+      climbGoals.find((g) => g.isFocusGoal && g.status === 'active') ??
+      climbGoals.find((g) => g.isFocusGoal) ??
+      null,
+    [climbGoals]
+  );
+
+  const personalStats = useMemo(() => computePersonalChampStats(matches), [matches]);
+
+  const settingsRef = useRef(settings);
+  const profileRef = useRef(effectiveProfile);
+  const matchesRef = useRef(matches);
+  useEffect(() => {
+    settingsRef.current = settings;
+    profileRef.current = effectiveProfile;
+    matchesRef.current = matches;
+  }, [settings, effectiveProfile, matches]);
+
+  useEffect(() => {
+    if (!isTauri || autoPostGameToken === 0) return;
+    const curSettings = settingsRef.current;
+    const curProfile = profileRef.current;
+    if (!curSettings.hasApiKey || !curProfile?.puuid) return;
+
+    let cancelled = false;
+    let activeTimer: number | null = null;
+    const prevTopId = matchesRef.current[0]?.matchId;
+    const cycleEndedAtMs = endOfGameAtMsRef.current || Date.now();
+    // Sequential gaps yielding cumulative 8s, 20s, 45s, 90s, 150s checkpoints
+    const STEP_DELAYS_MS = [8_000, 12_000, 25_000, 45_000, 60_000];
+    let syncedWin: boolean | null = null;
+    let syncedMatchId: string | null = null;
+    let matchUpdated = false;
+    let profileRefreshed = false;
+
+    const scheduleNext = (attemptIndex: number) => {
+      if (cancelled || attemptIndex >= STEP_DELAYS_MS.length) return;
+      activeTimer = window.setTimeout(
+        () => void runSyncAttempt(attemptIndex),
+        STEP_DELAYS_MS[attemptIndex]!
+      );
+    };
+
+    const runSyncAttempt = async (attemptIndex: number) => {
+      if (cancelled) return;
+      const isFinalAttempt = attemptIndex === STEP_DELAYS_MS.length - 1;
+      try {
+        if (!matchUpdated) {
+          const synced = await syncRecentMatches(curProfile.puuid, curSettings.region, 8);
+          if (cancelled) return;
+          const newest = synced[0];
+          const playedAtMs = newest?.playedAt ? Date.parse(newest.playedAt) : Number.NaN;
+          const endedApproxMs =
+            Number.isFinite(playedAtMs) && newest
+              ? playedAtMs + Math.max(newest.durationSeconds, 60) * 1000
+              : null;
+          const recencyOk =
+            endedApproxMs === null || endedApproxMs >= cycleEndedAtMs - 10 * 60 * 1000;
+          if (newest && newest.matchId !== prevTopId && recencyOk) {
+            matchUpdated = true;
+            syncedWin = newest.win;
+            syncedMatchId = newest.matchId;
+            setMatches(synced);
+            setLastAutoSyncedMatchId(newest.matchId);
+            setAutoSyncNotice(null);
+          } else {
+            if (isFinalAttempt) {
+              setAutoSyncNotice(
+                'Riot Match-V5 history has not published this game yet — click Sync Recent Games.'
+              );
+            } else {
+              scheduleNext(attemptIndex + 1);
+            }
+            return;
+          }
+        }
+
+        const riotIdToRefresh = curSettings.riotId.trim() || curProfile.riotId;
+        if (matchUpdated && !profileRefreshed && riotIdToRefresh) {
+          const refreshed = await fetchSummonerProfile(
+            riotIdToRefresh,
+            curSettings.region,
+            syncedWin ?? undefined,
+            syncedMatchId ?? undefined
+          );
+          if (cancelled) return;
+          profileRefreshed = true;
+          setSummonerProfile(refreshed);
+          void loadLpHistory()
+            .then((hist) => {
+              if (!cancelled && hist.length > 0) setLpHistory(hist);
+            })
+            .catch(() => {});
+        }
+      } catch {
+        if (isFinalAttempt && !matchUpdated && !cancelled) {
+          setAutoSyncNotice(
+            'Could not auto-sync post-game history — click Sync Recent Games when ready.'
+          );
+        } else if (!cancelled && (!matchUpdated || !profileRefreshed)) {
+          scheduleNext(attemptIndex + 1);
+        }
+      }
+    };
+
+    scheduleNext(0);
+
+    return () => {
+      cancelled = true;
+      if (activeTimer !== null) window.clearTimeout(activeTimer);
+    };
+  }, [autoPostGameToken, isTauri]);
 
   const rollingSummaries = useMemo(() => {
     if (demoScenario !== 'idle') {
@@ -580,12 +740,29 @@ export function App() {
     const synced = await syncRecentMatches(puuid, settings.region, 8);
     if (synced.length > 0) {
       setMatches(synced);
+      setAutoSyncNotice(null);
     }
   }
 
   async function handleUpsertGoal(goal: ClimbGoal) {
     await upsertClimbGoal(goal);
     setClimbGoals((prev) => [goal, ...prev.filter((g) => g.id !== goal.id)]);
+  }
+
+  async function handleSetFocusGoal(goalId: string) {
+    const previous = climbGoals;
+    const updated = setSingleFocusGoal(previous, goalId);
+    const changed = updated.filter(
+      (g, idx) => Boolean(g.isFocusGoal) !== Boolean(previous[idx]?.isFocusGoal)
+    );
+    setClimbGoals(updated);
+    try {
+      for (const g of changed) {
+        await upsertClimbGoal(g);
+      }
+    } catch {
+      setClimbGoals(previous);
+    }
   }
 
   async function handleDeleteGoal(goalId: string) {
@@ -635,7 +812,7 @@ export function App() {
         >
           <CompactHudBar
             phase={runtimeState.phase}
-            gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
+            gameTime={interpolatedGameTime}
             objectives={objectives}
             buildPlan={buildPlan}
             topCue={macroCues[0] ?? null}
@@ -945,6 +1122,8 @@ export function App() {
                 patchVersion={patchVersion}
                 summonerProfile={effectiveProfile}
                 highEloMeta={highEloMeta}
+                personalStats={personalStats}
+                focusGoal={focusGoal}
               />
             )}
             {activeTab === 'win_plan' && (
@@ -954,11 +1133,12 @@ export function App() {
                 championName={playerChampionName}
                 patchVersion={patchVersion}
                 aiConfig={settings.aiCoach}
+                focusGoal={focusGoal}
               />
             )}
             {activeTab === 'live_coach' && (
               <LiveCoachView
-                liveData={runtimeState.liveGame}
+                liveData={interpolatedLiveGame}
                 objectives={objectives}
                 buildPlan={buildPlan}
                 macroCues={macroCues}
@@ -975,6 +1155,9 @@ export function App() {
                 appVersion={appMeta.version}
                 aiConfig={settings.aiCoach}
                 canSyncLive={canSyncLive}
+                focusGoal={focusGoal}
+                lastAutoSyncedMatchId={lastAutoSyncedMatchId}
+                autoSyncNotice={autoSyncNotice}
                 onSyncMatches={handleSyncMatches}
               />
             )}
@@ -991,6 +1174,7 @@ export function App() {
                 canSyncLive={canSyncLive}
                 onUpsertGoal={handleUpsertGoal}
                 onDeleteGoal={handleDeleteGoal}
+                onSetFocusGoal={handleSetFocusGoal}
                 onRefreshHighElo={handleRefreshHighElo}
               />
             )}

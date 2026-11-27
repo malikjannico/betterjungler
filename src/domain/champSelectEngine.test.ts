@@ -7,6 +7,7 @@ import {
 } from '../data/jungleKnowledgePack';
 import {
   analyzeTeamComposition,
+  computePersonalChampStats,
   inferEnemyJunglerId,
   recommendJunglePicks,
   sanitizeChampSelectSession,
@@ -140,5 +141,39 @@ describe('champSelectEngine', () => {
       },
     ]);
     expect(soloDuoHiddenInferred).toBe(234);
+  });
+
+  it('weights personal rolling win rate when a jungler has at least 3 recent games', () => {
+    const personalStats = computePersonalChampStats([
+      { championId: 234, win: true }, // Viego: 4G 100% WR
+      { championId: 234, win: true },
+      { championId: 234, win: true },
+      { championId: 234, win: true },
+      { championId: 121, win: true }, // Kha'Zix: 2G (below >= 3 threshold)
+      { championId: 121, win: true },
+      { championId: 64, win: false }, // Lee Sin: 4G 0% WR (negative bias warning)
+      { championId: 64, win: false },
+      { championId: 64, win: false },
+      { championId: 64, win: false },
+    ]);
+
+    const recs = recommendJunglePicks({
+      allyChampionIds: [58, 61, 145, 111],
+      enemyChampionIds: [266, 56, 517, 222, 16],
+      bannedChampionIds: [],
+      masteryChampionIds: [234, 121, 64],
+      personalStats,
+    });
+
+    const viego = recs.find((r) => r.champion.championId === 234);
+    const khazix = recs.find((r) => r.champion.championId === 121);
+    const leeSin = recs.find((r) => r.champion.championId === 64);
+    expect(viego?.reasons.some((r) => r.includes('Your 100% WR (4G)'))).toBe(true);
+    if (khazix) {
+      expect(khazix.reasons.some((r) => r.includes('Your '))).toBe(false);
+    }
+    if (leeSin) {
+      expect(leeSin.warnings.some((w) => w.includes('Low personal WR: 0% (4G)'))).toBe(true);
+    }
   });
 });

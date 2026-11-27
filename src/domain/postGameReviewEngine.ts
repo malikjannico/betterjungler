@@ -67,7 +67,18 @@ export function analyzePostGameMatch(
   const frame10 = getFrameAtMinute(match, 10);
   const frame15 = getFrameAtMinute(match, 15);
 
+  const exactFrame5 = match.frames.find((f) => f.minute === 5);
+  const frame6 = match.frames.find((f) => f.minute === 6);
   const csAt4 = frame4?.cs ?? Math.round(csPerMin * 4);
+  const csAt5 =
+    match.durationSeconds < 300
+      ? undefined
+      : exactFrame5?.cs ??
+        (frame4 && frame6 && frame4.minute === 4
+          ? Math.round((frame4.cs + frame6.cs) / 2)
+          : undefined);
+  const exactFrame10 = match.frames.find((f) => f.minute === 10 || f.minute === 11);
+  const csAt10 = match.durationSeconds < 600 ? undefined : exactFrame10?.cs;
   const goldDiffAt10 = frame10 ? frame10.totalGold - frame10.enemyJunglerGold : 0;
   const goldDiffAt15 = frame15 ? frame15.totalGold - frame15.enemyJunglerGold : 0;
   const xpDiffAt15 = frame15 ? frame15.xp - frame15.enemyJunglerXp : 0;
@@ -110,6 +121,8 @@ export function analyzePostGameMatch(
   const kpis: PostGameKpis = {
     csPerMin,
     csAt4,
+    csAt5,
+    csAt10,
     goldDiffAt10,
     goldDiffAt15,
     xpDiffAt15,

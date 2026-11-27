@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import pkg from '../package.json';
 import { App } from './App';
 import { CompactHudBar } from './components/CompactHudBar';
 import { LiquidGlassFilter } from './components/LiquidGlassFilter';
@@ -27,6 +28,10 @@ async function renderAppAndFlush() {
 }
 
 describe('BetterJungler App Integration', () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
   it('renders sidebar rail navigation, preserves Solo/Duo anonymity, and synchronizes RiftMap + chart scrubber', async () => {
     await renderAppAndFlush();
 
@@ -90,7 +95,7 @@ describe('BetterJungler App Integration', () => {
         reader.readAsText(exportedBlob!);
       });
       expect(exportedText).toContain('"schemaVersion": 1');
-      expect(exportedText).toContain('"appVersion": "0.3.0"');
+      expect(exportedText).toContain(`"appVersion": "${pkg.version}"`);
       expect(exportedText).not.toContain('puuid');
       expect(exportedText).not.toContain('summonerName');
       expect(exportedText).not.toContain('riotId');
@@ -110,10 +115,25 @@ describe('BetterJungler App Integration', () => {
     fireEvent.keyDown(chartSlider, { key: 'ArrowRight' });
     expect(screen.getByText(/Jungle Path & Timeline Replay \(0m – 2m\)/i)).toBeInTheDocument();
 
-    // Climb Ladder & Goals
+    // Climb Ladder & Goals + Match Focus roundtrip across views
     fireEvent.click(screen.getByRole('button', { name: /Climb & Goals/i }));
     expect(screen.getByText(/Division Climb Ladder/i)).toBeInTheDocument();
     expect(screen.getByText(/Recommended Next Focus Goals/i)).toBeInTheDocument();
+
+    const pinButtons = screen.getAllByRole('button', { name: /Pin Goal/i });
+    expect(pinButtons.length).toBeGreaterThan(0);
+    fireEvent.click(pinButtons[0]!);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const focusBtn = screen.getByRole('button', { name: /Set as Match Focus/i });
+    fireEvent.click(focusBtn);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
+    expect(screen.getByText(/Last Game Takeaway/i)).toBeInTheDocument();
+    expect(screen.getByText(/Focus (PASS|MISS)/i)).toBeInTheDocument();
   });
 
   it('toggles into Compact HUD via button/expand roundtrip, Ctrl+K Simulator with Escape focus return, and renders LiquidGlassFilter', async () => {
@@ -171,17 +191,17 @@ describe('BetterJungler App Integration', () => {
     try {
       await renderAppAndFlush();
       // Browser demo starts in champ_select -> What's New waits safely until idle
-      expect(screen.queryByText(/What's New in v0\.2\.0/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/What's New in v/i)).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: /Simulator/i }));
       fireEvent.change(screen.getByLabelText('Simulation scenario'), {
         target: { value: 'idle' },
       });
 
-      expect(screen.getByText(/What's New in v0\.3\.0/i)).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(`What's New in v${pkg.version.replaceAll('.', '\\.')}`, 'i'))).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: "Dismiss What's New" }));
-      expect(screen.queryByText(/What's New in v0\.3\.0/i)).not.toBeInTheDocument();
-      expect(localStorage.getItem('betterjungler_last_seen_version')).toBe('0.3.0');
+      expect(screen.queryByText(new RegExp(`What's New in v${pkg.version.replaceAll('.', '\\.')}`, 'i'))).not.toBeInTheDocument();
+      expect(localStorage.getItem('betterjungler_last_seen_version')).toBe(pkg.version);
 
       expect(screen.getByText(/First-Run Windows Setup/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Dismiss setup checklist' }));
@@ -189,7 +209,7 @@ describe('BetterJungler App Integration', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
       expect(screen.getByText(/About & Automatic Updates/i)).toBeInTheDocument();
-      expect(screen.getByText('v0.3.0')).toBeInTheDocument();
+      expect(screen.getByText(`v${pkg.version}`)).toBeInTheDocument();
 
       // Verify changing HUD scale does not wipe unsaved Riot ID edits
       const riotIdInput = screen.getByLabelText(/Riot ID/i) as HTMLInputElement;

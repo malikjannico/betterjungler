@@ -147,21 +147,32 @@ async fn sync_ddragon(state: State<'_, Arc<SharedState>>) -> AppResult<String> {
     Ok(patch)
 }
 
-fn record_lp_if_changed(conn: &Connection, profile: &SummonerProfileSummary) {
+fn record_lp_if_changed(
+    conn: &Connection,
+    profile: &SummonerProfileSummary,
+    recent_win: Option<bool>,
+    match_id: Option<String>,
+) {
     if profile.tier == "UNRANKED" {
         return;
+    }
+    if let Some(ref mid) = match_id {
+        if storage::has_lp_snapshot_for_match(conn, mid) {
+            return;
+        }
     }
     let abs_lp = tier_rank_to_absolute_lp(&profile.tier, &profile.rank, profile.league_points);
     let latest = storage::get_latest_lp_snapshot(conn).ok().flatten();
     let should_insert = match &latest {
-        Some(prev) => prev.absolute_lp != abs_lp,
+        Some(prev) => prev.absolute_lp != abs_lp || recent_win.is_some(),
         None => true,
     };
     if should_insert {
-        let won = latest
-            .as_ref()
-            .map(|prev| abs_lp >= prev.absolute_lp)
-            .unwrap_or_else(|| profile.wins >= profile.losses);
+        let won = match &latest {
+            Some(prev) if abs_lp > prev.absolute_lp => true,
+            Some(prev) if abs_lp < prev.absolute_lp => false,
+            _ => recent_win.unwrap_or_else(|| profile.wins >= profile.losses),
+        };
         let _ = storage::append_lp_snapshot(
             conn,
             &LpHistoryRecord {
@@ -171,6 +182,7 @@ fn record_lp_if_changed(conn: &Connection, profile: &SummonerProfileSummary) {
                 league_points: profile.league_points,
                 absolute_lp: abs_lp,
                 win: won,
+                match_id,
             },
         );
     }
@@ -181,6 +193,8 @@ async fn fetch_summoner_profile(
     state: State<'_, Arc<SharedState>>,
     riot_id: String,
     region: String,
+    recent_win: Option<bool>,
+    match_id: Option<String>,
 ) -> AppResult<SummonerProfileSummary> {
     let api_key = storage::load_riot_api_key()?;
     let profile = riot_api::fetch_summoner_profile(
@@ -193,7 +207,7 @@ async fn fetch_summoner_profile(
     .await?;
 
     if let Ok(conn) = state.db.lock() {
-        record_lp_if_changed(&conn, &profile);
+        record_lp_if_changed(&conn, &profile, recent_win, match_id);
     }
     if let Ok(mut rt) = state.runtime.lock() {
         rt.summoner_profile = Some(profile.clone());
@@ -216,7 +230,7 @@ async fn get_lcu_profile(
     })?;
     let profile = lcu::fetch_lcu_profile(&state.loopback_client, &creds, &region).await?;
     if let Ok(conn) = state.db.lock() {
-        record_lp_if_changed(&conn, &profile);
+        record_lp_if_changed(&conn, &profile, None, None);
     }
     if let Ok(mut rt) = state.runtime.lock() {
         rt.summoner_profile = Some(profile.clone());
@@ -925,4 +939,66 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running BetterJungler");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_profile(tier: &str, rank: &str, lp: i32) -> SummonerProfileSummary {
+        SummonerProfileSummary {
+            riot_id: "Tester#EUW".to_string(),
+            puuid: "puuid-test".to_string(),
+            region: "EUW1".to_string(),
+            summoner_level: 120,
+            tier: tier.to_string(),
+            rank: rank.to_string(),
+            league_points: lp,
+            wins: 10,
+            losses: 8,
+            top_mastery_champion_ids: vec![234],
+        }
+    }
+
+    #[test]
+    fn lp_recorder_deduplicates_by_match_id_and_captures_zero_lp_demotion_shield() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        storage::run_migrations(&conn).expect("migrations");
+
+        // Initial snapshot at Gold IV 20 LP for game M1
+        record_lp_if_changed(
+            &conn,
+            &sample_profile("GOLD", "IV", 20),
+            Some(true),
+            Some("M1".to_string()),
+        );
+        // Drop to 0 LP even if caller passes stale Some(true)
+        record_lp_if_changed(
+            &conn,
+            &sample_profile("GOLD", "IV", 0),
+            Some(true),
+            Some("M2".to_string()),
+        );
+        // Demotion-shielded loss stays at 0 LP for M3
+        record_lp_if_changed(
+            &conn,
+            &sample_profile("GOLD", "IV", 0),
+            Some(false),
+            Some("M3".to_string()),
+        );
+        // Duplicate call with M3 must be ignored
+        record_lp_if_changed(
+            &conn,
+            &sample_profile("GOLD", "IV", 0),
+            Some(false),
+            Some("M3".to_string()),
+        );
+
+        let hist = storage::list_lp_history(&conn, 10).expect("list lp");
+        assert_eq!(hist.len(), 3);
+        assert!(hist[0].win);
+        assert!(!hist[1].win);
+        assert!(!hist[2].win);
+        assert_eq!(hist[2].match_id.as_deref(), Some("M3"));
+    }
 }

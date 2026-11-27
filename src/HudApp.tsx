@@ -9,6 +9,7 @@ import {
   resolveSelfPlayer,
 } from './domain/liveCoachEngine';
 import { generateWinConditionPlan } from './domain/winConditionEngine';
+import { useInterpolatedGameTime } from './hooks/useInterpolatedGameTime';
 import {
   getAppState,
   loadSettings,
@@ -87,14 +88,30 @@ export function HudApp() {
     };
   }, []);
 
+  const interpolatedTime = useInterpolatedGameTime(
+    runtimeState.liveGame?.gameData.gameTime ?? 0,
+    runtimeState.phase === 'in_game' && Boolean(runtimeState.liveGame)
+  );
+
+  const liveGameSynced = useMemo(
+    () =>
+      runtimeState.liveGame
+        ? {
+            ...runtimeState.liveGame,
+            gameData: { ...runtimeState.liveGame.gameData, gameTime: interpolatedTime },
+          }
+        : null,
+    [runtimeState.liveGame, interpolatedTime]
+  );
+
   const objectives = useMemo(() => {
-    if (!runtimeState.liveGame) return [];
+    if (!liveGameSynced) return [];
     return computeObjectiveWindows(
-      runtimeState.liveGame.gameData.gameTime,
-      runtimeState.liveGame.events.Events,
-      runtimeState.liveGame.allPlayers
+      liveGameSynced.gameData.gameTime,
+      liveGameSynced.events.Events,
+      liveGameSynced.allPlayers
     );
-  }, [runtimeState.liveGame]);
+  }, [liveGameSynced]);
 
   const winPlan = useMemo(() => {
     const cs = runtimeState.champSelect;
@@ -125,9 +142,9 @@ export function HudApp() {
   }, [runtimeState.liveGame]);
 
   const macroCues = useMemo(() => {
-    if (!runtimeState.liveGame) return [];
-    return computeMacroGuidance(runtimeState.liveGame, winPlan, objectives);
-  }, [runtimeState.liveGame, winPlan, objectives]);
+    if (!liveGameSynced) return [];
+    return computeMacroGuidance(liveGameSynced, winPlan, objectives);
+  }, [liveGameSynced, winPlan, objectives]);
 
   const hudStyle = {
     '--hud-alpha': String(Math.max(0.5, Math.min(1, opacity / 100))),
@@ -137,7 +154,7 @@ export function HudApp() {
     <div style={hudStyle} className="h-screen w-screen bg-transparent p-0">
       <CompactHudBar
         phase={runtimeState.phase}
-        gameTime={runtimeState.liveGame?.gameData.gameTime ?? 0}
+        gameTime={interpolatedTime}
         objectives={objectives}
         buildPlan={buildPlan}
         topCue={macroCues[0] ?? null}

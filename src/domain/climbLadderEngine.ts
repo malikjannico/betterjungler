@@ -263,3 +263,99 @@ export function evaluateDivisionProgress(
     suggestedGoals,
   };
 }
+
+/**
+ * Toggles a single Match Focus goal across the active goal list (at most one active focus).
+ */
+export function setSingleFocusGoal(goals: ClimbGoal[], goalId: string | null): ClimbGoal[] {
+  return goals.map((goal) => ({
+    ...goal,
+    isFocusGoal: goalId !== null && goal.id === goalId && !goal.isFocusGoal,
+  }));
+}
+
+export interface FocusGoalMatchEvaluation {
+  passed: boolean;
+  actualValue: number;
+  targetValue: number;
+  deltaLabel: string;
+}
+
+/**
+ * Grades a Match Focus goal directly against a completed Post-Game Review report.
+ */
+export function evaluateFocusGoalAgainstMatch(
+  goal: ClimbGoal,
+  kpis: {
+    csPerMin: number;
+    goldDiffAt15: number;
+    objectiveSharePct: number;
+    preObjectiveDeaths: number;
+    visionPerMin: number;
+    killParticipationPct: number;
+  }
+): FocusGoalMatchEvaluation {
+  const raw = kpis[goal.metric];
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return {
+      passed: false,
+      actualValue: 0,
+      targetValue: goal.targetValue,
+      deltaLabel: 'Metric unavailable',
+    };
+  }
+  const decimals = goal.metric === 'visionPerMin' ? 2 : goal.metric === 'csPerMin' ? 1 : 0;
+  const actualValue = roundTo(raw, decimals);
+  const passed = goal.lowerIsBetter
+    ? actualValue <= goal.targetValue
+    : actualValue >= goal.targetValue;
+  const diff = actualValue - goal.targetValue;
+  const roundedDiff = roundTo(Math.abs(diff), decimals);
+  const unitSuffix = goal.unit ? ` ${goal.unit}` : '';
+  const deltaLabel = passed
+    ? goal.lowerIsBetter
+      ? `Cleared target (${actualValue} <= ${goal.targetValue}${unitSuffix})`
+      : `Cleared target (${actualValue} >= ${goal.targetValue}${unitSuffix})`
+    : goal.lowerIsBetter
+      ? `${roundedDiff}${unitSuffix} above limit`
+      : `${roundedDiff}${unitSuffix} short`;
+
+  return {
+    passed,
+    actualValue,
+    targetValue: goal.targetValue,
+    deltaLabel,
+  };
+}
+
+const SESSION_TILT_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * Returns true when the three most recent recorded matches are consecutive losses
+ * within a single session window (4h span when match timestamps are available).
+ */
+export function isSessionTilting(
+  matches: ReadonlyArray<{ win: boolean; playedAt?: string }>,
+  referenceNowMs = Date.now()
+): boolean {
+  if (matches.length < 3) return false;
+  const hasAllDates = matches.every((m) => m.playedAt && !Number.isNaN(Date.parse(m.playedAt)));
+  const ordered = hasAllDates
+    ? [...matches].sort(
+        (a, b) => Date.parse(b.playedAt!) - Date.parse(a.playedAt!)
+      )
+    : matches;
+  const lastThree = ordered.slice(0, 3);
+  if (!lastThree.every((match) => !match.win)) return false;
+  if (hasAllDates) {
+    const newestMs = Date.parse(lastThree[0]!.playedAt!);
+    const oldestInStreakMs = Date.parse(lastThree[2]!.playedAt!);
+    if (
+      newestMs - oldestInStreakMs > SESSION_TILT_WINDOW_MS ||
+      referenceNowMs - newestMs > SESSION_TILT_WINDOW_MS
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
