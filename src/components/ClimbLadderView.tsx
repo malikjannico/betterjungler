@@ -1,6 +1,7 @@
 import { CheckCircle2, Circle, Trash2, TrendingUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { findJungleChampionById } from '../data/jungleKnowledgePack';
+import { formatChampionName } from '../domain/championNames';
 import {
   KPI_META,
   MIN_GOAL_COMPLETION_GAMES,
@@ -31,6 +32,7 @@ interface ClimbLadderViewProps {
   targetDivision: string;
   summaries: MatchSummaryRecord[];
   matches: MatchV5Detail[];
+  offRoleExcludedCount?: number;
   lpHistory: LpHistoryPoint[];
   patchVersion: string;
   goals: ClimbGoal[];
@@ -65,6 +67,7 @@ export function ClimbLadderView({
   targetDivision,
   summaries,
   matches,
+  offRoleExcludedCount = 0,
   lpHistory,
   patchVersion,
   goals,
@@ -190,18 +193,22 @@ export function ClimbLadderView({
         <EmptyState
           icon={TrendingUp}
           title={
-            !accountReady
-              ? 'Connect League Client or your Riot ID to begin'
-              : emptyReason === 'needs_api_key'
-                ? 'Save a Riot API key to sync Match-V5 history'
-                : 'No ranked jungle matches synced yet'
+            emptyReason === 'only_off_role_matches'
+              ? 'No ranked jungle matches in recent games'
+              : !accountReady
+                ? 'Connect League Client or your Riot ID to begin'
+                : emptyReason === 'needs_api_key'
+                  ? 'Save a Riot API key to sync Match-V5 history'
+                  : 'No ranked jungle matches synced yet'
           }
           description={
-            !accountReady
-              ? 'Open League of Legends for Keyless LCU live coaching, or save your Riot ID & Personal API Key in Settings to compute your rolling jungle KPIs and climb goals.'
-              : emptyReason === 'needs_api_key'
-                ? 'Your profile is detected via the League Client. Add a personal Riot API key in Settings to download Match-V5 timelines and benchmark your last 15 games.'
-                : 'Sync your recent ranked jungle matches to inspect KPI trends, death heatmaps, and bottleneck climb goals.'
+            emptyReason === 'only_off_role_matches'
+              ? `${offRoleExcludedCount} off-role ${offRoleExcludedCount === 1 ? 'game was' : 'games were'} synced. Climb benchmarks evaluate Jungle games only — inspect your off-role stats in Post-Game Review or sync more games.`
+              : !accountReady
+                ? 'Open League of Legends for Keyless LCU live coaching, or save your Riot ID & Personal API Key in Settings to compute your rolling jungle KPIs and climb goals.'
+                : emptyReason === 'needs_api_key'
+                  ? 'Your profile is detected via the League Client. Add a personal Riot API key in Settings to download Match-V5 timelines and benchmark your last 15 games.'
+                  : 'Sync your recent ranked jungle matches to inspect KPI trends, death heatmaps, and bottleneck climb goals.'
           }
           action={
             canSyncLive && onSyncMatches
@@ -307,7 +314,7 @@ export function ClimbLadderView({
               <span className="tabular-nums font-semibold text-white/[0.92]">
                 {evaluation.matchCount}
               </span>{' '}
-              ranked {evaluation.matchCount === 1 ? 'match' : 'matches'} (
+              ranked jungle {evaluation.matchCount === 1 ? 'match' : 'matches'} (
               <span className="tabular-nums font-semibold text-white/[0.92]">
                 {evaluation.winRatePct}% WR
               </span>
@@ -316,6 +323,12 @@ export function ClimbLadderView({
                 <span className="text-white/[0.45]">
                   {' '}
                   · {evaluation.matchCount}/{MIN_GOAL_COMPLETION_GAMES} games toward reliable goal lock-in
+                </span>
+              )}
+              {offRoleExcludedCount > 0 && (
+                <span className="text-white/[0.45]">
+                  {' '}
+                  · {offRoleExcludedCount} off-role game{offRoleExcludedCount === 1 ? '' : 's'} excluded
                 </span>
               )}
             </p>
@@ -605,12 +618,14 @@ export function ClimbLadderView({
                 <div className="flex flex-wrap gap-1.5">
                   {highEloMeta.champions.slice(0, 5).map((stat) => {
                     const champ = findJungleChampionById(stat.championId);
+                    const champLabel =
+                      champ?.name ?? formatChampionName(undefined, stat.championId);
                     return (
                       <span
                         key={stat.championId}
                         className="lg-inset px-2.5 py-1 text-white/[0.85]"
                       >
-                        {champ?.name ?? `#${stat.championId}`}:{' '}
+                        {champLabel}:{' '}
                         <span className="font-semibold text-white">{stat.winRate}%</span> (
                         {stat.games}g)
                       </span>

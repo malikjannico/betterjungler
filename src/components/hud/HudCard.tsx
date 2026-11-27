@@ -9,7 +9,7 @@ interface HudCardProps {
 }
 
 /**
- * Independent translucent floating HUD card with crisp double edge stroke for visibility over bright Rift terrain.
+ * Sharp broadcast-inspired translucent HUD plate with high-contrast outer keyline.
  */
 export function HudCard({
   children,
@@ -21,9 +21,9 @@ export function HudCard({
   return (
     <div
       data-testid={testId}
-      className={`hud-card text-xs text-white/[0.92] ${
-        pill ? '!rounded-full' : ''
-      } ${urgent ? 'ring-1 ring-amber-400/50' : ''} ${className}`}
+      className={`hud-card text-xs text-white/[0.94] ${
+        pill ? 'rounded-[3px]' : ''
+      } ${urgent ? 'ring-1 ring-amber-400/70' : ''} ${className}`}
     >
       {children}
     </div>

@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from 'react';
+import { formatChampionName } from '../domain/championNames';
 import { formatClock } from '../domain/liveCoachEngine';
 import { buildGoldXpSeries } from '../domain/trendAnalyticsEngine';
 import type { MatchV5Detail } from '../types/riot';
@@ -70,7 +71,8 @@ export function GoldXpDiffChart({
     <GlassSurface className="p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-semibold text-white">
-          {metric === 'goldDiff' ? 'Gold' : 'XP'} Diff vs {match.enemyJunglerName}
+          {metric === 'goldDiff' ? 'Gold' : 'XP'} Diff vs{' '}
+          {formatChampionName(match.enemyJunglerName, match.enemyJunglerChampionId)}
         </h3>
 
         <div className="flex items-center gap-3 text-[11px]">

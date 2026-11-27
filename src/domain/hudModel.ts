@@ -7,6 +7,15 @@ import type {
 } from '../types/coaching';
 import type { GamePhase } from '../types/riot';
 
+export type ObjectiveBadgeKind =
+  | 'scuttle'
+  | 'dragon'
+  | 'baron'
+  | 'grubs'
+  | 'herald'
+  | 'atakhan'
+  | 'objective';
+
 export interface HudStatusChip {
   dotTone: 'idle' | 'active' | 'urgent';
   label: string;
@@ -20,15 +29,20 @@ export interface HudRouteCard {
 }
 
 export interface HudObjectiveCard {
+  kind: ObjectiveBadgeKind;
   name: string;
+  shortName: string;
   timerText: string;
   isLive: boolean;
   isPrep: boolean;
   urgencyPct: number;
   actionChip: string;
   secondary?: {
+    kind: ObjectiveBadgeKind;
     name: string;
+    shortName: string;
     timerText: string;
+    isLive: boolean;
   };
 }
 
@@ -65,6 +79,36 @@ export interface DeriveHudCardsInput {
   hotkey: string;
 }
 
+function inferObjectiveBadgeKind(obj: ObjectiveWindow): ObjectiveBadgeKind {
+  const hay = `${obj.id} ${obj.name}`.toLowerCase();
+  if (hay.includes('scuttle') || hay.includes('scuttler')) return 'scuttle';
+  if (hay.includes('baron') || hay.includes('nashor')) return 'baron';
+  if (hay.includes('grub')) return 'grubs';
+  if (hay.includes('herald')) return 'herald';
+  if (hay.includes('atakhan')) return 'atakhan';
+  if (hay.includes('dragon') || hay.includes('drake')) return 'dragon';
+  return 'objective';
+}
+
+function toShortObjectiveName(kind: ObjectiveBadgeKind): string {
+  switch (kind) {
+    case 'scuttle':
+      return 'SCT';
+    case 'dragon':
+      return 'DRG';
+    case 'baron':
+      return 'BRN';
+    case 'grubs':
+      return 'GRB';
+    case 'herald':
+      return 'HLD';
+    case 'atakhan':
+      return 'ATK';
+    case 'objective':
+      return 'OBJ';
+  }
+}
+
 function toShortActionChip(obj: ObjectiveWindow): string {
   if (obj.status === 'live') return 'CONTEST NOW';
   if (obj.status === 'prep_vision') return 'RESET · WARD · SWEEP';
@@ -80,7 +124,7 @@ function computeUrgencyPct(obj: ObjectiveWindow): number {
 }
 
 /**
- * Pure transformer driving the multi-card transparent floating HUD.
+ * Pure transformer driving the broadcast-inspired translucent Compact HUD.
  */
 export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
   const primaryObj = input.objectives[0] ?? null;
@@ -96,16 +140,15 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
         : 'idle',
     label:
       input.phase === 'in_game' && input.gameTime > 0
-        ? `Live · ${formatClock(input.gameTime)}`
+        ? `LIVE ${formatClock(input.gameTime)}`
         : input.phase === 'loading'
-          ? 'Loading match'
+          ? 'LOADING MATCH'
           : input.phase === 'champ_select'
-            ? 'Champ select'
+            ? 'CHAMP SELECT'
             : 'HUD armed · appears in game',
     hotkey: input.hotkey,
   };
 
-  // Pre-1:30 / loading route card replaces Objective + Buy telemetry while spawning
   const showOpeningRoute =
     Boolean(input.openingRoute) &&
     (input.phase === 'loading' || (input.phase === 'in_game' && input.gameTime < 90));
@@ -119,10 +162,15 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
         }
       : null;
 
+  const primaryKind = primaryObj ? inferObjectiveBadgeKind(primaryObj) : null;
+  const secondaryKind = secondaryObj ? inferObjectiveBadgeKind(secondaryObj) : null;
+
   const objectiveCard: HudObjectiveCard | null =
-    !showOpeningRoute && input.phase === 'in_game' && primaryObj
+    !showOpeningRoute && input.phase === 'in_game' && primaryObj && primaryKind
       ? {
+          kind: primaryKind,
           name: primaryObj.name,
+          shortName: toShortObjectiveName(primaryKind),
           timerText:
             primaryObj.status === 'live'
               ? 'LIVE'
@@ -131,15 +179,19 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
           isPrep: primaryObj.status === 'prep_vision',
           urgencyPct: computeUrgencyPct(primaryObj),
           actionChip: toShortActionChip(primaryObj),
-          secondary: secondaryObj
-            ? {
-                name: secondaryObj.name,
-                timerText:
-                  secondaryObj.status === 'live'
-                    ? 'LIVE'
-                    : formatClock(secondaryObj.secondsRemaining),
-              }
-            : undefined,
+          secondary:
+            secondaryObj && secondaryKind
+              ? {
+                  kind: secondaryKind,
+                  name: secondaryObj.name,
+                  shortName: toShortObjectiveName(secondaryKind),
+                  timerText:
+                    secondaryObj.status === 'live'
+                      ? 'LIVE'
+                      : formatClock(secondaryObj.secondsRemaining),
+                  isLive: secondaryObj.status === 'live',
+                }
+              : undefined,
         }
       : null;
 

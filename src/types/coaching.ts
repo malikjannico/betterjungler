@@ -512,9 +512,11 @@ export interface PostGameReviewReport {
   matchId: string;
   championName: string;
   enemyJunglerName: string;
+  role: string;
+  isJungle: boolean;
   win: boolean;
   durationSeconds: number;
-  grade: 'S' | 'A' | 'B' | 'C' | 'D';
+  grade: 'S' | 'A' | 'B' | 'C' | 'D' | 'N/A';
   kpis: PostGameKpis;
   highlights: ReviewFinding[];
   mistakes: ReviewFinding[];

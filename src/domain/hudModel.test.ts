@@ -98,9 +98,45 @@ describe('hudModel', () => {
     });
 
     expect(mid.routeCard).toBeNull();
+    expect(mid.objectiveCard?.kind).toBe('dragon');
+    expect(mid.objectiveCard?.shortName).toBe('DRG');
     expect(mid.objectiveCard?.actionChip).toBe('RESET · WARD · SWEEP');
     expect(mid.objectiveCard?.timerText).toBe('0:42');
     expect(mid.buyCard?.goldStatusText).toBe('−420g');
     expect(mid.cueCard?.urgent).toBe(true);
+
+    const earlyPostRoute = deriveHudCards({
+      phase: 'in_game',
+      gameTime: 150,
+      objectives: [
+        {
+          id: 'scuttle',
+          name: 'Rift Scuttler',
+          status: 'live',
+          secondsRemaining: 0,
+          nextSpawnFormatted: '03:30',
+          priority: 'high',
+          actionText: 'Secure top/bot river crab',
+        },
+        {
+          id: 'dragon',
+          name: 'Elemental Dragon',
+          status: 'upcoming',
+          secondsRemaining: 150,
+          nextSpawnFormatted: '05:00',
+          priority: 'medium',
+          actionText: 'Track first spawn',
+        },
+      ],
+      buildPlan: null,
+      topCue: null,
+      openingRoute: clear1,
+      hotkey: 'Alt+J',
+    });
+
+    expect(earlyPostRoute.objectiveCard?.kind).toBe('scuttle');
+    expect(earlyPostRoute.objectiveCard?.shortName).toBe('SCT');
+    expect(earlyPostRoute.objectiveCard?.secondary?.kind).toBe('dragon');
+    expect(earlyPostRoute.objectiveCard?.secondary?.shortName).toBe('DRG');
   });
 });

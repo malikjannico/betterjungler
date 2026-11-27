@@ -151,4 +151,30 @@ describe('sessionContext', () => {
     expect(ctx.liveCoach.status).toBe('ready');
     expect(ctx.winPlan).toEqual({ status: 'empty', reason: 'no_completed_draft' });
   });
+
+  it('excludes off-role (ADC/Top/Mid/Support) matches from Climb jungle summaries while retaining Post-Game display', () => {
+    const jgMatch = { ...DEMO_POST_GAME_MATCHES[0]!, role: 'JUNGLE' };
+    const adcMatch = {
+      ...DEMO_POST_GAME_MATCHES[1]!,
+      matchId: 'EUW1_ADC_OFFROLE',
+      role: 'BOTTOM',
+    };
+    const ctx = deriveSessionContext({
+      demoScenario: 'idle',
+      liveState: null,
+      settings: { ...BASE_SETTINGS, hasApiKey: true, riotId: 'Jungler#EUW' },
+      summonerProfile: null,
+      matches: [jgMatch, adcMatch],
+      lpHistory: [],
+      highEloMeta: null,
+    });
+
+    expect(ctx.postGame.status).toBe('ready');
+    if (ctx.postGame.status === 'ready') {
+      expect(ctx.postGame.data.matches).toHaveLength(2);
+    }
+    expect(ctx.climb.jungleMatches).toHaveLength(1);
+    expect(ctx.climb.summaries).toHaveLength(1);
+    expect(ctx.climb.offRoleExcludedCount).toBe(1);
+  });
 });

@@ -1,6 +1,7 @@
 import { Map as MapIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
+import { formatChampionName } from '../domain/championNames';
 import { synthesizeDemoWinConBrief } from '../domain/aiCoachFallback';
 import type { EmptyReason } from '../domain/sessionContext';
 import { generateAiDebrief } from '../services/tauriBridge';
@@ -84,11 +85,12 @@ export function WinConditionView({
 
   async function handleGenerateBrief() {
     if (!plan || !mapSide || !championName) return;
+    const displayChampion = formatChampionName(championName);
     setAiLoading(true);
     setAiError(null);
     try {
       const ctx = JSON.stringify({
-        championName,
+        championName: displayChampion,
         mapSide,
         strongSide: plan.strongSide,
         allyArchetype: plan.allyAnalysis.archetype,
@@ -100,7 +102,7 @@ export function WinConditionView({
       setAiBrief(text);
     } catch (err) {
       if (err instanceof Error && err.message === 'DEMO_FALLBACK') {
-        setAiBrief(synthesizeDemoWinConBrief(plan, championName));
+        setAiBrief(synthesizeDemoWinConBrief(plan, displayChampion));
       } else {
         setAiError(err instanceof Error ? err.message : 'AI Win-Con Brief failed.');
       }
@@ -129,7 +131,7 @@ export function WinConditionView({
         <div className="grid gap-6 md:grid-cols-2">
           <div>
             <div className="t-caption font-medium text-white/[0.55]">
-              How we win · {championName}
+              How we win · {formatChampionName(championName)}
             </div>
             <p className="t-body mt-1.5 text-white/[0.92]">
               {plan.primaryWinCondition}
@@ -188,7 +190,7 @@ export function WinConditionView({
               Enemy jungle opening &amp; lane gankability
             </div>
             <h3 className="t-title mt-0.5 text-white/[0.92]">
-              vs {plan.enemyJunglePlaybook.enemyChampionName}
+              vs {formatChampionName(plan.enemyJunglePlaybook.enemyChampionName)}
             </h3>
           </div>
           <span

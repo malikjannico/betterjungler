@@ -1,3 +1,4 @@
+import { formatChampionName } from './championNames';
 import {
   findChampionIdByName,
   findJungleChampionById,
@@ -15,7 +16,11 @@ import {
   DEMO_POST_GAME_MATCHES,
   DEMO_ROLLING_SUMMARIES,
 } from './postGameFixtures';
-import { analyzePostGameMatch, toMatchSummaryRecord } from './postGameReviewEngine';
+import {
+  analyzePostGameMatch,
+  isJungleMatch,
+  toMatchSummaryRecord,
+} from './postGameReviewEngine';
 import { getDemoRuntimeState } from './simulationFixtures';
 import { generateWinConditionPlan } from './winConditionEngine';
 import type {
@@ -49,7 +54,8 @@ export type EmptyReason =
   | 'no_live_match'
   | 'no_account'
   | 'needs_api_key'
-  | 'no_matches_synced';
+  | 'no_matches_synced'
+  | 'only_off_role_matches';
 
 export type Gate<T> =
   | { status: 'ready'; data: T; source: DataSourceKind }
@@ -85,6 +91,8 @@ export interface ClimbStatus {
   source: DataSourceKind;
   profile: SummonerProfileSummary | null;
   matches: MatchV5Detail[];
+  jungleMatches: MatchV5Detail[];
+  offRoleExcludedCount: number;
   summaries: MatchSummaryRecord[];
   lpHistory: LpHistoryPoint[];
   highEloMeta: HighEloMetaSnapshot | null;
@@ -252,15 +260,18 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
   let playerChampionName: string | null = null;
   let playerChampionId: number | null = null;
   if (liveSelf) {
-    playerChampionName = liveSelf.championName;
     playerChampionId = findChampionIdByName(liveSelf.championName) ?? null;
+    playerChampionName = formatChampionName(liveSelf.championName, playerChampionId ?? undefined);
   }
   if (cs) {
     const slot = cs.myTeam.find((s) => s.isLocalPlayer);
     if (slot && slot.championId > 0) {
       if (!playerChampionId) playerChampionId = slot.championId;
       if (!playerChampionName) {
-        playerChampionName = findJungleChampionById(slot.championId)?.name ?? 'Jungler';
+        playerChampionName = formatChampionName(
+          findJungleChampionById(slot.championId)?.name ?? 'Jungler',
+          slot.championId
+        );
       }
     }
   }
@@ -372,16 +383,19 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
     liveCoachGate = { status: 'empty', reason: 'no_live_match' };
   }
 
-  // 4. Post-Game Gate
+  // 4. Post-Game & Climb Gate (Climb benchmarks evaluate Jungle games only)
+  const jungleMatches = matches.filter(isJungleMatch);
+  const offRoleExcludedCount = matches.length - jungleMatches.length;
   const summaries = isSimulated
     ? DEMO_ROLLING_SUMMARIES
-    : matches.map((m) =>
+    : jungleMatches.map((m) =>
         toMatchSummaryRecord(m, analyzePostGameMatch(m, input.settings.targetDivision))
       );
 
   let emptyAccountReason: EmptyReason | null = null;
-  if (matches.length === 0) {
-    if (!profile && !hasApiCreds) emptyAccountReason = 'no_account';
+  if (jungleMatches.length === 0) {
+    if (matches.length > 0) emptyAccountReason = 'only_off_role_matches';
+    else if (!profile && !hasApiCreds) emptyAccountReason = 'no_account';
     else if (!hasApiCreds) emptyAccountReason = 'needs_api_key';
     else emptyAccountReason = 'no_matches_synced';
   }
@@ -394,11 +408,13 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
   const accountReady = Boolean(profile) || hasApiCreds || isSimulated;
   const climb: ClimbStatus = {
     accountReady,
-    matchesReady: matches.length > 0,
+    matchesReady: jungleMatches.length > 0,
     emptyReason: emptyAccountReason,
     source,
     profile,
     matches,
+    jungleMatches,
+    offRoleExcludedCount,
     summaries,
     lpHistory,
     highEloMeta,

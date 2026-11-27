@@ -90,9 +90,11 @@ describe('BetterJungler App Integration', () => {
     expect(screen.getByText(/Elemental Dragon/i)).toBeInTheDocument();
     expect(screen.getByText(/Adaptive Item Build/i)).toBeInTheDocument();
 
-    // Post-Game Review + synchronized seconds cursor + JSON export
+    // Post-Game Review + Per-Game Subpages + synchronized seconds cursor + JSON export
     fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
     expect(screen.getByText(/What You Did Good/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Map & Timeline' }));
     const ghostBtn = screen.getByRole('button', { name: /Enemy Jungler Ghost/i });
     fireEvent.click(ghostBtn);
     expect(ghostBtn).toHaveAttribute('aria-pressed', 'true');
@@ -125,7 +127,12 @@ describe('BetterJungler App Integration', () => {
     fireEvent.keyDown(chartSlider, { key: 'ArrowRight' });
     expect(screen.getByText(/Jungle Path & Timeline Replay \(0:00 – 2:00\)/i)).toBeInTheDocument();
 
-    // Climb Ladder & Goals + Match Focus roundtrip
+    // Climb Ladder & Goals + Match Focus roundtrip + collapsible sidebar Ctrl+B
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+    expect(localStorage.getItem('betterjungler_nav_collapsed')).toBe('true');
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+    expect(localStorage.getItem('betterjungler_nav_collapsed')).toBe('false');
+
     fireEvent.click(screen.getByRole('button', { name: /Climb & Goals/i }));
     expect(screen.getByText(/Division Climb Ladder/i)).toBeInTheDocument();
     const pinButtons = screen.getAllByRole('button', { name: /Pin Goal/i });
@@ -205,20 +212,24 @@ describe('BetterJungler App Integration', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
       expect(screen.getByText(/Keyless LCU Mode active/i)).toBeInTheDocument();
-      expect(screen.getByText(/About & Automatic Updates/i)).toBeInTheDocument();
-      expect(screen.getByText(`v${pkg.version}`)).toBeInTheDocument();
 
       const riotIdInput = screen.getByLabelText(/Riot ID/i) as HTMLInputElement;
       fireEvent.change(riotIdInput, { target: { value: 'UnsavedSmurf#EUW' } });
-      fireEvent.change(screen.getByLabelText('HUD Scale'), { target: { value: '125' } });
       expect(riotIdInput.value).toBe('UnsavedSmurf#EUW');
-      expect(screen.getByLabelText('In-Game Minimap Side')).toBeInTheDocument();
-      expect(screen.getByLabelText('Update Mode')).toBeInTheDocument();
 
       const proxyInput = screen.getByLabelText('Riot API Proxy URL (HTTPS)') as HTMLInputElement;
       fireEvent.change(proxyInput, { target: { value: 'http://insecure.example.com' } });
       expect(screen.getByText(/Riot API Proxy URL must use HTTPS/i)).toBeInTheDocument();
       fireEvent.change(proxyInput, { target: { value: '' } });
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Overlay & HUD' }));
+      fireEvent.change(screen.getByLabelText('HUD Scale'), { target: { value: '125' } });
+      expect(screen.getByLabelText('In-Game Minimap Side')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Updates & About' }));
+      expect(screen.getByText(/About & Automatic Updates/i)).toBeInTheDocument();
+      expect(screen.getByText(`v${pkg.version}`)).toBeInTheDocument();
+      expect(screen.getByLabelText('Update Mode')).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: /View Changelog/i }));
       expect(screen.getByText(/Dedicated Two-Window HUD & Windows 11 Mica/i)).toBeInTheDocument();

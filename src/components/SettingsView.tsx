@@ -38,6 +38,16 @@ import type { SummonerProfileSummary } from '../types/riot';
 import { AboutUpdatesSection } from './AboutUpdatesSection';
 import { GlassSurface } from './GlassSurface';
 
+export type SettingsSectionId = 'account' | 'overlay' | 'recording' | 'ai' | 'updates';
+
+const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> = [
+  { id: 'account', label: 'Account & API' },
+  { id: 'overlay', label: 'Overlay & HUD' },
+  { id: 'recording', label: 'Recording & Replays' },
+  { id: 'ai', label: 'AI Coach' },
+  { id: 'updates', label: 'Updates & About' },
+];
+
 interface SettingsViewProps {
   settings: UserSettings;
   patchVersion: string;
@@ -52,6 +62,8 @@ interface SettingsViewProps {
   updateError: string | null;
   canInstallUpdateSafely: boolean;
   isTauri: boolean;
+  initialSection?: SettingsSectionId;
+  initialSectionToken?: number;
   onSettingsChanged: (next: UserSettings) => void;
   onProfileLoaded: (profile: SummonerProfileSummary) => void;
   onPatchSynced: (patch: string, counts?: { champions: number; items: number }) => void;
@@ -138,6 +150,8 @@ export function SettingsView({
   updateError,
   canInstallUpdateSafely,
   isTauri,
+  initialSection = 'account',
+  initialSectionToken = 0,
   onSettingsChanged,
   onProfileLoaded,
   onPatchSynced,
@@ -146,6 +160,7 @@ export function SettingsView({
   onInstallUpdate,
   onStageUpdate,
 }: SettingsViewProps) {
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(initialSection);
   const [draft, setDraft] = useState<UserSettings>(settings);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [aiKeyInput, setAiKeyInput] = useState('');
@@ -156,6 +171,12 @@ export function SettingsView({
   const [storedRecordings, setStoredRecordings] = useState<RecordingRecord[]>([]);
   const [togglingReplay, setTogglingReplay] = useState(false);
   const proxyValidationError = validateHttpsProxyUrl(draft.riotApiProxyUrl ?? '');
+
+  useEffect(() => {
+    if (initialSectionToken > 0) {
+      setActiveSection(initialSection);
+    }
+  }, [initialSection, initialSectionToken]);
 
   const rec = draft.recording ?? DEFAULT_RECORDING_SETTINGS;
 
@@ -442,13 +463,16 @@ export function SettingsView({
     try {
       const ok = await saveAiApiKey(aiKeyInput.trim());
       if (ok) {
-        const updated: UserSettings = {
-          ...draft,
+        const persisted: UserSettings = {
+          ...settings,
           aiCoach: { ...draft.aiCoach, hasApiKey: true },
         };
-        setDraft(updated);
-        await saveSettings(updated);
-        onSettingsChanged(updated);
+        setDraft((prev) => ({
+          ...prev,
+          aiCoach: { ...prev.aiCoach, hasApiKey: true },
+        }));
+        await saveSettings(persisted);
+        onSettingsChanged(persisted);
         setAiKeyInput('');
         setStatusMessage('AI Coach API key stored in Windows Credential Manager.');
       }
@@ -499,11 +523,38 @@ export function SettingsView({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        <GlassSurface className="space-y-3.5 p-5">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-            Riot Account &amp; Climb Target
-          </h2>
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        className="lg-segmented inline-flex flex-wrap items-center gap-1"
+      >
+        {SETTINGS_SECTIONS.map((sec) => {
+          const isActive = activeSection === sec.id;
+          return (
+            <button
+              key={sec.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setActiveSection(sec.id)}
+              className={`rounded-[7px] px-3 py-1.5 text-xs font-medium transition ${
+                isActive
+                  ? 'lg-segment-active font-semibold'
+                  : 'text-white/[0.62] hover:bg-white/[0.04] hover:text-white'
+              }`}
+            >
+              {sec.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeSection === 'account' && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <GlassSurface className="space-y-3.5 p-5">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+              Riot Account &amp; Climb Target
+            </h2>
           <p className="rounded-[8px] border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200/90">
             <strong>Keyless LCU Mode active:</strong> Open League of Legends for automatic Champ
             Select &amp; Live HUD coaching without an API key. Add a Riot API key below only for
@@ -680,12 +731,26 @@ export function SettingsView({
               Sync Patch
             </button>
           </div>
+        </GlassSurface>
+      </div>
+      )}
 
-          <div className="lg-inset p-3">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+      {activeSection === 'overlay' && (
+        <GlassSurface className="space-y-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+              Transparent Overlay &amp; Compact HUD
+            </h2>
+            <span className="text-[11px] text-slate-400">
+              Changes apply immediately in-game
+            </span>
+          </div>
+
+          <div className="lg-inset p-3.5">
+            <div className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               Overlay Ergonomics
             </div>
-            <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block text-[11px]">
                 <span className="text-slate-400">Compact HUD Corner</span>
                 <select
@@ -812,10 +877,11 @@ export function SettingsView({
             reading, no enemy cooldown tracking, and Solo/Duo anonymity enforced.
           </div>
         </GlassSurface>
-      </div>
+      )}
 
       {/* Opt-In Gameplay Recording & Riot Replay API */}
-      <GlassSurface className="space-y-3.5 p-5">
+      {activeSection === 'recording' && (
+        <GlassSurface className="space-y-3.5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
             Opt-In Gameplay Recording &amp; Riot Replay API
@@ -1003,10 +1069,22 @@ export function SettingsView({
                 : 'Enable Replay API'}
           </button>
         </div>
+
+        <div className="flex justify-end border-t border-white/[0.07] pt-3">
+          <button
+            type="button"
+            onClick={handleSaveSettings}
+            className="lg-btn-primary px-4 py-2 text-xs font-bold"
+          >
+            Save Preferences
+          </button>
+        </div>
       </GlassSurface>
+      )}
 
       {/* Optional BYOK AI Coach */}
-      <GlassSurface className="space-y-3 p-5">
+      {activeSection === 'ai' && (
+        <GlassSurface className="space-y-3 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
             Optional BYOK AI Coach (Natural-Language Debriefs)
@@ -1108,24 +1186,37 @@ export function SettingsView({
             </label>
           )}
         </div>
-      </GlassSurface>
 
-      <AboutUpdatesSection
-        appMeta={appMeta}
-        updateInfo={updateInfo}
-        checkingUpdate={checkingUpdate}
-        installingUpdate={installingUpdate}
-        stagingUpdate={stagingUpdate}
-        stagedUpdateVersion={stagedUpdateVersion}
-        updateMode={draft.updateMode ?? 'manual'}
-        updateError={updateError}
-        canInstallUpdateSafely={canInstallUpdateSafely}
-        isTauri={isTauri}
-        onUpdateModeChange={handleUpdateModeChange}
-        onCheckUpdate={onCheckUpdate}
-        onInstallUpdate={onInstallUpdate}
-        onStageUpdate={onStageUpdate}
-      />
+        <div className="flex justify-end border-t border-white/[0.07] pt-3">
+          <button
+            type="button"
+            onClick={handleSaveSettings}
+            className="lg-btn-primary px-4 py-2 text-xs font-bold"
+          >
+            Save Preferences
+          </button>
+        </div>
+      </GlassSurface>
+      )}
+
+      {activeSection === 'updates' && (
+        <AboutUpdatesSection
+          appMeta={appMeta}
+          updateInfo={updateInfo}
+          checkingUpdate={checkingUpdate}
+          installingUpdate={installingUpdate}
+          stagingUpdate={stagingUpdate}
+          stagedUpdateVersion={stagedUpdateVersion}
+          updateMode={draft.updateMode ?? 'manual'}
+          updateError={updateError}
+          canInstallUpdateSafely={canInstallUpdateSafely}
+          isTauri={isTauri}
+          onUpdateModeChange={handleUpdateModeChange}
+          onCheckUpdate={onCheckUpdate}
+          onInstallUpdate={onInstallUpdate}
+          onStageUpdate={onStageUpdate}
+        />
+      )}
 
       {statusMessage && (
         <div className="lg-inset px-3.5 py-2 text-xs text-emerald-300">

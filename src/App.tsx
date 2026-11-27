@@ -7,6 +7,8 @@ import {
   Info,
   Map as MapIcon,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -16,12 +18,13 @@ import {
 } from 'lucide-react';
 import pkg from '../package.json';
 import changelogRaw from '../CHANGELOG.md?raw';
+import { BrandMark } from './components/BrandMark';
 import { ChampSelectView } from './components/ChampSelectView';
 import { ClimbLadderView } from './components/ClimbLadderView';
 import { CompactHudBar } from './components/CompactHudBar';
 import { LiveCoachView } from './components/LiveCoachView';
 import { PostGameReviewView } from './components/PostGameReviewView';
-import { SettingsView } from './components/SettingsView';
+import { SettingsView, type SettingsSectionId } from './components/SettingsView';
 import { WinConditionView } from './components/WinConditionView';
 import { computePersonalChampStats } from './domain/champSelectEngine';
 import { parseChangelog } from './domain/changelogParser';
@@ -162,6 +165,17 @@ export function App() {
     },
   });
   const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('betterjungler_nav_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [settingsNavState, setSettingsNavState] = useState<{
+    section: SettingsSectionId;
+    token: number;
+  }>({ section: 'account', token: 0 });
   const [legalOpen, setLegalOpen] = useState(false);
   const [apiKeyHealth, setApiKeyHealth] = useState<ApiKeyHealthStatus | null>(null);
   const [appMeta, setAppMeta] = useState<AppMetaInfo>({
@@ -338,7 +352,26 @@ export function App() {
   }, [isTauri, liveState?.lcuConnected, summonerProfile, settings.region]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('betterjungler_nav_collapsed', navCollapsed ? 'true' : 'false');
+    } catch {
+      // ignore storage errors
+    }
+  }, [navCollapsed]);
+
+  useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      const targetEl = e.target as HTMLElement | null;
+      const isEditable =
+        targetEl?.tagName === 'INPUT' ||
+        targetEl?.tagName === 'TEXTAREA' ||
+        targetEl?.tagName === 'SELECT' ||
+        Boolean(targetEl?.isContentEditable);
+      if (!isEditable && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setNavCollapsed((prev) => !prev);
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSimulatorOpen((prev) => !prev);
@@ -422,9 +455,14 @@ export function App() {
   );
 
   const personalStats = useMemo(
-    () => computePersonalChampStats(sessionCtx.climb.matches),
-    [sessionCtx.climb.matches]
+    () => computePersonalChampStats(sessionCtx.climb.jungleMatches),
+    [sessionCtx.climb.jungleMatches]
   );
+
+  function openSettingsSection(section: SettingsSectionId = 'account') {
+    setSettingsNavState((prev) => ({ section, token: prev.token + 1 }));
+    setActiveTab('settings');
+  }
 
   const settingsRef = useRef(settings);
   const profileRef = useRef(sessionCtx.climb.profile);
@@ -785,16 +823,50 @@ export function App() {
           isTauri ? 'h-screen rounded-none' : 'h-[min(92vh,800px)] max-w-[1100px]'
         }`}
       >
-        {/* Architectural Left Navigation Rail */}
-        <aside className="flex w-[204px] shrink-0 flex-col justify-between border-r border-white/[0.08] bg-black/20 p-4">
-          <div className="space-y-5">
-            <div data-tauri-drag-region className="cursor-grab px-2 select-none active:cursor-grabbing">
-              <div className="pointer-events-none flex items-center justify-between gap-2">
-                <h1 className="t-title text-white">BetterJungler</h1>
+        {/* Collapsible Architectural Left Navigation Rail */}
+        <aside
+          data-collapsed={navCollapsed ? 'true' : 'false'}
+          className={`flex shrink-0 flex-col justify-between border-r border-white/[0.08] bg-black/20 transition-[width,padding] duration-200 ${
+            navCollapsed ? 'w-[68px] p-2.5' : 'w-[204px] p-4'
+          }`}
+        >
+          <div className="space-y-4">
+            <div
+              className={`flex items-center ${
+                navCollapsed ? 'flex-col gap-2' : 'justify-between gap-2 px-1'
+              }`}
+            >
+              <div
+                data-tauri-drag-region
+                className={`flex min-w-0 cursor-grab items-center gap-2.5 select-none active:cursor-grabbing ${
+                  navCollapsed ? 'justify-center' : ''
+                }`}
+                title={`BetterJungler · Patch ${patchVersion}`}
+              >
+                <BrandMark size={navCollapsed ? 28 : 26} />
+                {!navCollapsed && (
+                  <div className="pointer-events-none min-w-0">
+                    <h1 className="t-title truncate text-white">BetterJungler</h1>
+                    <div className="t-caption truncate text-white/[0.45]">
+                      Patch {patchVersion}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="t-caption pointer-events-none mt-0.5 text-white/[0.45]">
-                Patch {patchVersion}
-              </div>
+
+              <button
+                type="button"
+                aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+                title={`${navCollapsed ? 'Expand' : 'Collapse'} sidebar (Ctrl+B)`}
+                onClick={() => setNavCollapsed((v) => !v)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-white/[0.58] transition hover:bg-white/[0.08] hover:text-white"
+              >
+                {navCollapsed ? (
+                  <PanelLeftOpen className="h-3.5 w-3.5" />
+                ) : (
+                  <PanelLeftClose className="h-3.5 w-3.5" />
+                )}
+              </button>
             </div>
 
             <nav aria-label="Primary navigation" className="space-y-1">
@@ -806,9 +878,19 @@ export function App() {
                   <button
                     key={tab.id}
                     type="button"
+                    aria-label={tab.label}
+                    title={tab.label}
                     aria-current={active ? 'page' : undefined}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`relative flex h-8 w-full items-center justify-between gap-2 rounded-[7px] px-2.5 text-left text-xs font-medium transition-colors ${
+                    onClick={() =>
+                      tab.id === 'settings'
+                        ? openSettingsSection('account')
+                        : setActiveTab(tab.id)
+                    }
+                    className={`relative flex h-8 w-full items-center rounded-[7px] text-xs font-medium transition-colors ${
+                      navCollapsed
+                        ? 'justify-center px-0'
+                        : 'justify-between gap-2 px-2.5 text-left'
+                    } ${
                       active
                         ? 'text-white'
                         : 'text-white/[0.58] hover:bg-white/[0.04] hover:text-white/[0.92]'
@@ -823,12 +905,16 @@ export function App() {
                     )}
                     <span className="relative z-10 flex min-w-0 items-center gap-2.5">
                       <Icon className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{tab.label}</span>
+                      {!navCollapsed && <span className="truncate">{tab.label}</span>}
                     </span>
                     {livePhaseHit && (
                       <span
                         title="Active match phase"
-                        className="relative z-10 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
+                        className={
+                          navCollapsed
+                            ? 'absolute top-1.5 right-1.5 z-10 h-1.5 w-1.5 rounded-full bg-emerald-400'
+                            : 'relative z-10 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400'
+                        }
                       />
                     )}
                   </button>
@@ -838,43 +924,73 @@ export function App() {
           </div>
 
           <div className="space-y-2.5 border-t border-white/[0.08] pt-3.5 t-caption">
-            <div className="space-y-1.5 px-2 text-white/[0.58]">
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-2">
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${
-                      runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-white/25'
-                    }`}
-                  />
-                  League Client
-                </span>
-                <span className="text-[11px] text-white/[0.4]">
-                  {runtimeState.lcuConnected ? 'Ready' : 'Standby'}
-                </span>
+            {navCollapsed ? (
+              <div className="flex flex-col items-center gap-2 text-white/[0.58]">
+                <span
+                  title={`League Client: ${runtimeState.lcuConnected ? 'Ready' : 'Standby'}`}
+                  className={`h-2 w-2 rounded-full ${
+                    runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-white/25'
+                  }`}
+                />
+                <span
+                  title={`Live Match: ${runtimeState.liveClientConnected ? 'Active' : 'Standby'}`}
+                  className={`h-2 w-2 rounded-full ${
+                    runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-white/25'
+                  }`}
+                />
               </div>
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-2">
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${
-                      runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-white/25'
-                    }`}
-                  />
-                  Live Match
-                </span>
-                <span className="text-[11px] text-white/[0.4]">
-                  {runtimeState.liveClientConnected ? 'Active' : 'Standby'}
-                </span>
+            ) : (
+              <div className="space-y-1.5 px-2 text-white/[0.58]">
+                <div className="flex items-center justify-between">
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-white/25'
+                      }`}
+                    />
+                    League Client
+                  </span>
+                  <span className="text-[11px] text-white/[0.4]">
+                    {runtimeState.lcuConnected ? 'Ready' : 'Standby'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-white/25'
+                      }`}
+                    />
+                    Live Match
+                  </span>
+                  <span className="text-[11px] text-white/[0.4]">
+                    {runtimeState.liveClientConnected ? 'Active' : 'Standby'}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
 
             {updateInfo?.available &&
               updateInfo.latestVersion &&
               canInstallUpdateSafely &&
-              dismissedUpdateVersion !== updateInfo.latestVersion && (
+              dismissedUpdateVersion !== updateInfo.latestVersion &&
+              (navCollapsed ? (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    aria-label={`Update v${updateInfo.latestVersion}`}
+                    title={`Update v${updateInfo.latestVersion}`}
+                    onClick={() => openSettingsSection('updates')}
+                    className="flex h-7 w-7 items-center justify-center rounded-[7px] border border-emerald-400/35 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
                 <div className="flex items-center gap-1 rounded-[7px] border border-emerald-400/30 bg-emerald-500/12 px-2.5 py-1.5 text-xs text-emerald-200">
                   <button
                     type="button"
-                    onClick={() => setActiveTab('settings')}
+                    onClick={() => openSettingsSection('updates')}
                     className="flex-1 truncate text-left font-medium hover:underline"
                   >
                     Update v{updateInfo.latestVersion}
@@ -888,7 +1004,7 @@ export function App() {
                     <X className="h-3 w-3" />
                   </button>
                 </div>
-              )}
+              ))}
           </div>
         </aside>
 
@@ -1041,7 +1157,7 @@ export function App() {
                   <span>{apiKeyHealth.message}</span>
                   <button
                     type="button"
-                    onClick={() => setActiveTab('settings')}
+                    onClick={() => openSettingsSection('account')}
                     className="lg-btn-glass shrink-0 px-2.5 py-1 text-xs font-semibold text-white"
                   >
                     Open Settings
@@ -1082,7 +1198,8 @@ export function App() {
                     summonerProfile={sessionCtx.climb.profile}
                     targetDivision={settings.targetDivision}
                     summaries={sessionCtx.climb.summaries}
-                    matches={sessionCtx.climb.matches}
+                    matches={sessionCtx.climb.jungleMatches}
+                    offRoleExcludedCount={sessionCtx.climb.offRoleExcludedCount}
                     lpHistory={sessionCtx.climb.lpHistory}
                     patchVersion={patchVersion}
                     goals={climbGoals}
@@ -1098,7 +1215,7 @@ export function App() {
                     onSetFocusGoal={handleSetFocusGoal}
                     onRefreshHighElo={handleRefreshHighElo}
                     onSyncMatches={handleSyncMatches}
-                    onOpenSettings={() => setActiveTab('settings')}
+                    onOpenSettings={() => openSettingsSection('account')}
                     onTestHud={() => void toggleOverlayMode('compact')}
                     onPreviewSample={(scenario) =>
                       handleScenarioChange(scenario, { stayOnTab: true })
@@ -1176,7 +1293,7 @@ export function App() {
                         : undefined
                     }
                     onSyncMatches={handleSyncMatches}
-                    onOpenSettings={() => setActiveTab('settings')}
+                    onOpenSettings={(section) => openSettingsSection(section ?? 'account')}
                     onPreviewSample={(scenario) =>
                       handleScenarioChange(scenario, { stayOnTab: true })
                     }
@@ -1197,6 +1314,8 @@ export function App() {
                     updateError={updateError}
                     canInstallUpdateSafely={canInstallUpdateSafely}
                     isTauri={isTauri}
+                    initialSection={settingsNavState.section}
+                    initialSectionToken={settingsNavState.token}
                     onSettingsChanged={setSettings}
                     onProfileLoaded={handleProfileLoaded}
                     onPatchSynced={(patch, counts) => {

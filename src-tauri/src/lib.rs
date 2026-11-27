@@ -445,13 +445,20 @@ async fn sync_recent_matches(
         };
 
         if let Some(detail) = cached {
-            if let Some(played_at) = detail["playedAt"].as_str() {
-                if let Ok(conn) = state.db.lock() {
-                    let _ = storage::bind_unlinked_recording_to_match(&conn, &match_id, played_at);
+            if detail
+                .get("role")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.trim().is_empty())
+            {
+                if let Some(played_at) = detail["playedAt"].as_str() {
+                    if let Ok(conn) = state.db.lock() {
+                        let _ =
+                            storage::bind_unlinked_recording_to_match(&conn, &match_id, played_at);
+                    }
                 }
+                details.push(detail);
+                continue;
             }
-            details.push(detail);
-            continue;
         }
 
         let detail = match riot_api::fetch_match_detail_and_timeline(

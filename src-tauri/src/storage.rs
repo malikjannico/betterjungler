@@ -331,7 +331,8 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
                 map_side TEXT NOT NULL,
                 kills INTEGER NOT NULL,
                 deaths INTEGER NOT NULL,
-                assists INTEGER NOT NULL
+                assists INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'JUNGLE'
             );
 
             CREATE TABLE IF NOT EXISTS match_metrics (
@@ -457,6 +458,24 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             .map_err(|e| AppError::Storage(e.to_string()))?;
     }
 
+    if version < 4 {
+        if !table_has_column(conn, "matches_fact", "role")? {
+            conn.execute_batch(
+                "ALTER TABLE matches_fact ADD COLUMN role TEXT NOT NULL DEFAULT 'JUNGLE';",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        backfill_match_facts(conn)?;
+        conn.execute(
+            "DELETE FROM mistake_hits
+             WHERE match_id IN (SELECT match_id FROM matches_fact WHERE role != 'JUNGLE')",
+            [],
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+        conn.pragma_update(None, "user_version", 4_i64)
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+
     Ok(())
 }
 
@@ -533,12 +552,17 @@ fn upsert_match_facts(
     let kills = detail["kills"].as_i64().unwrap_or(0);
     let deaths = detail["deaths"].as_i64().unwrap_or(0);
     let assists = detail["assists"].as_i64().unwrap_or(0);
+    let role = detail["role"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .map(crate::riot_api::normalize_participant_role)
+        .unwrap_or("JUNGLE");
 
     conn.execute(
         "INSERT INTO matches_fact (
             match_id, puuid, played_at, champion_id, champion_name,
-            win, duration_sec, map_side, kills, deaths, assists
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            win, duration_sec, map_side, kills, deaths, assists, role
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(match_id) DO UPDATE SET
             puuid = excluded.puuid,
             played_at = excluded.played_at,
@@ -549,7 +573,8 @@ fn upsert_match_facts(
             map_side = excluded.map_side,
             kills = excluded.kills,
             deaths = excluded.deaths,
-            assists = excluded.assists",
+            assists = excluded.assists,
+            role = excluded.role",
         params![
             match_id,
             puuid,
@@ -561,7 +586,8 @@ fn upsert_match_facts(
             map_side,
             kills,
             deaths,
-            assists
+            assists,
+            role
         ],
     )
     .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -748,27 +774,38 @@ fn upsert_match_facts(
         }
     }
 
-    let has_mistakes: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM mistake_hits WHERE match_id = ?1",
+    if role != "JUNGLE" {
+        conn.execute(
+            "DELETE FROM mistake_hits WHERE match_id = ?1",
             params![match_id],
-            |row| row.get(0),
         )
-        .unwrap_or(0);
-    if has_mistakes == 0 {
-        for d_ts in &pre_obj_ts {
-            conn.execute(
-                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
-                 VALUES (?1, 'pre_obj_death', ?2, 'high', 'Died before major objective spawn/take')",
-                params![match_id, d_ts],
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    } else {
+        let has_mistakes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mistake_hits WHERE match_id = ?1",
+                params![match_id],
+                |row| row.get(0),
             )
-            .map_err(|e| AppError::Storage(e.to_string()))?;
+            .unwrap_or(0);
+        if has_mistakes == 0 {
+            for d_ts in &pre_obj_ts {
+                conn.execute(
+                    "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                     VALUES (?1, 'pre_obj_death', ?2, 'high', 'Died before major objective spawn/take')",
+                    params![match_id, d_ts],
+                )
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+            }
         }
     }
 
     let now_iso = chrono::Utc::now().to_rfc3339();
     if let Ok((n, avg_cs, avg_vis, avg_pre)) = conn.query_row(
-        "SELECT COUNT(*), AVG(cs_per_min), AVG(vision_per_min), AVG(pre_obj_deaths) FROM match_metrics",
+        "SELECT COUNT(*), AVG(m.cs_per_min), AVG(m.vision_per_min), AVG(m.pre_obj_deaths)
+         FROM match_metrics m
+         INNER JOIN matches_fact f ON f.match_id = m.match_id
+         WHERE f.role = 'JUNGLE'",
         [],
         |row| {
             Ok((
@@ -796,6 +833,9 @@ fn upsert_match_facts(
                 )
                 .map_err(|e| AppError::Storage(e.to_string()))?;
             }
+        } else {
+            conn.execute("DELETE FROM baselines", [])
+                .map_err(|e| AppError::Storage(e.to_string()))?;
         }
     }
 
@@ -1823,7 +1863,7 @@ mod tests {
         let user_ver: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read user_version");
-        assert_eq!(user_ver, 3);
+        assert_eq!(user_ver, 4);
 
         let sample_detail = serde_json::json!({
             "matchId": "EUW1_9001",
@@ -1949,6 +1989,97 @@ mod tests {
         assert_eq!(mistake_count, 1);
         assert_eq!(baseline_count, 3);
 
+        // Off-role (e.g., BOTTOM ADC) games persist role='BOTTOM' and stay excluded from jungle mistakes/baselines
+        let adc_game = serde_json::json!({
+            "matchId": "EUW1_ADC",
+            "role": "BOTTOM",
+            "championId": 222,
+            "championName": "Jinx",
+            "win": true,
+            "durationSeconds": 1800,
+            "mapSide": "blue",
+            "playerParticipantId": 4,
+            "kills": 9,
+            "deaths": 3,
+            "assists": 7,
+            "cs": 260,
+            "visionScore": 18,
+            "controlWardsBought": 1,
+            "teamKills": 24,
+            "teamObjectives": 3,
+            "enemyObjectives": 2,
+            "frames": [],
+            "events": [
+                { "type": "CHAMPION_KILL", "timestampSec": 270, "killerId": 6, "victimId": 4 }
+            ]
+        });
+        cache_match_record(
+            &conn,
+            "EUW1_ADC",
+            "puuid-1",
+            "2026-11-27T01:30:00Z",
+            &serde_json::json!({ "matchId": "EUW1_ADC", "role": "BOTTOM" }),
+            &adc_game,
+        )
+        .expect("cache off-role match");
+        let stored_role: String = conn
+            .query_row(
+                "SELECT role FROM matches_fact WHERE match_id = 'EUW1_ADC'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("stored role");
+        let adc_mistakes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mistake_hits WHERE match_id = 'EUW1_ADC'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("adc mistakes");
+        let baseline_n: i64 = conn
+            .query_row(
+                "SELECT sample_n FROM baselines WHERE key = 'cs_per_min'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("baseline sample_n");
+        assert_eq!(stored_role, "BOTTOM");
+        assert_eq!(adc_mistakes, 0);
+        assert_eq!(baseline_n, 2);
+
+        // Clearing all jungle matches and keeping only off-role clears stale baselines (n == 0)
+        let conn_offrole_only = Connection::open_in_memory().expect("in-memory sqlite offrole");
+        run_migrations(&conn_offrole_only).expect("migrations offrole");
+        upsert_match_facts(&conn_offrole_only, "EUW1_STALE", "p", "2026-11-27T01:00:00Z", &serde_json::json!({
+            "matchId": "EUW1_STALE", "role": "JUNGLE", "championId": 32, "championName": "Amumu",
+            "win": true, "durationSeconds": 1800, "mapSide": "blue", "playerParticipantId": 2,
+            "kills": 2, "deaths": 1, "assists": 5, "cs": 180, "visionScore": 20, "controlWardsBought": 2,
+            "teamKills": 10, "teamObjectives": 3, "enemyObjectives": 1, "frames": [], "events": []
+        })).expect("seed stale jungle");
+        assert_eq!(
+            conn_offrole_only
+                .query_row("SELECT COUNT(*) FROM baselines", [], |r| r.get::<_, i64>(0))
+                .expect("count seeded"),
+            3
+        );
+        conn_offrole_only
+            .execute("DELETE FROM matches_fact", [])
+            .expect("delete fact");
+        upsert_match_facts(
+            &conn_offrole_only,
+            "EUW1_ONLY_ADC",
+            "p",
+            "2026-11-27T02:00:00Z",
+            &adc_game,
+        )
+        .expect("insert adc only");
+        assert_eq!(
+            conn_offrole_only
+                .query_row("SELECT COUNT(*) FROM baselines", [], |r| r.get::<_, i64>(0))
+                .expect("cleared stale baselines"),
+            0
+        );
+
         // Atomic focus toggle across multiple goals + error on unknown ID
         let g1 = ClimbGoalRecord {
             id: "g1".to_string(),
@@ -1986,6 +2117,101 @@ mod tests {
 
         let cleared = set_focus_goal(&mut conn, "g2").expect("unfocus g2");
         assert!(cleared.iter().all(|g| !g.is_focus_goal));
+    }
+
+    #[test]
+    fn v3_to_v4_migration_adds_role_clears_offrole_mistakes_and_recomputes_baselines() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite v3");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE ddragon_cache (key TEXT PRIMARY KEY, patch_version TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE match_summaries (match_id TEXT PRIMARY KEY, puuid TEXT NOT NULL, champion_id INTEGER NOT NULL, win INTEGER NOT NULL, cs_per_min REAL NOT NULL, vision_per_min REAL NOT NULL, gd_at_15 INTEGER NOT NULL, played_at TEXT NOT NULL);
+            CREATE TABLE match_details_cache (match_id TEXT PRIMARY KEY, puuid TEXT NOT NULL, played_at TEXT NOT NULL, summary_json TEXT NOT NULL, detail_json TEXT NOT NULL);
+            CREATE TABLE climb_goals (id TEXT PRIMARY KEY, target_division TEXT NOT NULL, metric TEXT NOT NULL, title TEXT NOT NULL, target_value REAL NOT NULL, current_value REAL NOT NULL, unit TEXT NOT NULL, lower_is_better INTEGER NOT NULL, status TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE high_elo_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, patch TEXT NOT NULL, region TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE lp_history (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, tier TEXT NOT NULL, rank TEXT NOT NULL, league_points INTEGER NOT NULL, absolute_lp INTEGER NOT NULL, win INTEGER, match_id TEXT);
+            CREATE TABLE climb_goals_v2 (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE matches_fact (match_id TEXT PRIMARY KEY, puuid TEXT NOT NULL, played_at TEXT NOT NULL, champion_id INTEGER NOT NULL, champion_name TEXT NOT NULL, win INTEGER NOT NULL, duration_sec INTEGER NOT NULL, map_side TEXT NOT NULL, kills INTEGER NOT NULL, deaths INTEGER NOT NULL, assists INTEGER NOT NULL);
+            CREATE TABLE match_metrics (match_id TEXT PRIMARY KEY, cs_per_min REAL NOT NULL, cs_at_4 INTEGER, cs_at_5 INTEGER, cs_at_10 INTEGER, gold_diff_at_10 INTEGER, gold_diff_at_15 INTEGER, xp_diff_at_15 INTEGER, vision_per_min REAL NOT NULL, control_wards INTEGER NOT NULL, objective_share_pct INTEGER, kill_participation_pct INTEGER NOT NULL, early_deaths INTEGER NOT NULL, pre_obj_deaths INTEGER NOT NULL);
+            CREATE TABLE match_events (id INTEGER PRIMARY KEY AUTOINCREMENT, match_id TEXT NOT NULL, timestamp_sec INTEGER NOT NULL, event_type TEXT NOT NULL, killer_id INTEGER, victim_id INTEGER, x INTEGER, y INTEGER, monster_type TEXT, ward_type TEXT);
+            CREATE TABLE mistake_hits (id INTEGER PRIMARY KEY AUTOINCREMENT, match_id TEXT NOT NULL, detector_id TEXT NOT NULL, timestamp_sec INTEGER NOT NULL, severity TEXT NOT NULL, detail TEXT NOT NULL);
+            CREATE TABLE baselines (key TEXT PRIMARY KEY, scope TEXT NOT NULL, value REAL NOT NULL, sample_n INTEGER NOT NULL, updated_at TEXT NOT NULL);
+            PRAGMA user_version = 3;
+            "#,
+        )
+        .expect("create v3 schema");
+
+        let adc_detail = serde_json::json!({
+            "matchId": "EUW1_V3_ADC",
+            "role": "BOTTOM",
+            "championId": 222,
+            "championName": "Jinx",
+            "win": true,
+            "durationSeconds": 1800,
+            "mapSide": "blue",
+            "playerParticipantId": 4,
+            "kills": 8,
+            "deaths": 2,
+            "assists": 6,
+            "cs": 250,
+            "visionScore": 15,
+            "controlWardsBought": 1,
+            "teamKills": 20,
+            "teamObjectives": 3,
+            "enemyObjectives": 2,
+            "frames": [],
+            "events": [
+                { "type": "CHAMPION_KILL", "timestampSec": 270, "killerId": 6, "victimId": 4 }
+            ]
+        });
+        conn.execute(
+            "INSERT INTO match_details_cache (match_id, puuid, played_at, summary_json, detail_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                "EUW1_V3_ADC",
+                "puuid-v3",
+                "2026-11-27T01:00:00Z",
+                r#"{"matchId":"EUW1_V3_ADC"}"#,
+                adc_detail.to_string()
+            ],
+        )
+        .expect("seed v3 cached match");
+        conn.execute(
+            "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+             VALUES ('EUW1_V3_ADC', 'pre_obj_death', 270, 'high', 'stale v3 mistake')",
+            [],
+        )
+        .expect("seed stale mistake");
+        conn.execute(
+            "INSERT INTO baselines (key, scope, value, sample_n, updated_at)
+             VALUES ('cs_per_min', 'global', 8.3, 1, '2026-11-27T01:00:00Z')",
+            [],
+        )
+        .expect("seed stale baseline");
+
+        run_migrations(&conn).expect("upgrade v3 to v4");
+        let new_ver: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("read new user_version");
+        assert_eq!(new_ver, 4);
+        assert!(table_has_column(&conn, "matches_fact", "role").expect("check role col"));
+        let v4_role: String = conn
+            .query_row(
+                "SELECT role FROM matches_fact WHERE match_id = 'EUW1_V3_ADC'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("migrated role");
+        let v4_mistakes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM mistake_hits", [], |r| r.get(0))
+            .expect("cleared off-role mistakes");
+        let v4_baselines: i64 = conn
+            .query_row("SELECT COUNT(*) FROM baselines", [], |r| r.get(0))
+            .expect("cleared stale baselines");
+        assert_eq!(v4_role, "BOTTOM");
+        assert_eq!(v4_mistakes, 0);
+        assert_eq!(v4_baselines, 0);
     }
 
     #[test]

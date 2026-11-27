@@ -175,6 +175,7 @@ export interface MatchV5Detail {
   durationSeconds: number;
   patch: string;
   queueId: number;
+  role?: string;
   win: boolean;
   mapSide: MapSide;
   playerParticipantId: number;
@@ -201,6 +202,7 @@ export interface MatchSummaryRecord {
   playedAt: string;
   championId: number;
   championName: string;
+  role?: string;
   win: boolean;
   durationSeconds: number;
   kills: number;

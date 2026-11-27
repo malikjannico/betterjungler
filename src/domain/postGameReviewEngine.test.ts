@@ -105,4 +105,26 @@ describe('postGameReviewEngine', () => {
       expect(f.detail).not.toContain('undefined');
     }
   });
+
+  it('normalizes internal champion names (MonkeyKing -> Wukong) and omits deep jungle evaluation for off-role games', () => {
+    const base = DEMO_POST_GAME_MATCHES[0]!;
+    const adcMatch = {
+      ...base,
+      matchId: 'EUW1_OFFROLE_ADC',
+      role: 'BOTTOM',
+      championId: 62,
+      championName: 'MonkeyKing',
+      enemyJunglerChampionId: 121,
+      enemyJunglerName: 'Khazix',
+    };
+    const report = analyzePostGameMatch(adcMatch, 'PLATINUM IV');
+    expect(report.championName).toBe('Wukong');
+    expect(report.enemyJunglerName).toBe("Kha'Zix");
+    expect(report.isJungle).toBe(false);
+    expect(report.role).toBe('BOTTOM');
+    expect(report.grade).toBe('N/A');
+    expect(report.highlights).toEqual([]);
+    expect(report.mistakes).toEqual([]);
+    expect(report.improvements).toEqual([]);
+  });
 });

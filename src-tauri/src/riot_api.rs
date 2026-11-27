@@ -797,6 +797,17 @@ pub async fn fetch_match_detail_and_timeline(
     normalize_match_v5_detail(safe_match_id, puuid, &match_json, &timeline_json)
 }
 
+pub fn normalize_participant_role(raw: &str) -> &'static str {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "JUNGLE" => "JUNGLE",
+        "TOP" => "TOP",
+        "MIDDLE" | "MID" => "MIDDLE",
+        "BOTTOM" | "BOT" | "ADC" => "BOTTOM",
+        "UTILITY" | "SUPPORT" => "UTILITY",
+        _ => "UNKNOWN",
+    }
+}
+
 pub fn normalize_match_v5_detail(
     match_id: &str,
     puuid: &str,
@@ -944,6 +955,16 @@ pub fn normalize_match_v5_detail(
 
     let cs_total = player["totalMinionsKilled"].as_i64().unwrap_or(0)
         + player["neutralMinionsKilled"].as_i64().unwrap_or(0);
+    let raw_role = player["teamPosition"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            player["individualPosition"]
+                .as_str()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .unwrap_or("");
+    let role = normalize_participant_role(raw_role);
 
     Ok(json!({
         "matchId": match_id,
@@ -951,6 +972,7 @@ pub fn normalize_match_v5_detail(
         "durationSeconds": info["gameDuration"].as_i64().unwrap_or(1800),
         "patch": info["gameVersion"].as_str().unwrap_or("16.1"),
         "queueId": info["queueId"].as_i64().unwrap_or(420),
+        "role": role,
         "win": player["win"].as_bool().unwrap_or(false),
         "mapSide": if my_team_id == 200 { "red" } else { "blue" },
         "playerParticipantId": player_pid,
@@ -1075,6 +1097,13 @@ mod tests {
         assert!(out["frames"][0]["enemyJunglerPosition"].is_null());
         assert_eq!(out["frames"][0]["enemyJunglerGold"], 3500);
         assert_eq!(out["enemyJunglerName"], "Unknown");
+        assert_eq!(out["role"], "JUNGLE");
+
+        let mut adc_match = match_json.clone();
+        adc_match["info"]["participants"][0]["teamPosition"] = json!("BOTTOM");
+        let adc_out = normalize_match_v5_detail("EUW1_998", "p-ally", &adc_match, &timeline_json)
+            .expect("off-role ADC match normalizes with BOTTOM role");
+        assert_eq!(adc_out["role"], "BOTTOM");
     }
 
     #[test]

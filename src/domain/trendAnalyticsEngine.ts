@@ -1,3 +1,4 @@
+import { formatChampionName } from './championNames';
 import { formatClock } from './liveCoachEngine';
 import { normalizeRiotCoordinate } from './postGameReviewEngine';
 import type { LpHistoryPoint } from '../types/coaching';
@@ -133,7 +134,7 @@ export function aggregateDeathHeatmap(
       points.push({
         id: `${match.matchId}-d-${idx}`,
         matchId: match.matchId,
-        championName: match.championName,
+        championName: formatChampionName(match.championName, match.championId),
         timestampFormatted: formatClock(ev.timestampSec),
         x,
         y,

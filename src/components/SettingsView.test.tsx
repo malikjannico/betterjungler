@@ -57,6 +57,11 @@ describe('SettingsView overlay rollback', () => {
       />
     );
 
+    const riotIdInput = screen.getByLabelText(/Riot ID/i) as HTMLInputElement;
+    fireEvent.change(riotIdInput, { target: { value: 'DraftSaver#EUW' } });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Overlay & HUD' }));
+
     const hotkeySelect = screen.getByLabelText('Global Hotkey') as HTMLSelectElement;
     await act(async () => {
       fireEvent.change(hotkeySelect, { target: { value: 'Alt+B' } });
@@ -69,6 +74,10 @@ describe('SettingsView overlay rollback', () => {
     ).toBeInTheDocument();
     expect(hotkeySelect.value).toBe('Alt+J');
     expect(onSettingsChanged).toHaveBeenLastCalledWith(BASE_SETTINGS);
+
+    // Returning to Account & API preserves unsaved draft edits across subpage navigation
+    fireEvent.click(screen.getByRole('tab', { name: 'Account & API' }));
+    expect((screen.getByLabelText(/Riot ID/i) as HTMLInputElement).value).toBe('DraftSaver#EUW');
 
     spyEnv.mockRestore();
     spyPrefs.mockRestore();

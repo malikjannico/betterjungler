@@ -2,6 +2,18 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [1.3.0] - 2026-11-27
+
+### Added
+- **Settings Subpages & Clean Architecture**: Split Settings into focused subpages (`Account & API`, `Overlay & HUD`, `Recording & Replays`, `AI Coach`, `Updates & About`) while preserving unsaved draft edits across tab switches and direct deep-linking from Update & Recording CTAs.
+- **Post-Game Review Per-Game Subpages**: Organized each selected match into dedicated `Overview`, `Map & Timeline`, `Video & Replay`, and `AI Debrief` sub-tabs, keeping synchronized seconds cursors across tabs and jumping directly to `Map & Timeline` from any `Jump @ mm:ss` marker.
+- **Collapsible Navigation Rail & Solid-Background Jungle Crest Icon**: Added a collapsible left navigation rail (`204px` expanded / `68px` collapsed, toggled via button or `Ctrl+B` and persisted locally) alongside a bold solid-background Jungle Crest app icon, Windows ICO, web favicon, and `<BrandMark />`.
+
+### Changed
+- **Champion Display Name Normalization**: Added `formatChampionName()` backed by hydrated Data Dragon catalogs and internal Riot ID overrides so internal keys like `MonkeyKing`, `Khazix`, `FiddleSticks`, and `Belveth` render consistently as `Wukong`, `Kha'Zix`, `Fiddlesticks`, and `Bel'Veth` across Champ Select, Win Plan, Climb, and Post-Game Review.
+- **Jungle-Only Role Evaluation (`PRAGMA user_version = 4`)**: Persists normalized participant roles (`JUNGLE`, `TOP`, `MIDDLE`, `BOTTOM`, `UTILITY`) in Match-V5 normalization and SQLite `matches_fact.role`. Off-role matches show clear off-role badges and basic scoreboard stats without lane-CS/jungle grading and are excluded from Climb benchmarks, rolling goals, and SQLite jungle baselines/mistake hits.
+- **Broadcast-Inspired Compact HUD Refactor**: Redesigned the transparent floating HUD into sharp rectangular broadcast plates (`#0A0C12`, `3px` corners) with dual objective countdown tiles (`SCT`/`DRG`/`GRB`/`BRN`/`HLD`), geometric objective crest badges, bottom urgency bars, and left-accented tactical callout strips.
+
 ## [1.2.0] - 2026-11-27
 
 ### Added

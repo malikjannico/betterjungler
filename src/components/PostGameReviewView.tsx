@@ -2,9 +2,14 @@ import { History } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import pkg from '../../package.json';
 import { synthesizeDemoPostGameDebrief } from '../domain/aiCoachFallback';
+import { formatChampionName } from '../domain/championNames';
 import { evaluateFocusGoalAgainstMatch } from '../domain/climbLadderEngine';
 import { formatClock } from '../domain/liveCoachEngine';
-import { analyzePostGameMatch } from '../domain/postGameReviewEngine';
+import {
+  analyzePostGameMatch,
+  formatRoleLabel,
+  isJungleMatch,
+} from '../domain/postGameReviewEngine';
 import type { EmptyReason } from '../domain/sessionContext';
 import { generateAiDebrief } from '../services/tauriBridge';
 import type { AiCoachConfig, ClimbGoal, DemoScenarioId } from '../types/coaching';
@@ -14,6 +19,20 @@ import { GlassSurface } from './GlassSurface';
 import { GoldXpDiffChart } from './GoldXpDiffChart';
 import { PostGameTimelineMap } from './PostGameTimelineMap';
 import { RecordingPlayerCard } from './RecordingPlayerCard';
+
+export type PostGameSubpageId = 'overview' | 'timeline' | 'video' | 'ai';
+
+const JUNGLE_SUBPAGES: Array<{ id: PostGameSubpageId; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'timeline', label: 'Map & Timeline' },
+  { id: 'video', label: 'Video & Replay' },
+  { id: 'ai', label: 'AI Debrief' },
+];
+
+const OFFROLE_SUBPAGES: Array<{ id: PostGameSubpageId; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'video', label: 'Video & Replay' },
+];
 
 interface PostGameReviewViewProps {
   matches: MatchV5Detail[];
@@ -28,7 +47,7 @@ interface PostGameReviewViewProps {
   autoSyncNotice?: string | null;
   emptyReason?: EmptyReason;
   onSyncMatches: () => Promise<void>;
-  onOpenSettings?: () => void;
+  onOpenSettings?: (section?: 'account' | 'recording') => void;
   onPreviewSample?: (scenario: DemoScenarioId) => void;
 }
 
@@ -55,13 +74,14 @@ export function PostGameReviewView({
     manualId: null,
     seenAutoSyncId: lastAutoSyncedMatchId ?? null,
   });
+  const [subpage, setSubpage] = useState<PostGameSubpageId>('overview');
   const [activeSecondState, setActiveSecondState] = useState<{
     matchId: string;
     second: number | null;
   }>({ matchId: '', second: null });
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const [aiLoadingMatchId, setAiLoadingMatchId] = useState<string | null>(null);
   const [aiDebriefState, setAiDebriefState] = useState<{
     matchId: string;
     text: string | null;
@@ -75,11 +95,14 @@ export function PostGameReviewView({
     kind: 'success' | 'error';
     message: string;
   } | null>(null);
+  const mountedRef = useRef(true);
   const pendingRevokesRef = useRef<Array<{ timerId: number; url: string }>>([]);
 
   useEffect(() => {
+    mountedRef.current = true;
     const revokes = pendingRevokesRef;
     return () => {
+      mountedRef.current = false;
       for (const entry of revokes.current) {
         window.clearTimeout(entry.timerId);
         if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
@@ -120,8 +143,13 @@ export function PostGameReviewView({
     return analyzePostGameMatch(selectedMatch, targetDivision);
   }, [selectedMatch, targetDivision]);
 
+  const availableSubpages = report?.isJungle ? JUNGLE_SUBPAGES : OFFROLE_SUBPAGES;
+  const activeSubpage: PostGameSubpageId = availableSubpages.some((t) => t.id === subpage)
+    ? subpage
+    : 'overview';
+
   const focusGoalResult = useMemo(() => {
-    if (!focusGoal || !report) return null;
+    if (!focusGoal || !report || !report.isJungle) return null;
     return evaluateFocusGoalAgainstMatch(focusGoal, report.kpis);
   }, [focusGoal, report]);
 
@@ -132,6 +160,8 @@ export function PostGameReviewView({
       appVersion,
       exportedAt: new Date().toISOString(),
       matchId: report.matchId,
+      role: report.role,
+      isJungle: report.isJungle,
       championName: report.championName,
       enemyJunglerName: report.enemyJunglerName,
       win: report.win,
@@ -204,10 +234,12 @@ export function PostGameReviewView({
     }
   }
 
+  const isAiLoading = Boolean(selectedMatch && aiLoadingMatchId === selectedMatch.matchId);
+
   async function handleGenerateAiDebrief() {
-    if (!report) return;
+    if (!report || !report.isJungle) return;
     const requestMatchId = report.matchId;
-    setAiLoading(true);
+    setAiLoadingMatchId(requestMatchId);
     setAiErrorState({ matchId: requestMatchId, message: null });
     const context = JSON.stringify({
       champion: report.championName,
@@ -223,8 +255,10 @@ export function PostGameReviewView({
 
     try {
       const response = await generateAiDebrief(context);
+      if (!mountedRef.current) return;
       setAiDebriefState({ matchId: requestMatchId, text: response });
     } catch (err) {
+      if (!mountedRef.current) return;
       if (err instanceof Error && err.message === 'DEMO_FALLBACK') {
         setAiDebriefState({
           matchId: requestMatchId,
@@ -237,7 +271,9 @@ export function PostGameReviewView({
         });
       }
     } finally {
-      setAiLoading(false);
+      if (mountedRef.current) {
+        setAiLoadingMatchId((prev) => (prev === requestMatchId ? null : prev));
+      }
     }
   }
 
@@ -250,7 +286,7 @@ export function PostGameReviewView({
           description={
             emptyReason === 'no_account' || !canSyncLive
               ? 'Save your Riot ID & Personal Riot API Key in Settings to download Match-V5 timelines and review pathing, objectives, and mistakes.'
-              : 'Sync your recent ranked jungle games to review minute-by-minute gold swings, pathing replay, and objective mistakes.'
+              : 'Sync your recent ranked games to review minute-by-minute gold swings, pathing replay, and objective mistakes.'
           }
           action={
             canSyncLive
@@ -262,7 +298,7 @@ export function PostGameReviewView({
               : onOpenSettings
                 ? {
                     label: 'Open Settings',
-                    onClick: onOpenSettings,
+                    onClick: () => onOpenSettings('account'),
                   }
                 : undefined
           }
@@ -286,19 +322,33 @@ export function PostGameReviewView({
         ? 'text-emerald-200 border-emerald-300/40 bg-emerald-400/10'
         : report.grade === 'B'
           ? 'text-white border-white/25 bg-white/10'
-          : 'text-rose-200 border-rose-300/40 bg-rose-400/10';
+          : report.grade === 'N/A'
+            ? 'text-slate-300 border-white/15 bg-white/[0.04]'
+            : 'text-rose-200 border-rose-300/40 bg-rose-400/10';
 
   const effectiveCursorSecond = activeSecond ?? selectedMatch.durationSeconds;
   const csTenLabel =
     report.kpis.csAt10Minute === 11 ? 'CS @5 / @11' : 'CS @5 / @10';
+  const roleLabel = formatRoleLabel(report.role);
+
+  function jumpToSecondOnTimeline(sec: number) {
+    if (!selectedMatch) return;
+    setActiveSecondState({
+      matchId: selectedMatch.matchId,
+      second: Math.round(sec),
+    });
+    setSubpage('timeline');
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Match Selector Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="lg-segmented flex flex-wrap items-center gap-1">
           {matches.map((m) => {
             const active = m.matchId === selectedMatch.matchId;
+            const mJungle = isJungleMatch(m);
+            const mDisplayName = formatChampionName(m.championName, m.championId);
             return (
               <button
                 key={m.matchId}
@@ -309,6 +359,9 @@ export function PostGameReviewView({
                     manualId: m.matchId,
                     seenAutoSyncId: lastAutoSyncedMatchId ?? null,
                   });
+                  if (!mJungle) {
+                    setSubpage('overview');
+                  }
                   setActiveSecondState({
                     matchId: m.matchId,
                     second: m.durationSeconds,
@@ -327,7 +380,12 @@ export function PostGameReviewView({
                 >
                   {m.win ? 'W' : 'L'}
                 </span>
-                <span>{m.championName}</span>
+                <span>{mDisplayName}</span>
+                {!mJungle && (
+                  <span className="ml-1.5 rounded bg-white/10 px-1 py-0.5 text-[10px] font-medium text-white/[0.72]">
+                    {formatRoleLabel(m.role)}
+                  </span>
+                )}
                 <span className="tabular-nums ml-1.5 text-[11px] text-white/[0.55]">
                   {m.kills}/{m.deaths}/{m.assists}
                 </span>
@@ -388,51 +446,15 @@ export function PostGameReviewView({
         </p>
       )}
 
-      {/* Last Game Takeaway & Lead Focus Goal PASS/MISS Verdict */}
-      <GlassSurface className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs">
-        <div className="space-y-0.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="t-caption font-semibold text-white/[0.55]">
-              Last Game Takeaway
-            </span>
-            {selectedMatch.matchId === lastAutoSyncedMatchId && (
-              <span className="t-caption font-medium text-emerald-300">Auto-Synced</span>
-            )}
-          </div>
-          <p className="t-body text-white/[0.88]">
-            {report.mistakes[0]?.detail ??
-              report.improvements[0]?.detail ??
-              report.highlights[0]?.detail ??
-              'Solid jungle fundamentals across objective setups.'}
-          </p>
-        </div>
-
-        {focusGoal && focusGoalResult && (
-          <div className="lg-inset flex items-center gap-2.5 px-3 py-2">
-            <span
-              className={`t-caption font-bold ${
-                focusGoalResult.passed ? 'text-emerald-300' : 'text-rose-300'
-              }`}
-            >
-              Focus {focusGoalResult.passed ? 'PASS' : 'MISS'}
-            </span>
-            <div className="t-caption">
-              <div className="font-medium text-white/[0.92]">{focusGoal.title}</div>
-              <div className="tabular-nums text-[11px] text-white/[0.55]">
-                {focusGoalResult.deltaLabel}
-              </div>
-            </div>
-          </div>
-        )}
-      </GlassSurface>
-
-      {/* Match Header + Grade + KPIs */}
+      {/* Match Header + Verdict Grade */}
       <GlassSurface className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="t-title text-white/[0.92]">
-                {report.championName} vs {report.enemyJunglerName}
+                {report.isJungle
+                  ? `${report.championName} vs ${report.enemyJunglerName}`
+                  : `${report.championName} (${roleLabel})`}
               </h2>
               <span
                 className={`t-caption font-semibold ${
@@ -441,194 +463,311 @@ export function PostGameReviewView({
               >
                 {report.win ? 'Victory' : 'Defeat'} · {formatClock(report.durationSeconds)}
               </span>
+              {selectedMatch.matchId === lastAutoSyncedMatchId && (
+                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-medium text-emerald-300">
+                  Auto-Synced
+                </span>
+              )}
+              {!report.isJungle && (
+                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[11px] font-medium text-white/[0.78]">
+                  Off-Role ({roleLabel})
+                </span>
+              )}
             </div>
             <p className="t-caption mt-0.5 text-white/[0.55]">
-              Benchmarked against {targetDivision}
+              {report.isJungle
+                ? `Jungle evaluation benchmarked against ${targetDivision}`
+                : 'Basic match stats shown · Jungle benchmarks & climb metrics exclude off-role games'}
             </p>
           </div>
 
-          <div
-            className={`flex h-11 w-11 items-center justify-center rounded-full border text-base font-bold ${gradeColor}`}
-            title="Overall Jungle Performance Grade"
-          >
-            {report.grade}
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-7">
-          {[
-            { label: 'CS / min', value: String(report.kpis.csPerMin) },
-            {
-              label: csTenLabel,
-              value: `${report.kpis.csAt5 ?? 'n/a'} / ${report.kpis.csAt10 ?? 'n/a'}`,
-            },
-            {
-              label: 'Gold diff @15',
-              value: `${report.kpis.goldDiffAt15 >= 0 ? '+' : ''}${report.kpis.goldDiffAt15}g`,
-            },
-            { label: 'Obj share', value: `${report.kpis.objectiveSharePct}%` },
-            { label: 'Vision / min', value: String(report.kpis.visionPerMin) },
-            { label: 'Pre-obj deaths', value: String(report.kpis.preObjectiveDeaths) },
-            { label: 'Control wards', value: String(report.kpis.controlWardsBought) },
-          ].map((kpi) => (
-            <div key={kpi.label} className="lg-inset px-3 py-2.5">
-              <div className="t-caption text-white/[0.55]">{kpi.label}</div>
-              <div className="tabular-nums mt-1 text-base font-bold text-white">
-                {kpi.value}
+          <div className="flex items-center gap-3">
+            {focusGoal && focusGoalResult && (
+              <div className="lg-inset flex items-center gap-2 px-2.5 py-1.5">
+                <span
+                  className={`t-caption font-bold ${
+                    focusGoalResult.passed ? 'text-emerald-300' : 'text-rose-300'
+                  }`}
+                >
+                  Focus {focusGoalResult.passed ? 'PASS' : 'MISS'}
+                </span>
+                <div className="t-caption">
+                  <div className="font-medium text-white/[0.92]">{focusGoal.title}</div>
+                  <div className="tabular-nums text-[11px] text-white/[0.55]">
+                    {focusGoalResult.deltaLabel}
+                  </div>
+                </div>
               </div>
+            )}
+
+            <div
+              className={`flex h-11 min-w-[44px] items-center justify-center rounded-full border px-2 text-sm font-bold ${gradeColor}`}
+              title={report.isJungle ? 'Overall Jungle Performance Grade' : 'Off-Role Match'}
+            >
+              {report.grade}
             </div>
-          ))}
+          </div>
         </div>
       </GlassSurface>
 
-      {/* Synchronized Gold/XP Timeline Curve & Interactive Rift Replay */}
-      <GoldXpDiffChart
-        key={`chart-${selectedMatch.matchId}`}
-        match={selectedMatch}
-        activeSecond={effectiveCursorSecond}
-        onSelectSecond={(second) =>
-          setActiveSecondState({ matchId: selectedMatch.matchId, second })
-        }
-      />
+      {/* Per-Game Subpage Tab Strip */}
+      <div
+        role="tablist"
+        aria-label="Match review sections"
+        className="lg-segmented inline-flex flex-wrap items-center gap-1"
+      >
+        {availableSubpages.map((tab) => {
+          const isActive = activeSubpage === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setSubpage(tab.id)}
+              className={`rounded-[7px] px-3 py-1.5 text-xs font-medium transition ${
+                isActive
+                  ? 'lg-segment-active font-semibold'
+                  : 'text-white/[0.62] hover:bg-white/[0.04] hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
 
-      <PostGameTimelineMap
-        key={selectedMatch.matchId}
-        durationSeconds={selectedMatch.durationSeconds}
-        patchVersion={patchVersion}
-        pathPoints={report.pathPoints}
-        enemyPathPoints={report.enemyPathPoints}
-        markers={report.markers}
-        activeSecond={effectiveCursorSecond}
-        onChangeSecond={(second) =>
-          setActiveSecondState({ matchId: selectedMatch.matchId, second })
-        }
-      />
-
-      {/* Opt-In Synchronized Match Video & Riot Replay Deep-Link */}
-      <RecordingPlayerCard
-        key={`rec-${selectedMatch.matchId}`}
-        matchId={selectedMatch.matchId}
-        durationSeconds={selectedMatch.durationSeconds}
-        activeSecond={effectiveCursorSecond}
-        isTauri={isTauri}
-        onSelectSecond={(second) =>
-          setActiveSecondState({ matchId: selectedMatch.matchId, second })
-        }
-        onOpenSettings={onOpenSettings}
-      />
-
-      {/* What You Did Good / Mistakes / Where to Improve */}
-      <GlassSurface className="p-4">
-        <div className="grid gap-6 md:grid-cols-3">
-          <div>
-            <div className="t-caption mb-2.5 font-semibold text-emerald-300">
-              What You Did Good
-            </div>
-            <div className="space-y-2.5">
-              {report.highlights.map((item) => (
-                <div key={item.id} className="t-caption">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-white/[0.92]">{item.title}</span>
-                    {item.timestampSec !== undefined && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActiveSecondState({
-                            matchId: selectedMatch.matchId,
-                            second: Math.round(item.timestampSec!),
-                          })
-                        }
-                        className="tabular-nums shrink-0 rounded-[5px] border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-white/[0.72] hover:text-white"
-                      >
-                        Jump @ {formatClock(item.timestampSec)}
-                      </button>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
+      {/* Subpage 1: Overview */}
+      {activeSubpage === 'overview' && (
+        <div className="space-y-4">
+          {!report.isJungle ? (
+            <>
+              <div
+                role="status"
+                className="rounded-[10px] border border-white/15 bg-white/[0.04] px-4 py-3 text-xs text-white/[0.78]"
+              >
+                <strong className="font-semibold text-white">Off-role game ({roleLabel})</strong> —
+                No deep jungle evaluation or lane-CS grading is generated here, and this match is
+                excluded from your Jungle Climb benchmarks and mistake trends.
+              </div>
+              <GlassSurface className="p-4">
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+                  {[
+                    {
+                      label: 'K / D / A',
+                      value: `${selectedMatch.kills}/${selectedMatch.deaths}/${selectedMatch.assists}`,
+                    },
+                    { label: 'CS / min', value: String(report.kpis.csPerMin) },
+                    { label: 'Vision / min', value: String(report.kpis.visionPerMin) },
+                    { label: 'Control wards', value: String(report.kpis.controlWardsBought) },
+                    { label: 'Kill participation', value: `${report.kpis.killParticipationPct}%` },
+                  ].map((stat) => (
+                    <div key={stat.label} className="lg-inset px-3 py-2.5">
+                      <div className="t-caption text-white/[0.55]">{stat.label}</div>
+                      <div className="tabular-nums mt-1 text-base font-bold text-white">
+                        {stat.value}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
+              </GlassSurface>
+            </>
+          ) : (
+            <>
+              <GlassSurface className="space-y-3 p-4">
+                <div>
+                  <span className="t-caption font-semibold text-white/[0.55]">
+                    Last Game Takeaway
+                  </span>
+                  <p className="t-body mt-0.5 text-white/[0.88]">
+                    {report.mistakes[0]?.detail ??
+                      report.improvements[0]?.detail ??
+                      report.highlights[0]?.detail ??
+                      'Solid jungle fundamentals across objective setups.'}
+                  </p>
+                </div>
 
-          <div className="border-t border-white/[0.08] pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6">
-            <div className="t-caption mb-2.5 font-semibold text-rose-300">
-              Mistakes to Cut Out
-            </div>
-            <div className="space-y-2.5">
-              {report.mistakes.length > 0 ? (
-                report.mistakes.map((item) => (
-                  <div key={item.id} className="t-caption">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-white/[0.92]">{item.title}</span>
-                      {item.timestampSec !== undefined && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActiveSecondState({
-                              matchId: selectedMatch.matchId,
-                              second: Math.round(item.timestampSec!),
-                            })
-                          }
-                          className="tabular-nums shrink-0 rounded-[5px] border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-[11px] text-rose-200 hover:bg-rose-500/20"
-                        >
-                          Jump @ {formatClock(item.timestampSec)}
-                        </button>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-7">
+                  {[
+                    { label: 'CS / min', value: String(report.kpis.csPerMin) },
+                    {
+                      label: csTenLabel,
+                      value: `${report.kpis.csAt5 ?? 'n/a'} / ${report.kpis.csAt10 ?? 'n/a'}`,
+                    },
+                    {
+                      label: 'Gold diff @15',
+                      value: `${report.kpis.goldDiffAt15 >= 0 ? '+' : ''}${report.kpis.goldDiffAt15}g`,
+                    },
+                    { label: 'Obj share', value: `${report.kpis.objectiveSharePct}%` },
+                    { label: 'Vision / min', value: String(report.kpis.visionPerMin) },
+                    { label: 'Pre-obj deaths', value: String(report.kpis.preObjectiveDeaths) },
+                    { label: 'Control wards', value: String(report.kpis.controlWardsBought) },
+                  ].map((kpi) => (
+                    <div key={kpi.label} className="lg-inset px-3 py-2.5">
+                      <div className="t-caption text-white/[0.55]">{kpi.label}</div>
+                      <div className="tabular-nums mt-1 text-base font-bold text-white">
+                        {kpi.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </GlassSurface>
+
+              <GlassSurface className="p-4">
+                <div className="grid gap-6 md:grid-cols-3">
+                  <div>
+                    <div className="t-caption mb-2.5 font-semibold text-emerald-300">
+                      What You Did Good
+                    </div>
+                    <div className="space-y-2.5">
+                      {report.highlights.map((item) => (
+                        <div key={item.id} className="t-caption">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-white/[0.92]">{item.title}</span>
+                            {item.timestampSec !== undefined && (
+                              <button
+                                type="button"
+                                onClick={() => jumpToSecondOnTimeline(item.timestampSec!)}
+                                className="tabular-nums shrink-0 rounded-[5px] border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-white/[0.72] hover:text-white"
+                              >
+                                Jump @ {formatClock(item.timestampSec)}
+                              </button>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/[0.08] pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6">
+                    <div className="t-caption mb-2.5 font-semibold text-rose-300">
+                      Mistakes to Cut Out
+                    </div>
+                    <div className="space-y-2.5">
+                      {report.mistakes.length > 0 ? (
+                        report.mistakes.map((item) => (
+                          <div key={item.id} className="t-caption">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold text-white/[0.92]">{item.title}</span>
+                              {item.timestampSec !== undefined && (
+                                <button
+                                  type="button"
+                                  onClick={() => jumpToSecondOnTimeline(item.timestampSec!)}
+                                  className="tabular-nums shrink-0 rounded-[5px] border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-[11px] text-rose-200 hover:bg-rose-500/20"
+                                >
+                                  Jump @ {formatClock(item.timestampSec)}
+                                </button>
+                              )}
+                            </div>
+                            <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="t-caption text-white/[0.58]">
+                          No major macro mistakes flagged in this match.
+                        </p>
                       )}
                     </div>
-                    <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
                   </div>
-                ))
-              ) : (
-                <p className="t-caption text-white/[0.58]">
-                  No major macro mistakes flagged in this match.
-                </p>
-              )}
-            </div>
-          </div>
 
-          <div className="border-t border-white/[0.08] pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6">
-            <div className="t-caption mb-2.5 font-semibold text-white/[0.92]">
-              Where &amp; How to Improve
-            </div>
-            <div className="space-y-2.5">
-              {report.improvements.map((item) => (
-                <div key={item.id} className="t-caption">
-                  <div className="font-semibold text-white/[0.92]">{item.title}</div>
-                  <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
+                  <div className="border-t border-white/[0.08] pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6">
+                    <div className="t-caption mb-2.5 font-semibold text-white/[0.92]">
+                      Where &amp; How to Improve
+                    </div>
+                    <div className="space-y-2.5">
+                      {report.improvements.map((item) => (
+                        <div key={item.id} className="t-caption">
+                          <div className="font-semibold text-white/[0.92]">{item.title}</div>
+                          <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
+              </GlassSurface>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Subpage 2: Map & Timeline */}
+      {activeSubpage === 'timeline' && report.isJungle && (
+        <div className="space-y-4">
+          <GoldXpDiffChart
+            key={`chart-${selectedMatch.matchId}`}
+            match={selectedMatch}
+            activeSecond={effectiveCursorSecond}
+            onSelectSecond={(second) =>
+              setActiveSecondState({ matchId: selectedMatch.matchId, second })
+            }
+          />
+
+          <PostGameTimelineMap
+            key={selectedMatch.matchId}
+            durationSeconds={selectedMatch.durationSeconds}
+            patchVersion={patchVersion}
+            pathPoints={report.pathPoints}
+            enemyPathPoints={report.enemyPathPoints}
+            markers={report.markers}
+            activeSecond={effectiveCursorSecond}
+            onChangeSecond={(second) =>
+              setActiveSecondState({ matchId: selectedMatch.matchId, second })
+            }
+          />
+        </div>
+      )}
+
+      {/* Subpage 3: Video & Replay */}
+      {activeSubpage === 'video' && (
+        <RecordingPlayerCard
+          key={`rec-${selectedMatch.matchId}`}
+          matchId={selectedMatch.matchId}
+          durationSeconds={selectedMatch.durationSeconds}
+          activeSecond={effectiveCursorSecond}
+          isTauri={isTauri}
+          onSelectSecond={(second) =>
+            setActiveSecondState({ matchId: selectedMatch.matchId, second })
+          }
+          onOpenSettings={onOpenSettings ? () => onOpenSettings('recording') : undefined}
+        />
+      )}
+
+      {/* Subpage 4: AI Debrief */}
+      {activeSubpage === 'ai' && report.isJungle && (
+        <GlassSurface className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="t-caption font-medium text-white/[0.75]">
+              Optional AI Coach Debrief (
+              {aiConfig.provider === 'off'
+                ? 'Built-in Coaching Preview / Configure AI in Settings'
+                : `${aiConfig.provider.toUpperCase()} · ${aiConfig.model}`}
+              )
+            </span>
+            <button
+              type="button"
+              disabled={isAiLoading}
+              onClick={() => void handleGenerateAiDebrief()}
+              className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {isAiLoading ? 'Generating...' : 'Generate AI Coach Debrief'}
+            </button>
           </div>
-        </div>
-      </GlassSurface>
 
-      {/* Optional BYOK AI Coach Debrief */}
-      <GlassSurface className="p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="t-caption font-medium text-white/[0.75]">
-            Optional AI Coach Debrief (
-            {aiConfig.provider === 'off'
-              ? 'Built-in Coaching Preview / Configure AI in Settings'
-              : `${aiConfig.provider.toUpperCase()} · ${aiConfig.model}`}
-            )
-          </span>
-          <button
-            type="button"
-            disabled={aiLoading}
-            onClick={() => void handleGenerateAiDebrief()}
-            className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-          >
-            {aiLoading ? 'Generating...' : 'Generate AI Coach Debrief'}
-          </button>
-        </div>
-
-        {aiDebrief && (
-          <pre className="lg-inset t-caption mt-3 whitespace-pre-wrap p-3 font-sans leading-relaxed text-white/[0.88]">
-            {aiDebrief}
-          </pre>
-        )}
-        {aiError && <p className="t-caption mt-2 text-rose-300">{aiError}</p>}
-      </GlassSurface>
+          {aiDebrief && (
+            <pre className="lg-inset t-caption mt-3 whitespace-pre-wrap p-3 font-sans leading-relaxed text-white/[0.88]">
+              {aiDebrief}
+            </pre>
+          )}
+          {!aiDebrief && !aiError && (
+            <p className="t-caption mt-3 text-white/[0.55]">
+              Click &quot;Generate AI Coach Debrief&quot; for a narrative summary grounded in your{' '}
+              {report.championName} vs {report.enemyJunglerName} match telemetry.
+            </p>
+          )}
+          {aiError && <p className="t-caption mt-2 text-rose-300">{aiError}</p>}
+        </GlassSurface>
+      )}
     </div>
   );
 }

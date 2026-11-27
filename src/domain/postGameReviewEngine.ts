@@ -1,3 +1,4 @@
+import { formatChampionName } from './championNames';
 import { formatClock } from './liveCoachEngine';
 import { parseTargetTier, DIVISION_BENCHMARKS } from './climbLadderEngine';
 import type {
@@ -11,6 +12,33 @@ import type { MatchSummaryRecord, MatchV5Detail } from '../types/riot';
 
 const RIOT_MAP_MAX = 14870;
 const KEY_SPAWN_SECONDS = [300, 360, 840, 1500];
+
+export function isJungleMatch(match: { role?: string | null }): boolean {
+  const normalized = (match.role ?? '').trim().toUpperCase();
+  return !normalized || normalized === 'JUNGLE';
+}
+
+export function formatRoleLabel(role?: string | null): string {
+  switch ((role ?? '').trim().toUpperCase()) {
+    case '':
+    case 'JUNGLE':
+      return 'Jungle';
+    case 'TOP':
+      return 'Top';
+    case 'MIDDLE':
+    case 'MID':
+      return 'Mid';
+    case 'BOTTOM':
+    case 'BOT':
+    case 'ADC':
+      return 'ADC';
+    case 'UTILITY':
+    case 'SUPPORT':
+      return 'Support';
+    default:
+      return 'Off-Role';
+  }
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -227,6 +255,35 @@ export function analyzePostGameMatch(
     }
   });
 
+  // Non-jungle games (Top/Mid/ADC/Support) only compute basic scoreboard stats & timeline without jungle evaluation
+  const role = (match.role ?? 'JUNGLE').trim().toUpperCase() || 'JUNGLE';
+  const jungleRole = isJungleMatch(match);
+  const displayChampionName = formatChampionName(match.championName, match.championId);
+  const displayEnemyJunglerName = formatChampionName(
+    match.enemyJunglerName,
+    match.enemyJunglerChampionId
+  );
+
+  if (!jungleRole) {
+    return {
+      matchId: match.matchId,
+      championName: displayChampionName,
+      enemyJunglerName: displayEnemyJunglerName,
+      role,
+      isJungle: false,
+      win: match.win,
+      durationSeconds: match.durationSeconds,
+      grade: 'N/A',
+      kpis,
+      highlights: [],
+      mistakes: [],
+      improvements: [],
+      pathPoints,
+      enemyPathPoints,
+      markers,
+    };
+  }
+
   // Evaluate against target division benchmarks
   const tier = parseTargetTier(targetDivision);
   const bench = DIVISION_BENCHMARKS[tier];
@@ -243,8 +300,8 @@ export function analyzePostGameMatch(
       title: `Strong Early Jungle Tempo (+${goldDiffAt15}g @ 15m)`,
       detail:
         csAt4 !== undefined
-          ? `Out-paced ${match.enemyJunglerName} through the first 15 minutes with ${csAt4} CS at 4:00.`
-          : `Out-paced ${match.enemyJunglerName} through the first 15 minutes in early jungle gold tempo.`,
+          ? `Out-paced ${displayEnemyJunglerName} through the first 15 minutes with ${csAt4} CS at 4:00.`
+          : `Out-paced ${displayEnemyJunglerName} through the first 15 minutes in early jungle gold tempo.`,
     });
   }
   if (objectiveSharePct >= 55) {
@@ -330,7 +387,7 @@ export function analyzePostGameMatch(
       id: 'mk-gd15',
       category: 'pathing',
       severity: 'mistake',
-      title: `Fell Behind Early (${goldDiffAt15}g @ 15m vs ${match.enemyJunglerName})`,
+      title: `Fell Behind Early (${goldDiffAt15}g @ 15m vs ${displayEnemyJunglerName})`,
       detail: 'Lost early skirmishes or forced low-odds ganks while enemy jungler counter-jungled.',
     });
     improvements.push({
@@ -414,8 +471,10 @@ export function analyzePostGameMatch(
 
   return {
     matchId: match.matchId,
-    championName: match.championName,
-    enemyJunglerName: match.enemyJunglerName,
+    championName: displayChampionName,
+    enemyJunglerName: displayEnemyJunglerName,
+    role,
+    isJungle: true,
     win: match.win,
     durationSeconds: match.durationSeconds,
     grade,
@@ -437,7 +496,8 @@ export function toMatchSummaryRecord(
     matchId: match.matchId,
     playedAt: match.playedAt,
     championId: match.championId,
-    championName: match.championName,
+    championName: formatChampionName(match.championName, match.championId),
+    role: match.role ?? 'JUNGLE',
     win: match.win,
     durationSeconds: match.durationSeconds,
     kills: match.kills,
