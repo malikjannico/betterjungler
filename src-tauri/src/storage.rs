@@ -476,8 +476,8 @@ fn upsert_match_facts(
     let gd_15 = frame15.map(|f| {
         f["totalGold"].as_i64().unwrap_or(0) - f["enemyJunglerGold"].as_i64().unwrap_or(0)
     });
-    let xp_15 = frame15
-        .map(|f| f["xp"].as_i64().unwrap_or(0) - f["enemyJunglerXp"].as_i64().unwrap_or(0));
+    let xp_15 =
+        frame15.map(|f| f["xp"].as_i64().unwrap_or(0) - f["enemyJunglerXp"].as_i64().unwrap_or(0));
 
     let team_obj = detail["teamObjectives"].as_i64().unwrap_or(0);
     let enemy_obj = detail["enemyObjectives"].as_i64().unwrap_or(0);

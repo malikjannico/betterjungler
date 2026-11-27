@@ -191,7 +191,9 @@ fn record_lp_if_changed(
     let latest = storage::get_latest_lp_snapshot(conn).ok().flatten();
     let should_insert = match &latest {
         Some(prev) => {
-            let games_advanced = prev.total_games.is_some_and(|prev_tg| total_games > prev_tg);
+            let games_advanced = prev
+                .total_games
+                .is_some_and(|prev_tg| total_games > prev_tg);
             prev.absolute_lp != abs_lp
                 || (recent_win.is_some() && prev.league_points == 0)
                 || games_advanced

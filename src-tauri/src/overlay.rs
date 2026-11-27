@@ -407,7 +407,10 @@ mod tests {
         let (pw, ph, px, py) =
             compute_physical_hud_rect("bottom-right", "right", 125, 1920, 0, 3840, 2160, 1.5);
         assert_eq!((pw, ph), (795, 345));
-        assert_eq!(px, 1920 + ((2560.0_f64 - 530.0 - 16.0) * 1.5).round() as i32);
+        assert_eq!(
+            px,
+            1920 + ((2560.0_f64 - 530.0 - 16.0) * 1.5).round() as i32
+        );
         assert_eq!(py, ((1440.0_f64 - 230.0 - 16.0) * 1.5).round() as i32);
     }
 }
