@@ -28,6 +28,18 @@ fn main() {
             "check_update",
             "install_update",
             "stage_update",
+            "probe_hardware_encoder",
+            "get_recording_status",
+            "list_recordings",
+            "get_match_recording",
+            "toggle_recording_pin",
+            "delete_recording",
+            "save_recording_clip",
+            "delete_recording_clip",
+            "open_recordings_folder",
+            "inspect_replay_config",
+            "set_replay_api_enabled",
+            "seek_riot_replay",
         ]));
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }

@@ -290,6 +290,103 @@ export type HudScalePercent = 100 | 125 | 150;
 export type HudMonitorTarget = 'primary' | 'active';
 export type MinimapSide = 'right' | 'left';
 export type UpdateMode = 'manual' | 'install_on_quit';
+export type RecordingPreset = '720p30' | '1080p60' | 'clips_only';
+
+export interface RecordingSettings {
+  enabled: boolean;
+  preset: RecordingPreset;
+  maxStorageGb: number;
+  keepLastNGames: number;
+  autoRecordRanked: boolean;
+  replayApiEnabled: boolean;
+}
+
+export interface HardwareEncoderStatus {
+  hardwareAvailable: boolean;
+  encoderNames: string[];
+  recommendedPreset: RecordingPreset | string;
+  message: string;
+  leagueWindowMode: 'borderless' | 'windowed' | 'fullscreen' | 'unknown' | string;
+}
+
+export interface RecordingRuntimeStatus {
+  state: 'idle' | 'recording' | 'stopping' | 'unavailable' | 'error' | string;
+  recordingId?: string | null;
+  preset: RecordingPreset | string;
+  elapsedSec: number;
+  encoderName?: string | null;
+  message?: string | null;
+}
+
+export interface RecordingRecord {
+  id: string;
+  matchId?: string | null;
+  filePath: string;
+  startedAt: string;
+  endedAt?: string | null;
+  durationSec: number;
+  sizeBytes: number;
+  width: number;
+  height: number;
+  fps: number;
+  preset: RecordingPreset | string;
+  encoderName: string;
+  syncOffsetSec: number;
+  pinned: boolean;
+  status: 'recording' | 'ready' | 'failed' | 'interrupted' | string;
+}
+
+export interface RecordingClipRecord {
+  id: string;
+  recordingId: string;
+  matchId?: string | null;
+  label: string;
+  kind: string;
+  gameTimeSec: number;
+  startSec: number;
+  endSec: number;
+  pinned: boolean;
+  createdAt: string;
+}
+
+export interface GameCfgReplayStatus {
+  cfgExists: boolean;
+  cfgPath: string;
+  replayApiEnabled: boolean;
+  windowMode: 'borderless' | 'windowed' | 'fullscreen' | 'unknown' | string;
+  previewDiff: string;
+}
+
+export interface RoflReplayInfo {
+  matchId: string;
+  fileName: string;
+  filePath: string;
+  sizeBytes: number;
+}
+
+export interface ReplayPlaybackState {
+  connected: boolean;
+  time: number;
+  length: number;
+  paused: boolean;
+  speed: number;
+}
+
+export interface ReplaySeekResult {
+  status: 'seeked' | 'launched' | 'unavailable' | string;
+  message: string;
+  targetSec: number;
+  playback?: ReplayPlaybackState | null;
+  rofl?: RoflReplayInfo | null;
+}
+
+export interface MatchRecordingBundle {
+  recording: RecordingRecord | null;
+  clips: RecordingClipRecord[];
+  rofl: RoflReplayInfo | null;
+  replayApiConnected: boolean;
+  replayApiEnabled: boolean;
+}
 
 export interface AiCoachConfig {
   provider: AiProvider;
@@ -317,6 +414,7 @@ export interface UserSettings {
   updateMode?: UpdateMode;
   riotApiProxyUrl?: string;
   aiCoach: AiCoachConfig;
+  recording?: RecordingSettings;
 }
 
 export interface LpHistoryPoint {

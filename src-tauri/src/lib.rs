@@ -5,12 +5,14 @@ mod lcu;
 mod live_client;
 mod overlay;
 mod rate_limiter;
+mod recorder;
+mod replay_api;
 mod riot_api;
 mod storage;
 mod updater;
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -25,8 +27,13 @@ use crate::lcu::{RunePageSpec, SanitizedChampSelectSession};
 use crate::live_client::LiveClientPollResult;
 use crate::overlay::OverlayController;
 use crate::rate_limiter::RiotRateLimiter;
+use crate::recorder::{HardwareEncoderStatus, RecordingRuntimeStatus};
+use crate::replay_api::{GameCfgReplayStatus, ReplaySeekResult, RoflReplayInfo};
 use crate::riot_api::{ApiKeyHealthStatus, SummonerProfileSummary};
-use crate::storage::{tier_rank_to_absolute_lp, ClimbGoalRecord, LpHistoryRecord, UserSettings};
+use crate::storage::{
+    tier_rank_to_absolute_lp, ClimbGoalRecord, LpHistoryRecord, RecordingClipRecord,
+    RecordingRecord, RecordingSettings, UserSettings,
+};
 use crate::updater::{AppMetaInfo, UpdateCheckResult};
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,6 +48,8 @@ pub struct AppRuntimeState {
     pub live_game: Option<Value>,
     pub summoner_profile: Option<SummonerProfileSummary>,
     pub patch_version: String,
+    pub recording_status: String,
+    pub recording_elapsed_sec: f64,
 }
 
 impl Default for AppRuntimeState {
@@ -55,6 +64,8 @@ impl Default for AppRuntimeState {
             live_game: None,
             summoner_profile: None,
             patch_version: "16.23.1".to_string(),
+            recording_status: "idle".to_string(),
+            recording_elapsed_sec: 0.0,
         }
     }
 }
@@ -63,6 +74,16 @@ impl Default for AppRuntimeState {
 struct ApplyActionResult {
     success: bool,
     message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchRecordingBundle {
+    pub recording: Option<RecordingRecord>,
+    pub clips: Vec<RecordingClipRecord>,
+    pub rofl: Option<RoflReplayInfo>,
+    pub replay_api_connected: bool,
+    pub replay_api_enabled: bool,
 }
 
 pub struct SharedState {
@@ -74,6 +95,11 @@ pub struct SharedState {
     ai_client: reqwest::Client,
     riot_limiter: Arc<RiotRateLimiter>,
     install_path: Arc<RwLock<String>>,
+    recordings_dir: PathBuf,
+    recorder: Arc<recorder::RecorderManager>,
+    recording_settings: Arc<RwLock<RecordingSettings>>,
+    hardware_probe_cache: Mutex<Option<HardwareEncoderStatus>>,
+    clip_seq: AtomicU64,
     live_miss_streak: Arc<AtomicU8>,
     pending_update: Mutex<Option<updater::PendingUpdate>>,
     log_dir: PathBuf,
@@ -110,6 +136,9 @@ fn get_settings(state: State<'_, Arc<SharedState>>) -> AppResult<UserSettings> {
 #[tauri::command]
 fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings) -> AppResult<()> {
     settings.update_mode = updater::normalize_update_mode(&settings.update_mode);
+    settings.recording.preset = storage::normalize_recording_preset(&settings.recording.preset);
+    settings.recording.max_storage_gb = settings.recording.max_storage_gb.clamp(1, 50);
+    settings.recording.keep_last_n_games = settings.recording.keep_last_n_games.clamp(1, 100);
     let trimmed_proxy = settings.riot_api_proxy_url.trim().to_string();
     settings.riot_api_proxy_url = if trimmed_proxy.is_empty() {
         String::new()
@@ -136,6 +165,9 @@ fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings)
     storage::save_settings(&conn, &settings)?;
     if let Ok(mut path_guard) = state.install_path.write() {
         *path_guard = settings.lol_install_path.clone();
+    }
+    if let Ok(mut rec_guard) = state.recording_settings.write() {
+        *rec_guard = settings.recording.clone();
     }
     Ok(())
 }
@@ -413,6 +445,11 @@ async fn sync_recent_matches(
         };
 
         if let Some(detail) = cached {
+            if let Some(played_at) = detail["playedAt"].as_str() {
+                if let Ok(conn) = state.db.lock() {
+                    let _ = storage::bind_unlinked_recording_to_match(&conn, &match_id, played_at);
+                }
+            }
             details.push(detail);
             continue;
         }
@@ -470,6 +507,7 @@ async fn sync_recent_matches(
                 &summary_stub,
                 &detail,
             )?;
+            let _ = storage::bind_unlinked_recording_to_match(&conn, &match_id, &played_at);
         }
 
         details.push(detail);
@@ -794,6 +832,383 @@ async fn stage_update(app: AppHandle, state: State<'_, Arc<SharedState>>) -> App
     updater::stage_update_for_quit(&app, &state.pending_update).await
 }
 
+fn enforce_recording_quota(
+    conn: &Connection,
+    recordings_dir: &Path,
+    settings: &RecordingSettings,
+    active_recording_id: Option<&str>,
+) {
+    let Ok(records) = storage::list_all_recordings(conn) else {
+        return;
+    };
+    let protected_ids = storage::list_recording_ids_with_pinned_clips(conn).unwrap_or_default();
+    let max_bytes = u64::from(settings.max_storage_gb.clamp(1, 50)) * 1024 * 1024 * 1024;
+    let mut keep_last_n = usize::from(settings.keep_last_n_games.clamp(1, 100));
+    if settings.preset == "clips_only" {
+        keep_last_n = keep_last_n.min(3);
+    }
+    let evict_ids = storage::plan_quota_evictions(&records, &protected_ids, max_bytes, keep_last_n);
+    for id in evict_ids {
+        if active_recording_id == Some(id.as_str()) {
+            continue;
+        }
+        if let Ok(Some(rec)) = storage::get_recording_by_id(conn, &id) {
+            let candidate = PathBuf::from(&rec.file_path);
+            if candidate.exists() {
+                if !recorder::is_safe_recording_path(recordings_dir, &candidate) {
+                    continue;
+                }
+                if let Err(err) = std::fs::remove_file(&candidate) {
+                    tracing::warn!(error = %err, recording_id = %id, "Skipping quota eviction because recording file could not be removed");
+                    continue;
+                }
+            }
+            let _ = storage::delete_recording_rows(conn, &id);
+        }
+    }
+}
+
+fn stop_and_finalize_active_recording(shared: &SharedState) {
+    let Some(stopped) = shared.recorder.stop_recording() else {
+        return;
+    };
+    let rec_settings = shared
+        .recording_settings
+        .read()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    if let Ok(conn) = shared.db.lock() {
+        let _ = storage::finalize_recording(
+            &conn,
+            &stopped.recording_id,
+            &stopped.ended_at,
+            stopped.duration_sec,
+            stopped.size_bytes,
+            &stopped.status,
+        );
+        enforce_recording_quota(&conn, &shared.recordings_dir, &rec_settings, None);
+    }
+}
+
+async fn stop_and_finalize_active_recording_async(shared: &Arc<SharedState>) {
+    let shared_clone = Arc::clone(shared);
+    if let Err(err) =
+        tokio::task::spawn_blocking(move || stop_and_finalize_active_recording(&shared_clone)).await
+    {
+        tracing::warn!(error = %err, "Blocking recording finalization task failed");
+    }
+}
+
+#[tauri::command]
+fn probe_hardware_encoder(state: State<'_, Arc<SharedState>>) -> HardwareEncoderStatus {
+    let install_path = state
+        .install_path
+        .read()
+        .map(|p| p.clone())
+        .unwrap_or_default();
+    let status = recorder::probe_hardware_encoder(&install_path);
+    if let Ok(mut cache) = state.hardware_probe_cache.lock() {
+        *cache = Some(status.clone());
+    }
+    status
+}
+
+#[tauri::command]
+fn get_recording_status(state: State<'_, Arc<SharedState>>) -> RecordingRuntimeStatus {
+    let preset = state
+        .recording_settings
+        .read()
+        .map(|r| r.preset.clone())
+        .unwrap_or_else(|_| "720p30".to_string());
+    let cached_hw = state
+        .hardware_probe_cache
+        .lock()
+        .ok()
+        .and_then(|c| c.as_ref().map(|s| s.hardware_available));
+    let hw_ok = match cached_hw {
+        Some(avail) => avail,
+        None => {
+            let install_path = state
+                .install_path
+                .read()
+                .map(|p| p.clone())
+                .unwrap_or_default();
+            let probed = recorder::probe_hardware_encoder(&install_path);
+            let avail = probed.hardware_available;
+            if let Ok(mut cache) = state.hardware_probe_cache.lock() {
+                *cache = Some(probed);
+            }
+            avail
+        }
+    };
+    state.recorder.status(&preset, hw_ok)
+}
+
+#[tauri::command]
+fn list_recordings(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<RecordingRecord>> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::list_recordings(&conn, 50)
+}
+
+#[tauri::command]
+async fn get_match_recording(
+    state: State<'_, Arc<SharedState>>,
+    match_id: String,
+) -> AppResult<MatchRecordingBundle> {
+    let (recording, clips) = {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut rec = storage::get_recording_for_match(&conn, &match_id)?;
+        if rec.is_none() {
+            if let Ok(played_at) = conn.query_row(
+                "SELECT played_at FROM matches_fact WHERE match_id = ?1 LIMIT 1",
+                rusqlite::params![&match_id],
+                |row| row.get::<_, String>(0),
+            ) {
+                rec = storage::bind_unlinked_recording_to_match(&conn, &match_id, &played_at)?;
+            }
+        }
+        let clips = match &rec {
+            Some(r) => storage::list_recording_clips(&conn, &r.id)?,
+            None => Vec::new(),
+        };
+        (rec, clips)
+    };
+
+    let install_path = state
+        .install_path
+        .read()
+        .map(|p| p.clone())
+        .unwrap_or_default();
+    let cfg = replay_api::inspect_game_cfg(&install_path);
+    let rofl = replay_api::discover_rofl_for_match(&match_id, None);
+    let playback = replay_api::get_replay_api_status(&state.loopback_client).await;
+
+    Ok(MatchRecordingBundle {
+        recording,
+        clips,
+        rofl,
+        replay_api_connected: playback.connected,
+        replay_api_enabled: cfg.replay_api_enabled,
+    })
+}
+
+#[tauri::command]
+fn toggle_recording_pin(
+    state: State<'_, Arc<SharedState>>,
+    recording_id: String,
+    pinned: bool,
+) -> AppResult<Option<RecordingRecord>> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::set_recording_pinned(&conn, &recording_id, pinned)
+}
+
+#[tauri::command]
+fn delete_recording(state: State<'_, Arc<SharedState>>, recording_id: String) -> AppResult<()> {
+    if state.recorder.active_recording_id().as_deref() == Some(recording_id.as_str()) {
+        return Err(AppError::Storage(
+            "Cannot delete a recording while it is actively capturing.".to_string(),
+        ));
+    }
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    if let Some(existing) = storage::get_recording_by_id(&conn, &recording_id)? {
+        let candidate = PathBuf::from(&existing.file_path);
+        if candidate.exists() && recorder::is_safe_recording_path(&state.recordings_dir, &candidate)
+        {
+            std::fs::remove_file(&candidate).map_err(|e| {
+                AppError::Storage(format!(
+                    "Unable to remove recording video file (close player or retry): {e}"
+                ))
+            })?;
+        }
+        let _ = storage::delete_recording_rows(&conn, &recording_id)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn save_recording_clip(
+    state: State<'_, Arc<SharedState>>,
+    recording_id: String,
+    match_id: Option<String>,
+    label: String,
+    kind: String,
+    game_time_sec: f64,
+) -> AppResult<RecordingClipRecord> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    if storage::get_recording_by_id(&conn, &recording_id)?.is_none() {
+        return Err(AppError::Storage(format!(
+            "Recording not found for clip: {recording_id}"
+        )));
+    }
+    let clean_time = if game_time_sec.is_finite() {
+        game_time_sec.max(0.0)
+    } else {
+        0.0
+    };
+    let clean_label: String = label.trim().chars().take(120).collect();
+    let final_label = if clean_label.is_empty() {
+        "Saved Clip".to_string()
+    } else {
+        clean_label
+    };
+    let clean_kind = match kind.trim() {
+        "bookmark" | "mistake" | "highlight" | "death" | "objective" => kind.trim().to_string(),
+        _ => "bookmark".to_string(),
+    };
+    let start_sec = (clean_time - 12.0).max(0.0);
+    let end_sec = clean_time + 6.0;
+    let now = chrono::Utc::now();
+    let seq = state.clip_seq.fetch_add(1, Ordering::Relaxed);
+    let clip = RecordingClipRecord {
+        id: format!("clip-{}-{seq}", now.timestamp_millis()),
+        recording_id,
+        match_id,
+        label: final_label,
+        kind: clean_kind,
+        game_time_sec: clean_time,
+        start_sec,
+        end_sec,
+        pinned: true,
+        created_at: now.to_rfc3339(),
+    };
+    storage::upsert_recording_clip(&conn, &clip)?;
+    Ok(clip)
+}
+
+#[tauri::command]
+fn delete_recording_clip(state: State<'_, Arc<SharedState>>, clip_id: String) -> AppResult<()> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    storage::delete_recording_clip(&conn, &clip_id)
+}
+
+#[tauri::command]
+fn open_recordings_folder(state: State<'_, Arc<SharedState>>) -> AppResult<()> {
+    std::fs::create_dir_all(&state.recordings_dir).map_err(|e| AppError::Storage(e.to_string()))?;
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&state.recordings_dir)
+            .spawn()
+            .map_err(|e| AppError::Overlay(e.to_string()))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        tracing::info!(
+            recordings_dir = %state.recordings_dir.display(),
+            "Open recordings folder requested on non-Windows host"
+        );
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn inspect_replay_config(state: State<'_, Arc<SharedState>>) -> GameCfgReplayStatus {
+    let install_path = state
+        .install_path
+        .read()
+        .map(|p| p.clone())
+        .unwrap_or_default();
+    replay_api::inspect_game_cfg(&install_path)
+}
+
+#[tauri::command]
+fn set_replay_api_enabled(
+    state: State<'_, Arc<SharedState>>,
+    enable: bool,
+) -> AppResult<GameCfgReplayStatus> {
+    let install_path = state
+        .install_path
+        .read()
+        .map(|p| p.clone())
+        .unwrap_or_default();
+    let cfg_status = replay_api::set_game_cfg_replay_api(&install_path, enable)?;
+    if let Ok(conn) = state.db.lock() {
+        if let Ok(mut settings) = storage::load_settings(&conn) {
+            settings.recording.replay_api_enabled = cfg_status.replay_api_enabled;
+            let _ = storage::save_settings(&conn, &settings);
+            if let Ok(mut rec_guard) = state.recording_settings.write() {
+                *rec_guard = settings.recording;
+            }
+        }
+    }
+    Ok(cfg_status)
+}
+
+#[tauri::command]
+async fn seek_riot_replay(
+    state: State<'_, Arc<SharedState>>,
+    match_id: String,
+    time_sec: f64,
+    launch_if_closed: bool,
+) -> AppResult<ReplaySeekResult> {
+    let target_sec = if time_sec.is_finite() {
+        time_sec.max(0.0)
+    } else {
+        0.0
+    };
+    let install_path = state
+        .install_path
+        .read()
+        .map(|p| p.clone())
+        .unwrap_or_default();
+    let rofl = replay_api::discover_rofl_for_match(&match_id, None);
+    let playback_now = replay_api::get_replay_api_status(&state.loopback_client).await;
+    if playback_now.connected {
+        let updated =
+            replay_api::seek_replay_api(&state.loopback_client, target_sec, false).await?;
+        return Ok(ReplaySeekResult {
+            status: "seeked".to_string(),
+            message: format!("Jumped LoL Replay to {:.0}s.", updated.time),
+            target_sec,
+            playback: Some(updated),
+            rofl,
+        });
+    }
+
+    if launch_if_closed {
+        if let Some(ref found) = rofl {
+            replay_api::launch_rofl_replay(&install_path, found)?;
+            return Ok(ReplaySeekResult {
+                status: "launched".to_string(),
+                message: format!(
+                    "Launched {} in League Replay Client. Click Seek once loaded to jump to {:.0}s.",
+                    found.file_name, target_sec
+                ),
+                target_sec,
+                playback: None,
+                rofl,
+            });
+        }
+    }
+
+    Ok(ReplaySeekResult {
+        status: "unavailable".to_string(),
+        message: "No open Riot Replay API session or .rofl replay file found for this match."
+            .to_string(),
+        target_sec,
+        playback: None,
+        rofl,
+    })
+}
+
 pub fn persist_main_window_bounds(app: &AppHandle, shared: &SharedState) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -829,10 +1244,37 @@ fn is_terminal_post_game_flow(gameflow: &str) -> bool {
     )
 }
 
+fn is_playable_live_match(
+    payload: &serde_json::Value,
+    lcu_connected: bool,
+    gameflow_phase: &str,
+) -> bool {
+    let has_active_player = payload
+        .pointer("/activePlayer/riotId")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.trim().is_empty())
+        || payload
+            .pointer("/activePlayer/summonerName")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.trim().is_empty());
+    if !has_active_player {
+        return false;
+    }
+    !lcu_connected || matches!(gameflow_phase, "InProgress" | "Reconnect")
+}
+
 fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
+    enum PollerRecAction {
+        None,
+        SyncOrStart(f64),
+        Stop,
+    }
+
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(1800));
         let mut post_game_latch_ticks: u8 = 0;
+        let mut rec_attempted_for_match = false;
+        let mut last_queue_is_ranked: Option<bool> = None;
 
         loop {
             interval.tick().await;
@@ -841,8 +1283,14 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                 .read()
                 .map(|p| p.clone())
                 .unwrap_or_default();
+            let rec_settings = shared
+                .recording_settings
+                .read()
+                .map(|s| s.clone())
+                .unwrap_or_default();
 
             let live_result = live_client::poll_live_client(&shared.loopback_client).await;
+            let pre_lcu_elapsed = shared.recorder.current_elapsed_sec();
             let lcu_creds = lcu::discover_lockfile(&install_path);
             let lcu_connected = lcu_creds.is_some();
 
@@ -859,7 +1307,7 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                 (None, "None".to_string())
             };
 
-            let updated_snapshot = {
+            let (mut updated_snapshot, rec_action) = {
                 let mut rt = match shared.runtime.lock() {
                     Ok(guard) => guard,
                     Err(_) => continue,
@@ -867,16 +1315,31 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                 rt.lcu_connected = lcu_connected;
                 rt.gameflow_phase = gameflow_phase.clone();
 
+                let mut action = PollerRecAction::None;
                 match live_result {
                     LiveClientPollResult::Active(payload) => {
                         post_game_latch_ticks = 0;
                         shared.live_miss_streak.store(0, Ordering::SeqCst);
                         rt.phase = "in_game".to_string();
                         rt.live_client_connected = true;
+                        let game_time = payload
+                            .pointer("/gameData/gameTime")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+                        let has_session = shared.recorder.has_active_session();
+                        if !rec_settings.enabled && has_session {
+                            action = PollerRecAction::Stop;
+                        } else if rec_settings.enabled
+                            && game_time >= 1.0
+                            && is_playable_live_match(&payload, lcu_connected, &gameflow_phase)
+                        {
+                            action = PollerRecAction::SyncOrStart(game_time);
+                        }
                         rt.live_game = Some(payload);
                     }
                     LiveClientPollResult::Loading => {
                         post_game_latch_ticks = 0;
+                        rec_attempted_for_match = false;
                         shared.live_miss_streak.store(0, Ordering::SeqCst);
                         rt.phase = "loading".to_string();
                         rt.live_client_connected = true;
@@ -899,14 +1362,16 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                             rt.live_client_connected = false;
                             // Hold in_game state cleanly across transient single-poll timeouts
                         } else {
+                            action = PollerRecAction::Stop;
+                            rec_attempted_for_match = false;
                             rt.live_client_connected = false;
                             rt.live_game = None;
                             if let Some(cs) = champ_select {
                                 post_game_latch_ticks = 0;
+                                last_queue_is_ranked = Some(cs.is_ranked_solo_duo);
                                 rt.phase = "champ_select".to_string();
                                 rt.champ_select = Some(cs);
                             } else {
-                                // Clear stale champ select immediately on dodge / exit
                                 rt.champ_select = None;
                                 if was_in_game
                                     || matches!(
@@ -920,6 +1385,16 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                                     post_game_latch_ticks -= 1;
                                     rt.phase = "post_game".to_string();
                                 } else {
+                                    if matches!(
+                                        gameflow_phase.as_str(),
+                                        "None"
+                                            | "Lobby"
+                                            | "EndOfGame"
+                                            | "PreEndOfGame"
+                                            | "WaitingForStats"
+                                    ) {
+                                        last_queue_is_ranked = None;
+                                    }
                                     rt.phase = "idle".to_string();
                                 }
                             }
@@ -933,8 +1408,122 @@ fn spawn_local_poller(app: AppHandle, shared: Arc<SharedState>) {
                     rt.live_client_connected,
                     misses,
                 );
-                rt.clone()
+                (rt.clone(), action)
             };
+
+            // Execute WGC recording start/sync/stop OUTSIDE shared.runtime lock
+            match rec_action {
+                PollerRecAction::SyncOrStart(game_time) => {
+                    if let Some((rec_id, elapsed_sec)) =
+                        pre_lcu_elapsed.or_else(|| shared.recorder.current_elapsed_sec())
+                    {
+                        if let Ok(conn) = shared.db.lock() {
+                            let now_str = chrono::Utc::now().to_rfc3339();
+                            let _ = storage::insert_recording_sync_point(
+                                &conn,
+                                &rec_id,
+                                game_time,
+                                elapsed_sec,
+                                &now_str,
+                            );
+                        }
+                    } else {
+                        if shared.recorder.has_active_session() {
+                            stop_and_finalize_active_recording_async(&shared).await;
+                        }
+                        if !rec_attempted_for_match {
+                            if rec_settings.auto_record_ranked && last_queue_is_ranked.is_none() {
+                                if let Some(ref creds) = lcu_creds {
+                                    if let Some(queue_id) =
+                                        lcu::fetch_gameflow_queue_id(&shared.loopback_client, creds)
+                                            .await
+                                    {
+                                        last_queue_is_ranked = Some(queue_id == 420);
+                                    }
+                                }
+                            }
+                            rec_attempted_for_match = true;
+                            let skip_for_non_ranked = rec_settings.auto_record_ranked
+                                && last_queue_is_ranked != Some(true);
+                            if !skip_for_non_ranked {
+                                let shared_rec = Arc::clone(&shared);
+                                let preset = rec_settings.preset.clone();
+                                let install_path_clone = install_path.clone();
+                                let start_res = tokio::task::spawn_blocking(move || {
+                                    shared_rec.recorder.start_recording(
+                                        &shared_rec.recordings_dir,
+                                        &preset,
+                                        &install_path_clone,
+                                    )
+                                })
+                                .await;
+                                match start_res {
+                                    Ok(Ok(started)) => {
+                                        if let Ok(conn) = shared.db.lock() {
+                                            let row = RecordingRecord {
+                                                id: started.recording_id.clone(),
+                                                match_id: None,
+                                                file_path: started.file_path,
+                                                started_at: started.started_at,
+                                                ended_at: None,
+                                                duration_sec: 0.0,
+                                                size_bytes: 0,
+                                                width: started.width,
+                                                height: started.height,
+                                                fps: started.fps,
+                                                preset: started.preset,
+                                                encoder_name: started.encoder_name,
+                                                sync_offset_sec: 0.0,
+                                                pinned: false,
+                                                status: "recording".to_string(),
+                                            };
+                                            let _ = storage::insert_recording_started(&conn, &row);
+                                            let now_str = chrono::Utc::now().to_rfc3339();
+                                            let _ = storage::insert_recording_sync_point(
+                                                &conn,
+                                                &started.recording_id,
+                                                game_time,
+                                                0.0,
+                                                &now_str,
+                                            );
+                                        }
+                                    }
+                                    Ok(Err(err)) => {
+                                        tracing::warn!(
+                                            error = %err,
+                                            "Opt-in WGC recorder could not start"
+                                        );
+                                    }
+                                    Err(err) => {
+                                        tracing::warn!(
+                                            error = %err,
+                                            "Blocking WGC recorder start panicked"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                PollerRecAction::Stop => {
+                    if shared.recorder.has_active_session() {
+                        stop_and_finalize_active_recording_async(&shared).await;
+                    }
+                }
+                PollerRecAction::None => {}
+            }
+
+            if let Some((_id, elapsed)) = shared.recorder.current_elapsed_sec() {
+                updated_snapshot.recording_status = "recording".to_string();
+                updated_snapshot.recording_elapsed_sec = elapsed;
+            } else {
+                updated_snapshot.recording_status = "idle".to_string();
+                updated_snapshot.recording_elapsed_sec = 0.0;
+            }
+            if let Ok(mut rt) = shared.runtime.lock() {
+                rt.recording_status = updated_snapshot.recording_status.clone();
+                rt.recording_elapsed_sec = updated_snapshot.recording_elapsed_sec;
+            }
 
             let _ = app.emit("game-state-updated", updated_snapshot);
         }
@@ -1005,10 +1594,13 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("betterjungler"));
             let log_dir = app_dir.join("logs");
+            let recordings_dir = app_dir.join("recordings");
+            let _ = std::fs::create_dir_all(&recordings_dir);
             init_file_logging(&log_dir);
 
             let db_path = app_dir.join("betterjungler.db");
             let conn = storage::init_database(&db_path)?;
+            let _ = storage::reconcile_interrupted_recordings(&conn);
             let loopback_client = lcu::build_loopback_client()?;
             let riot_web_client = riot_api::build_riot_web_client()?;
             let ai_client = ai_coach::build_ai_client()?;
@@ -1063,6 +1655,11 @@ pub fn run() {
                 ai_client,
                 riot_limiter: Arc::new(RiotRateLimiter::with_default_pacing()),
                 install_path: Arc::new(RwLock::new(initial_settings.lol_install_path)),
+                recordings_dir,
+                recorder: Arc::new(recorder::RecorderManager::default()),
+                recording_settings: Arc::new(RwLock::new(initial_settings.recording)),
+                hardware_probe_cache: Mutex::new(None),
+                clip_seq: AtomicU64::new(1),
                 live_miss_streak: Arc::new(AtomicU8::new(0)),
                 pending_update: Mutex::new(None),
                 log_dir,
@@ -1070,6 +1667,7 @@ pub fn run() {
 
             let quit_shared = shared.clone();
             let on_quit: Arc<dyn Fn(&AppHandle) + Send + Sync> = Arc::new(move |handle| {
+                stop_and_finalize_active_recording(&quit_shared);
                 persist_main_window_bounds(handle, &quit_shared);
                 let is_safe = quit_shared
                     .runtime
@@ -1135,7 +1733,19 @@ pub fn run() {
             open_logs_folder,
             check_update,
             install_update,
-            stage_update
+            stage_update,
+            probe_hardware_encoder,
+            get_recording_status,
+            list_recordings,
+            get_match_recording,
+            toggle_recording_pin,
+            delete_recording,
+            save_recording_clip,
+            delete_recording_clip,
+            open_recordings_folder,
+            inspect_replay_config,
+            set_replay_api_enabled,
+            seek_riot_replay
         ])
         .run(tauri::generate_context!())
         .expect("error while running BetterJungler");
@@ -1222,5 +1832,24 @@ mod tests {
         let base_hist = storage::list_lp_history(&conn2, 5).expect("base hist");
         assert_eq!(base_hist.len(), 1);
         assert_eq!(base_hist[0].win, None);
+    }
+
+    #[test]
+    fn live_match_detection_ignores_replay_and_spectator_sessions() {
+        let live_payload = serde_json::json!({
+            "activePlayer": { "riotId": "JungleMain#EUW", "summonerName": "JungleMain" },
+            "gameData": { "gameTime": 142.0 }
+        });
+        assert!(is_playable_live_match(&live_payload, true, "InProgress"));
+        assert!(is_playable_live_match(&live_payload, false, "None"));
+        assert!(!is_playable_live_match(&live_payload, true, "None"));
+        assert!(!is_playable_live_match(&live_payload, true, "Lobby"));
+
+        let replay_payload = serde_json::json!({
+            "activePlayer": { "error": "Spectator mode doesn't currently support this feature" },
+            "gameData": { "gameTime": 420.0 }
+        });
+        assert!(!is_playable_live_match(&replay_payload, false, "None"));
+        assert!(!is_playable_live_match(&replay_payload, true, "InProgress"));
     }
 }

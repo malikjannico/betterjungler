@@ -1,24 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { syncFullDdragonCatalog } from '../services/ddragonService';
 import {
+  DEFAULT_RECORDING_SETTINGS,
   checkRiotApiKeyHealth,
   fetchSummonerProfile,
+  inspectReplayConfig,
   isTauriEnvironment,
+  listRecordings,
+  openRecordingsFolder,
+  probeHardwareEncoder,
   saveAiApiKey,
   saveRiotApiKey,
   saveSettings,
+  setReplayApiEnabled,
   syncDdragonPatch,
   updateOverlayPreferences,
 } from '../services/tauriBridge';
+import { formatStorageBytes } from '../domain/recordingSync';
 import type {
   AiProvider,
   ApiKeyHealthStatus,
   AppMetaInfo,
+  GameCfgReplayStatus,
+  HardwareEncoderStatus,
   HudCorner,
   HudMonitorTarget,
   HudScalePercent,
   MinimapSide,
   OverlayHotkeyPreset,
+  RecordingPreset,
+  RecordingRecord,
   UpdateCheckResult,
   UpdateMode,
   UserSettings,
@@ -140,7 +151,36 @@ export function SettingsView({
   const [aiKeyInput, setAiKeyInput] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [hwStatus, setHwStatus] = useState<HardwareEncoderStatus | null>(null);
+  const [replayCfg, setReplayCfg] = useState<GameCfgReplayStatus | null>(null);
+  const [storedRecordings, setStoredRecordings] = useState<RecordingRecord[]>([]);
+  const [togglingReplay, setTogglingReplay] = useState(false);
   const proxyValidationError = validateHttpsProxyUrl(draft.riotApiProxyUrl ?? '');
+
+  const rec = draft.recording ?? DEFAULT_RECORDING_SETTINGS;
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let cancelled = false;
+    void probeHardwareEncoder()
+      .then((s) => {
+        if (!cancelled) setHwStatus(s);
+      })
+      .catch(() => {});
+    void inspectReplayConfig()
+      .then((c) => {
+        if (!cancelled) setReplayCfg(c);
+      })
+      .catch(() => {});
+    void listRecordings()
+      .then((rows) => {
+        if (!cancelled) setStoredRecordings(rows);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isTauri, settings.lolInstallPath]);
 
   const prevSettingsRef = useRef<UserSettings>(settings);
   const persistedOverlayRef = useRef<
@@ -183,6 +223,17 @@ export function SettingsView({
         cur.aiCoach.endpoint !== prev.aiCoach.endpoint
           ? { ...cur.aiCoach, hasApiKey: settings.aiCoach.hasApiKey }
           : settings.aiCoach,
+      recording:
+        JSON.stringify(cur.recording ?? DEFAULT_RECORDING_SETTINGS) !==
+        JSON.stringify(prev.recording ?? DEFAULT_RECORDING_SETTINGS)
+          ? {
+              ...(cur.recording ?? DEFAULT_RECORDING_SETTINGS),
+              replayApiEnabled:
+                settings.recording?.replayApiEnabled ??
+                cur.recording?.replayApiEnabled ??
+                false,
+            }
+          : (settings.recording ?? DEFAULT_RECORDING_SETTINGS),
     }));
     prevSettingsRef.current = settings;
   }, [settings]);
@@ -405,6 +456,46 @@ export function SettingsView({
       setErrorMessage(err instanceof Error ? err.message : 'Failed to store AI API key.');
     }
   }
+
+  async function handleReprobeHardware() {
+    setErrorMessage(null);
+    try {
+      const next = await probeHardwareEncoder();
+      setHwStatus(next);
+      setStatusMessage(next.message);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Hardware encoder probe failed.');
+    }
+  }
+
+  async function handleToggleReplayApi() {
+    const nextEnable = !(replayCfg?.replayApiEnabled ?? rec.replayApiEnabled);
+    setTogglingReplay(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const cfg = await setReplayApiEnabled(nextEnable);
+      setReplayCfg(cfg);
+      const baseRec = settings.recording ?? DEFAULT_RECORDING_SETTINGS;
+      const nextSettingsRec = { ...baseRec, replayApiEnabled: cfg.replayApiEnabled };
+      setDraft((prev) => ({
+        ...prev,
+        recording: { ...(prev.recording ?? DEFAULT_RECORDING_SETTINGS), replayApiEnabled: cfg.replayApiEnabled },
+      }));
+      onSettingsChanged({ ...settings, recording: nextSettingsRec });
+      setStatusMessage(
+        cfg.replayApiEnabled
+          ? `Enabled EnableReplayApi=1 in game.cfg (backup saved as game.cfg.bak).`
+          : `Disabled EnableReplayApi in game.cfg (backup saved as game.cfg.bak).`
+      );
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to update game.cfg.');
+    } finally {
+      setTogglingReplay(false);
+    }
+  }
+
+  const totalUsedBytes = storedRecordings.reduce((acc, row) => acc + row.sizeBytes, 0);
 
   return (
     <div className="space-y-4">
@@ -722,6 +813,197 @@ export function SettingsView({
           </div>
         </GlassSurface>
       </div>
+
+      {/* Opt-In Gameplay Recording & Riot Replay API */}
+      <GlassSurface className="space-y-3.5 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+            Opt-In Gameplay Recording &amp; Riot Replay API
+          </h3>
+          <span className="text-[11px] text-slate-400">
+            Off by default · OS H.264 encoder (GPU probe) · League HWND only
+          </span>
+        </div>
+
+        <div className="lg-inset flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 text-xs">
+          <div className="space-y-0.5">
+            <div className="font-medium text-white">
+              {hwStatus
+                ? hwStatus.hardwareAvailable
+                  ? `GPU Encoder Ready: ${hwStatus.encoderNames[0] ?? 'Hardware H.264'}`
+                  : 'Hardware GPU H.264 Encoder Not Detected'
+                : 'GPU Encoder Probe'}
+            </div>
+            <div className="text-[11px] text-slate-400">
+              {hwStatus?.message ?? 'Checks NVENC / AMF / QuickSync hardware capability.'}
+            </div>
+            {hwStatus?.leagueWindowMode === 'fullscreen' && (
+              <div className="text-[11px] text-amber-300">
+                League WindowMode=0 (Exclusive Fullscreen) detected. Switch to Borderless for
+                optimal WGC capture and overlay visibility.
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleReprobeHardware()}
+            className="lg-btn-glass shrink-0 px-3 py-1.5 text-xs font-medium text-white"
+          >
+            Re-check GPU
+          </button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="lg-inset flex items-center justify-between gap-2 px-3 py-2.5 text-xs">
+            <span>
+              <span className="block font-medium text-white">Enable Recording</span>
+              <span className="text-[11px] text-slate-400">
+                Captures League window only
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              aria-label="Enable GPU Gameplay Recording"
+              checked={rec.enabled}
+              disabled={isTauri && hwStatus !== null && !hwStatus.hardwareAvailable && !rec.enabled}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  recording: { ...rec, enabled: e.target.checked },
+                })
+              }
+              className="h-4 w-4 accent-white"
+            />
+          </label>
+
+          <label className="block text-xs">
+            <span className="text-slate-300">Quality Preset</span>
+            <select
+              aria-label="Recording Quality Preset"
+              value={rec.preset}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  recording: { ...rec, preset: e.target.value as RecordingPreset },
+                })
+              }
+              className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
+            >
+              <option value="720p30" className="bg-zinc-900">
+                30fps · 3.5 Mbps (Native Window · Recommended)
+              </option>
+              <option value="1080p60" className="bg-zinc-900">
+                60fps · 8 Mbps (Native Window · dGPU)
+              </option>
+              <option value="clips_only" className="bg-zinc-900">
+                Clips Focus (30fps · Keep Last 3 Games)
+              </option>
+            </select>
+          </label>
+
+          <label className="block text-xs">
+            <span className="text-slate-300">Disk Quota (GB)</span>
+            <input
+              type="number"
+              aria-label="Recording Disk Quota GB"
+              min={1}
+              max={50}
+              value={rec.maxStorageGb}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  recording: {
+                    ...rec,
+                    maxStorageGb: Math.min(50, Math.max(1, Number(e.target.value) || 5)),
+                  },
+                })
+              }
+              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
+            />
+          </label>
+
+          <label className="block text-xs">
+            <span className="text-slate-300">Keep Last N Games</span>
+            <input
+              type="number"
+              aria-label="Keep Last N Recordings"
+              min={1}
+              max={100}
+              value={rec.keepLastNGames}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  recording: {
+                    ...rec,
+                    keepLastNGames: Math.min(100, Math.max(1, Number(e.target.value) || 10)),
+                  },
+                })
+              }
+              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <label className="inline-flex items-center gap-2 text-slate-300">
+            <input
+              type="checkbox"
+              aria-label="Auto-record Ranked Solo/Duo only"
+              checked={rec.autoRecordRanked}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  recording: { ...rec, autoRecordRanked: e.target.checked },
+                })
+              }
+              className="h-3.5 w-3.5 accent-white"
+            />
+            <span>Record Ranked Solo/Duo matches automatically (skip non-ranked modes)</span>
+          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-slate-400">
+              {storedRecordings.length} saved ({formatStorageBytes(totalUsedBytes)})
+            </span>
+            <button
+              type="button"
+              onClick={() => void openRecordingsFolder()}
+              className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white"
+            >
+              Open Recordings Folder
+            </button>
+          </div>
+        </div>
+
+        <div className="lg-inset flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 text-xs">
+          <div className="space-y-1">
+            <div className="font-medium text-white">
+              Zero-Overhead Riot Replay API (127.0.0.1:2999)
+            </div>
+            <div className="text-[11px] text-slate-400">
+              {replayCfg?.replayApiEnabled
+                ? 'Enabled in League game.cfg (EnableReplayApi=1). One-click Seek works for .rofl replays.'
+                : 'Disabled by default by Riot. Close League before toggling so game.cfg edits persist (.cfg.bak backup created).'}
+            </div>
+            {replayCfg?.previewDiff && (
+              <pre className="rounded bg-black/35 px-2 py-1 font-mono text-[10px] text-slate-300">
+                {replayCfg.previewDiff}
+              </pre>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={togglingReplay}
+            onClick={() => void handleToggleReplayApi()}
+            className="lg-btn-glass shrink-0 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {togglingReplay
+              ? 'Updating game.cfg...'
+              : replayCfg?.replayApiEnabled
+                ? 'Disable Replay API'
+                : 'Enable Replay API'}
+          </button>
+        </div>
+      </GlassSurface>
 
       {/* Optional BYOK AI Coach */}
       <GlassSurface className="space-y-3 p-5">

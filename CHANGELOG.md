@@ -2,6 +2,13 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [1.2.0] - 2026-11-27
+
+### Added
+- **Opt-In GPU Gameplay Recording (Windows Graphics Capture + Media Foundation H.264)**: Disabled by default (`enabled: false`), checks hardware H.264 MFT availability (`NVENC` / `AMD AMF` / `Intel QuickSync`) before encoding via OS Media Foundation H.264, captures strictly the `League of Legends (TM) Client` HWND (ignoring replays and spectator sessions), excludes Alt-Tab windows and overlays, locks lazily to native even frame dimensions, persists monotonic clock sync offsets (`PRAGMA user_version = 3`), and enforces disk quota pruning with pinned exemptions plus startup crash recovery.
+- **Synchronized Post-Game Video Player & `-12s/+6s` Clip Bookmarks**: Plays match MP4 recordings over a scoped Tauri asset protocol (`$APPDATA/recordings/**`), bi-directionally synchronized with the seconds-granular timeline cursor, RiftMap, Gold/XP diff chart, clickable Mistake/Highlight `"Jump @ mm:ss"` buttons, and persistent `-12s/+6s` clip bookmarks.
+- **Riot Replay `.rofl` Discovery & Local Replay API Deep-Links**: Discovers `<REGION>-<GAMEID>.rofl` files automatically, adds an explicit opt-in Settings toggle to enable `EnableReplayApi=1` in `Config\game.cfg` with a preserved `.cfg.bak` backup, and adds one-click `"Open / Seek LoL Replay @ mm:ss"` fallback controls against `127.0.0.1:2999/replay/playback`.
+
 ## [1.1.1] - 2026-11-27
 
 ### Fixed

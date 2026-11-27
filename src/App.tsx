@@ -26,6 +26,7 @@ import { WinConditionView } from './components/WinConditionView';
 import { computePersonalChampStats } from './domain/champSelectEngine';
 import { parseChangelog } from './domain/changelogParser';
 import { setSingleFocusGoal } from './domain/climbLadderEngine';
+import { formatClock } from './domain/liveCoachEngine';
 import { deriveSessionContext } from './domain/sessionContext';
 import { useInterpolatedGameTime } from './hooks/useInterpolatedGameTime';
 import {
@@ -910,6 +911,16 @@ export function App() {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
+              {runtimeState.recordingStatus === 'recording' && (
+                <div
+                  title="Opt-in League HWND GPU recording active"
+                  className="tabular-nums flex items-center gap-1.5 rounded-full border border-rose-400/35 bg-rose-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-rose-200"
+                >
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-400" />
+                  <span>REC {formatClock(runtimeState.recordingElapsedSec ?? 0)}</span>
+                </div>
+              )}
+
               {sessionCtx.simulationLabel && (
                 <div className="flex items-center gap-2 rounded-full border border-amber-400/35 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-medium text-amber-200">
                   <span>Simulation · {sessionCtx.simulationLabel}</span>
@@ -1155,6 +1166,7 @@ export function App() {
                     appVersion={appMeta.version}
                     aiConfig={settings.aiCoach}
                     canSyncLive={canSyncLive}
+                    isTauri={isTauri}
                     focusGoal={focusGoal}
                     lastAutoSyncedMatchId={lastAutoSyncedMatchId}
                     autoSyncNotice={autoSyncNotice}

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use keyring::Entry;
@@ -51,6 +52,65 @@ pub fn detect_lol_install_path() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+pub struct RecordingSettings {
+    pub enabled: bool,
+    pub preset: String, // "720p30" | "1080p60" | "clips_only"
+    pub max_storage_gb: u16,
+    pub keep_last_n_games: u16,
+    pub auto_record_ranked: bool,
+    pub replay_api_enabled: bool,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            preset: "720p30".to_string(),
+            max_storage_gb: 5,
+            keep_last_n_games: 10,
+            auto_record_ranked: true,
+            replay_api_enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingRecord {
+    pub id: String,
+    pub match_id: Option<String>,
+    pub file_path: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub duration_sec: f64,
+    pub size_bytes: u64,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub preset: String,
+    pub encoder_name: String,
+    pub sync_offset_sec: f64,
+    pub pinned: bool,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingClipRecord {
+    pub id: String,
+    pub recording_id: String,
+    pub match_id: Option<String>,
+    pub label: String,
+    pub kind: String,
+    pub game_time_sec: f64,
+    pub start_sec: f64,
+    pub end_sec: f64,
+    pub pinned: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct UserSettings {
     pub riot_id: String,
     pub region: String,
@@ -70,6 +130,7 @@ pub struct UserSettings {
     pub update_mode: String,
     pub riot_api_proxy_url: String,
     pub ai_coach: AiCoachConfig,
+    pub recording: RecordingSettings,
 }
 
 impl Default for UserSettings {
@@ -93,6 +154,7 @@ impl Default for UserSettings {
             update_mode: "manual".to_string(),
             riot_api_proxy_url: String::new(),
             ai_coach: AiCoachConfig::default(),
+            recording: RecordingSettings::default(),
         }
     }
 }
@@ -334,7 +396,76 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             .map_err(|e| AppError::Storage(e.to_string()))?;
     }
 
+    if version < 3 {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS recordings (
+                id TEXT PRIMARY KEY,
+                match_id TEXT,
+                file_path TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                duration_sec REAL NOT NULL DEFAULT 0,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                width INTEGER NOT NULL DEFAULT 1280,
+                height INTEGER NOT NULL DEFAULT 720,
+                fps INTEGER NOT NULL DEFAULT 30,
+                preset TEXT NOT NULL DEFAULT '720p30',
+                encoder_name TEXT NOT NULL DEFAULT '',
+                sync_offset_sec REAL NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'recording'
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_recordings_match_id
+              ON recordings(match_id) WHERE match_id IS NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_recordings_started_at
+              ON recordings(started_at DESC);
+
+            CREATE TABLE IF NOT EXISTS recording_sync_points (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id TEXT NOT NULL,
+                game_time_sec REAL NOT NULL,
+                video_elapsed_sec REAL NOT NULL,
+                recorded_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_recording_sync_points_rec
+              ON recording_sync_points(recording_id);
+
+            CREATE TABLE IF NOT EXISTS recording_clips (
+                id TEXT PRIMARY KEY,
+                recording_id TEXT NOT NULL,
+                match_id TEXT,
+                label TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                game_time_sec REAL NOT NULL,
+                start_sec REAL NOT NULL,
+                end_sec REAL NOT NULL,
+                pinned INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_recording_clips_rec
+              ON recording_clips(recording_id);
+            "#,
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        conn.pragma_update(None, "user_version", 3_i64)
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+
     Ok(())
+}
+
+pub fn normalize_recording_preset(raw: &str) -> String {
+    match raw {
+        "1080p60" => "1080p60".to_string(),
+        "clips_only" => "clips_only".to_string(),
+        _ => "720p30".to_string(),
+    }
 }
 
 pub fn load_settings(conn: &Connection) -> AppResult<UserSettings> {
@@ -355,6 +486,9 @@ pub fn load_settings(conn: &Connection) -> AppResult<UserSettings> {
         };
 
     settings.hud_opacity = settings.hud_opacity.clamp(70, 100);
+    settings.recording.preset = normalize_recording_preset(&settings.recording.preset);
+    settings.recording.max_storage_gb = settings.recording.max_storage_gb.clamp(1, 50);
+    settings.recording.keep_last_n_games = settings.recording.keep_last_n_games.clamp(1, 100);
     if settings.lol_install_path.trim().is_empty()
         || !PathBuf::from(&settings.lol_install_path).exists()
     {
@@ -1101,6 +1235,492 @@ pub fn has_ai_api_key() -> bool {
         .unwrap_or(false)
 }
 
+pub fn compute_median_sync_offset(points: &[(f64, f64)]) -> f64 {
+    let mut offsets: Vec<f64> = points
+        .iter()
+        .filter_map(|(game_sec, video_sec)| {
+            if game_sec.is_finite()
+                && video_sec.is_finite()
+                && *game_sec >= 0.0
+                && *video_sec >= 0.0
+            {
+                Some(video_sec - game_sec)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if offsets.is_empty() {
+        return 0.0;
+    }
+    offsets.sort_by(|a, b| a.total_cmp(b));
+    let mid = offsets.len() / 2;
+    if offsets.len() % 2 == 1 {
+        offsets[mid]
+    } else {
+        (offsets[mid - 1] + offsets[mid]) * 0.5
+    }
+}
+
+pub fn plan_quota_evictions(
+    records: &[RecordingRecord],
+    protected_ids: &HashSet<String>,
+    max_bytes: u64,
+    keep_last_n: usize,
+) -> Vec<String> {
+    let mut evictable: Vec<&RecordingRecord> = records
+        .iter()
+        .filter(|r| !r.pinned && !protected_ids.contains(&r.id) && r.status != "recording")
+        .collect();
+    // Sort oldest first so we evict oldest unpinned recordings first
+    evictable.sort_by(|a, b| a.started_at.cmp(&b.started_at).then(a.id.cmp(&b.id)));
+
+    let mut total_bytes: u64 = records
+        .iter()
+        .filter(|r| r.status != "recording")
+        .map(|r| r.size_bytes)
+        .sum();
+    let mut remaining_unpinned = evictable.len();
+    let mut evict_ids = Vec::new();
+    let mut evicted_set = HashSet::new();
+
+    for rec in evictable {
+        let over_count = remaining_unpinned > keep_last_n;
+        let over_bytes = total_bytes > max_bytes;
+        if !over_count && !over_bytes {
+            break;
+        }
+        evicted_set.insert(rec.id.clone());
+        evict_ids.push(rec.id.clone());
+        total_bytes = total_bytes.saturating_sub(rec.size_bytes);
+        remaining_unpinned = remaining_unpinned.saturating_sub(1);
+    }
+
+    // Hard disk-quota cap: if non-explicitly-pinned clip-protected recordings still exceed max_bytes,
+    // evict oldest non-`pinned` recordings rather than bypassing max_bytes indefinitely.
+    if total_bytes > max_bytes {
+        let mut fallback: Vec<&RecordingRecord> = records
+            .iter()
+            .filter(|r| !r.pinned && r.status != "recording" && !evicted_set.contains(&r.id))
+            .collect();
+        fallback.sort_by(|a, b| a.started_at.cmp(&b.started_at).then(a.id.cmp(&b.id)));
+        for rec in fallback {
+            if total_bytes <= max_bytes {
+                break;
+            }
+            evict_ids.push(rec.id.clone());
+            total_bytes = total_bytes.saturating_sub(rec.size_bytes);
+        }
+    }
+
+    evict_ids
+}
+
+pub fn list_recording_ids_with_pinned_clips(conn: &Connection) -> AppResult<HashSet<String>> {
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT recording_id FROM recording_clips WHERE pinned = 1")
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut out = HashSet::new();
+    for row in rows {
+        out.insert(row.map_err(|e| AppError::Storage(e.to_string()))?);
+    }
+    Ok(out)
+}
+
+pub fn list_all_recordings(conn: &Connection) -> AppResult<Vec<RecordingRecord>> {
+    list_recordings(conn, 100_000)
+}
+
+pub fn reconcile_interrupted_recordings(conn: &Connection) -> AppResult<usize> {
+    let mut stmt = conn
+        .prepare("SELECT id, file_path FROM recordings WHERE status = 'recording'")
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut stuck = Vec::new();
+    for row in rows {
+        stuck.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+    }
+    let now_str = chrono::Utc::now().to_rfc3339();
+    for (id, file_path) in &stuck {
+        let size_bytes = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+        conn.execute(
+            "UPDATE recordings
+             SET ended_at = COALESCE(ended_at, ?2),
+                 size_bytes = ?3,
+                 status = 'interrupted'
+             WHERE id = ?1",
+            params![id, &now_str, size_bytes as i64],
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+    Ok(stuck.len())
+}
+
+fn map_recording_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecordingRecord> {
+    Ok(RecordingRecord {
+        id: row.get(0)?,
+        match_id: row.get(1)?,
+        file_path: row.get(2)?,
+        started_at: row.get(3)?,
+        ended_at: row.get(4)?,
+        duration_sec: row.get(5)?,
+        size_bytes: row.get::<_, i64>(6)?.max(0) as u64,
+        width: row.get::<_, i64>(7)?.max(0) as u32,
+        height: row.get::<_, i64>(8)?.max(0) as u32,
+        fps: row.get::<_, i64>(9)?.max(0) as u32,
+        preset: row.get(10)?,
+        encoder_name: row.get(11)?,
+        sync_offset_sec: row.get(12)?,
+        pinned: row.get::<_, i64>(13)? != 0,
+        status: row.get(14)?,
+    })
+}
+
+pub fn insert_recording_started(conn: &Connection, rec: &RecordingRecord) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO recordings (
+            id, match_id, file_path, started_at, ended_at, duration_sec,
+            size_bytes, width, height, fps, preset, encoder_name,
+            sync_offset_sec, pinned, status
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        params![
+            rec.id,
+            rec.match_id,
+            rec.file_path,
+            rec.started_at,
+            rec.ended_at,
+            rec.duration_sec,
+            rec.size_bytes as i64,
+            i64::from(rec.width),
+            i64::from(rec.height),
+            i64::from(rec.fps),
+            rec.preset,
+            rec.encoder_name,
+            rec.sync_offset_sec,
+            if rec.pinned { 1_i64 } else { 0_i64 },
+            rec.status
+        ],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    Ok(())
+}
+
+pub fn insert_recording_sync_point(
+    conn: &Connection,
+    recording_id: &str,
+    game_time_sec: f64,
+    video_elapsed_sec: f64,
+    recorded_at: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO recording_sync_points (
+            recording_id, game_time_sec, video_elapsed_sec, recorded_at
+         ) VALUES (?1, ?2, ?3, ?4)",
+        params![recording_id, game_time_sec, video_elapsed_sec, recorded_at],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    Ok(())
+}
+
+pub fn finalize_recording(
+    conn: &Connection,
+    recording_id: &str,
+    ended_at: &str,
+    duration_sec: f64,
+    size_bytes: u64,
+    status: &str,
+) -> AppResult<Option<RecordingRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT game_time_sec, video_elapsed_sec
+             FROM recording_sync_points WHERE recording_id = ?1",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![recording_id], |row| {
+            Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?))
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut pts = Vec::new();
+    for row in rows {
+        pts.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+    }
+    let sync_offset = compute_median_sync_offset(&pts);
+
+    conn.execute(
+        "UPDATE recordings
+         SET ended_at = ?2,
+             duration_sec = ?3,
+             size_bytes = ?4,
+             sync_offset_sec = ?5,
+             status = ?6
+         WHERE id = ?1",
+        params![
+            recording_id,
+            ended_at,
+            duration_sec,
+            size_bytes as i64,
+            sync_offset,
+            status
+        ],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    get_recording_by_id(conn, recording_id)
+}
+
+pub fn list_recordings(conn: &Connection, limit: usize) -> AppResult<Vec<RecordingRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, match_id, file_path, started_at, ended_at, duration_sec,
+                    size_bytes, width, height, fps, preset, encoder_name,
+                    sync_offset_sec, pinned, status
+             FROM recordings ORDER BY started_at DESC LIMIT ?1",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![limit as i64], map_recording_row)
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+    }
+    Ok(out)
+}
+
+pub fn get_recording_by_id(
+    conn: &Connection,
+    recording_id: &str,
+) -> AppResult<Option<RecordingRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, match_id, file_path, started_at, ended_at, duration_sec,
+                    size_bytes, width, height, fps, preset, encoder_name,
+                    sync_offset_sec, pinned, status
+             FROM recordings WHERE id = ?1",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut rows = stmt
+        .query_map(params![recording_id], map_recording_row)
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    if let Some(row) = rows.next() {
+        Ok(Some(row.map_err(|e| AppError::Storage(e.to_string()))?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn get_recording_for_match(
+    conn: &Connection,
+    match_id: &str,
+) -> AppResult<Option<RecordingRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, match_id, file_path, started_at, ended_at, duration_sec,
+                    size_bytes, width, height, fps, preset, encoder_name,
+                    sync_offset_sec, pinned, status
+             FROM recordings WHERE match_id = ?1 LIMIT 1",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut rows = stmt
+        .query_map(params![match_id], map_recording_row)
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    if let Some(row) = rows.next() {
+        Ok(Some(row.map_err(|e| AppError::Storage(e.to_string()))?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn set_recording_pinned(
+    conn: &Connection,
+    recording_id: &str,
+    pinned: bool,
+) -> AppResult<Option<RecordingRecord>> {
+    let changed = conn
+        .execute(
+            "UPDATE recordings SET pinned = ?2 WHERE id = ?1",
+            params![recording_id, if pinned { 1_i64 } else { 0_i64 }],
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    if changed == 0 {
+        return Err(AppError::Storage(format!(
+            "Recording not found: {recording_id}"
+        )));
+    }
+    get_recording_by_id(conn, recording_id)
+}
+
+pub fn delete_recording_rows(conn: &Connection, recording_id: &str) -> AppResult<Option<String>> {
+    let existing = get_recording_by_id(conn, recording_id)?;
+    let Some(rec) = existing else {
+        return Ok(None);
+    };
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    tx.execute(
+        "DELETE FROM recording_sync_points WHERE recording_id = ?1",
+        params![recording_id],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    tx.execute(
+        "DELETE FROM recording_clips WHERE recording_id = ?1",
+        params![recording_id],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    tx.execute(
+        "DELETE FROM recordings WHERE id = ?1",
+        params![recording_id],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    tx.commit().map_err(|e| AppError::Storage(e.to_string()))?;
+    Ok(Some(rec.file_path))
+}
+
+pub fn upsert_recording_clip(conn: &Connection, clip: &RecordingClipRecord) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO recording_clips (
+            id, recording_id, match_id, label, kind, game_time_sec,
+            start_sec, end_sec, pinned, created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET
+            recording_id = excluded.recording_id,
+            match_id = excluded.match_id,
+            label = excluded.label,
+            kind = excluded.kind,
+            game_time_sec = excluded.game_time_sec,
+            start_sec = excluded.start_sec,
+            end_sec = excluded.end_sec,
+            pinned = excluded.pinned,
+            created_at = excluded.created_at",
+        params![
+            clip.id,
+            clip.recording_id,
+            clip.match_id,
+            clip.label,
+            clip.kind,
+            clip.game_time_sec,
+            clip.start_sec,
+            clip.end_sec,
+            if clip.pinned { 1_i64 } else { 0_i64 },
+            clip.created_at
+        ],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    Ok(())
+}
+
+pub fn list_recording_clips(
+    conn: &Connection,
+    recording_id: &str,
+) -> AppResult<Vec<RecordingClipRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, recording_id, match_id, label, kind, game_time_sec,
+                    start_sec, end_sec, pinned, created_at
+             FROM recording_clips
+             WHERE recording_id = ?1
+             ORDER BY game_time_sec ASC, created_at ASC",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![recording_id], |row| {
+            Ok(RecordingClipRecord {
+                id: row.get(0)?,
+                recording_id: row.get(1)?,
+                match_id: row.get(2)?,
+                label: row.get(3)?,
+                kind: row.get(4)?,
+                game_time_sec: row.get(5)?,
+                start_sec: row.get(6)?,
+                end_sec: row.get(7)?,
+                pinned: row.get::<_, i64>(8)? != 0,
+                created_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+    }
+    Ok(out)
+}
+
+pub fn delete_recording_clip(conn: &Connection, clip_id: &str) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM recording_clips WHERE id = ?1",
+        params![clip_id],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    Ok(())
+}
+
+pub fn bind_unlinked_recording_to_match(
+    conn: &Connection,
+    match_id: &str,
+    played_at: &str,
+) -> AppResult<Option<RecordingRecord>> {
+    if let Some(existing) = get_recording_for_match(conn, match_id)? {
+        return Ok(Some(existing));
+    }
+    let Ok(match_start_dt) = chrono::DateTime::parse_from_rfc3339(played_at) else {
+        return Ok(None);
+    };
+    let match_start_utc = match_start_dt.with_timezone(&chrono::Utc);
+
+    let candidates = list_recordings(conn, 25)?;
+    let mut best_id: Option<String> = None;
+    let mut best_delta = i64::MAX;
+
+    for rec in candidates {
+        if rec.match_id.is_some() || rec.status != "ready" {
+            continue;
+        }
+        let Ok(rec_start_dt) = chrono::DateTime::parse_from_rfc3339(&rec.started_at) else {
+            continue;
+        };
+        let rec_start_utc = rec_start_dt.with_timezone(&chrono::Utc);
+        if let Some(ref ended_raw) = rec.ended_at {
+            if let Ok(rec_end_dt) = chrono::DateTime::parse_from_rfc3339(ended_raw) {
+                if rec_end_dt.with_timezone(&chrono::Utc)
+                    < match_start_utc - chrono::Duration::seconds(60)
+                {
+                    continue;
+                }
+            }
+        }
+        let delta_sec = (rec_start_utc - match_start_utc).num_seconds().abs();
+        if delta_sec <= 900 && delta_sec < best_delta {
+            best_delta = delta_sec;
+            best_id = Some(rec.id);
+        }
+    }
+
+    let Some(rec_id) = best_id else {
+        return Ok(None);
+    };
+    conn.execute(
+        "UPDATE recordings SET match_id = ?2 WHERE id = ?1 AND match_id IS NULL",
+        params![rec_id, match_id],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+    conn.execute(
+        "UPDATE recording_clips SET match_id = ?2 WHERE recording_id = ?1 AND match_id IS NULL",
+        params![rec_id, match_id],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    get_recording_by_id(conn, &rec_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1203,7 +1823,7 @@ mod tests {
         let user_ver: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read user_version");
-        assert_eq!(user_ver, 2);
+        assert_eq!(user_ver, 3);
 
         let sample_detail = serde_json::json!({
             "matchId": "EUW1_9001",
@@ -1376,6 +1996,163 @@ mod tests {
         assert!(sanitize_riot_api_key("").is_err());
         assert!(sanitize_riot_api_key("not-a-riot-key").is_err());
         assert!(sanitize_riot_api_key("RGAPI-short").is_err());
+    }
+
+    #[test]
+    fn recording_metadata_sync_offset_and_quota_evictions() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        run_migrations(&conn).expect("migrate v3");
+
+        let default_settings = load_settings(&conn).expect("default settings");
+        assert!(!default_settings.recording.enabled);
+        assert_eq!(default_settings.recording.preset, "720p30");
+        assert_eq!(default_settings.recording.max_storage_gb, 5);
+
+        let rec1 = RecordingRecord {
+            id: "rec-1".to_string(),
+            match_id: None,
+            file_path: "C:\\tmp\\rec-1.mp4".to_string(),
+            started_at: "2026-11-27T10:00:30Z".to_string(),
+            ended_at: None,
+            duration_sec: 0.0,
+            size_bytes: 0,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            preset: "720p30".to_string(),
+            encoder_name: "NVIDIA H.264".to_string(),
+            sync_offset_sec: 0.0,
+            pinned: false,
+            status: "recording".to_string(),
+        };
+        insert_recording_started(&conn, &rec1).expect("insert rec1");
+        insert_recording_sync_point(&conn, "rec-1", 10.0, 22.0, "2026-11-27T10:00:22Z")
+            .expect("pt1");
+        insert_recording_sync_point(&conn, "rec-1", 120.0, 124.2, "2026-11-27T10:02:04Z")
+            .expect("pt2");
+        insert_recording_sync_point(&conn, "rec-1", 300.0, 304.0, "2026-11-27T10:05:04Z")
+            .expect("pt3");
+
+        let finalized = finalize_recording(
+            &conn,
+            "rec-1",
+            "2026-11-27T10:35:30Z",
+            2100.0,
+            600_000_000,
+            "ready",
+        )
+        .expect("finalize rec1")
+        .expect("rec1 exists");
+        assert!((finalized.sync_offset_sec - 4.2).abs() < 0.01);
+
+        // Long 35m match whose gameCreation is 10:00:00Z must bind to rec1 via started_at
+        let bound = bind_unlinked_recording_to_match(&conn, "EUW1_55555", "2026-11-27T10:00:00Z")
+            .expect("bind rec1")
+            .expect("bound row");
+        assert_eq!(bound.match_id.as_deref(), Some("EUW1_55555"));
+
+        let clip = RecordingClipRecord {
+            id: "clip-1".to_string(),
+            recording_id: "rec-1".to_string(),
+            match_id: Some("EUW1_55555".to_string()),
+            label: "Death before Dragon".to_string(),
+            kind: "pre_obj_death".to_string(),
+            game_time_sec: 310.0,
+            start_sec: 298.0,
+            end_sec: 316.0,
+            pinned: true,
+            created_at: "2026-11-27T10:36:00Z".to_string(),
+        };
+        upsert_recording_clip(&conn, &clip).expect("upsert clip");
+        let clips = list_recording_clips(&conn, "rec-1").expect("list clips");
+        assert_eq!(clips.len(), 1);
+        assert_eq!(clips[0].label, "Death before Dragon");
+
+        let mut protected = HashSet::new();
+        protected.insert("rec-protected".to_string());
+
+        let pinned_rec = RecordingRecord {
+            id: "rec-pinned".to_string(),
+            pinned: true,
+            size_bytes: 900_000_000,
+            started_at: "2026-11-27T08:00:00Z".to_string(),
+            ..finalized.clone()
+        };
+        let protected_by_clip = RecordingRecord {
+            id: "rec-protected".to_string(),
+            pinned: false,
+            size_bytes: 300_000_000,
+            started_at: "2026-11-27T08:30:00Z".to_string(),
+            ..finalized.clone()
+        };
+        let old_rec = RecordingRecord {
+            id: "rec-old".to_string(),
+            pinned: false,
+            size_bytes: 400_000_000,
+            started_at: "2026-11-27T09:00:00Z".to_string(),
+            ..finalized.clone()
+        };
+        let new_rec = RecordingRecord {
+            id: "rec-new".to_string(),
+            pinned: false,
+            size_bytes: 400_000_000,
+            started_at: "2026-11-27T11:00:00Z".to_string(),
+            ..finalized
+        };
+        let evictions = plan_quota_evictions(
+            &[
+                new_rec.clone(),
+                pinned_rec.clone(),
+                protected_by_clip.clone(),
+                old_rec.clone(),
+            ],
+            &protected,
+            1_650_000_000,
+            5,
+        );
+        assert_eq!(evictions, vec!["rec-old".to_string()]);
+
+        // Hard byte quota still evicts unpinned recordings first, then non-pinned clip-protected ones
+        let hard_cap_evictions = plan_quota_evictions(
+            &[new_rec, pinned_rec, protected_by_clip, old_rec],
+            &protected,
+            1_100_000_000,
+            5,
+        );
+        assert_eq!(
+            hard_cap_evictions,
+            vec![
+                "rec-old".to_string(),
+                "rec-new".to_string(),
+                "rec-protected".to_string()
+            ]
+        );
+
+        // Crash recovery reconciles stuck 'recording' rows on startup
+        let stuck = RecordingRecord {
+            id: "rec-crashed".to_string(),
+            match_id: None,
+            file_path: "C:\\tmp\\nonexistent-crashed.mp4".to_string(),
+            started_at: "2026-11-27T12:00:00Z".to_string(),
+            ended_at: None,
+            duration_sec: 0.0,
+            size_bytes: 0,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            preset: "720p30".to_string(),
+            encoder_name: "NVIDIA".to_string(),
+            sync_offset_sec: 0.0,
+            pinned: false,
+            status: "recording".to_string(),
+        };
+        insert_recording_started(&conn, &stuck).expect("insert stuck");
+        let fixed = reconcile_interrupted_recordings(&conn).expect("reconcile stuck");
+        assert_eq!(fixed, 1);
+        let loaded_stuck = get_recording_by_id(&conn, "rec-crashed")
+            .expect("get stuck")
+            .expect("stuck row");
+        assert_eq!(loaded_stuck.status, "interrupted");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: BetterJungler.BetterJungler
-PackageVersion: 1.1.1
+PackageVersion: 1.2.0
 PackageLocale: en-US
 Publisher: BetterJungler
 PublisherUrl: https://github.com/malikjannico/betterjungler
@@ -20,6 +20,6 @@ Tags:
   - overlay
   - gaming
   - esports
-ReleaseNotesUrl: https://github.com/malikjannico/betterjungler/releases/tag/v1.1.1
+ReleaseNotesUrl: https://github.com/malikjannico/betterjungler/releases/tag/v1.2.0
 ManifestType: defaultLocale
 ManifestVersion: 1.6.0

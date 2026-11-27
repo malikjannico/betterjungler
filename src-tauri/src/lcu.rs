@@ -415,6 +415,26 @@ async fn fetch_queue_id_and_party(
     (queue_id, party_ids)
 }
 
+pub async fn fetch_gameflow_queue_id(client: &Client, creds: &LockfileCredentials) -> Option<i64> {
+    let auth = auth_header(creds);
+    let url = assert_loopback_url(&format!(
+        "{}://127.0.0.1:{}/lol-gameflow/v1/session",
+        creds.protocol, creds.port
+    ))
+    .ok()?;
+    let resp = client
+        .get(url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let val: serde_json::Value = resp.json().await.ok()?;
+    val.pointer("/gameData/queue/id").and_then(|v| v.as_i64())
+}
+
 pub async fn fetch_champ_select_session(
     client: &Client,
     creds: &LockfileCredentials,

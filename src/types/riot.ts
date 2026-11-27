@@ -126,6 +126,8 @@ export interface AppRuntimeState {
   liveGame: LiveGameData | null;
   summonerProfile: SummonerProfileSummary | null;
   patchVersion: string;
+  recordingStatus?: 'idle' | 'recording' | 'stopping' | 'unavailable' | 'error' | string;
+  recordingElapsedSec?: number;
 }
 
 export interface MatchV5TimelinePosition {

@@ -13,6 +13,7 @@ import { EmptyState } from './EmptyState';
 import { GlassSurface } from './GlassSurface';
 import { GoldXpDiffChart } from './GoldXpDiffChart';
 import { PostGameTimelineMap } from './PostGameTimelineMap';
+import { RecordingPlayerCard } from './RecordingPlayerCard';
 
 interface PostGameReviewViewProps {
   matches: MatchV5Detail[];
@@ -21,6 +22,7 @@ interface PostGameReviewViewProps {
   appVersion?: string;
   aiConfig: AiCoachConfig;
   canSyncLive: boolean;
+  isTauri?: boolean;
   focusGoal?: ClimbGoal | null;
   lastAutoSyncedMatchId?: string | null;
   autoSyncNotice?: string | null;
@@ -37,6 +39,7 @@ export function PostGameReviewView({
   appVersion = pkg.version,
   aiConfig,
   canSyncLive,
+  isTauri = typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__),
   focusGoal,
   lastAutoSyncedMatchId,
   autoSyncNotice,
@@ -501,6 +504,19 @@ export function PostGameReviewView({
         }
       />
 
+      {/* Opt-In Synchronized Match Video & Riot Replay Deep-Link */}
+      <RecordingPlayerCard
+        key={`rec-${selectedMatch.matchId}`}
+        matchId={selectedMatch.matchId}
+        durationSeconds={selectedMatch.durationSeconds}
+        activeSecond={effectiveCursorSecond}
+        isTauri={isTauri}
+        onSelectSecond={(second) =>
+          setActiveSecondState({ matchId: selectedMatch.matchId, second })
+        }
+        onOpenSettings={onOpenSettings}
+      />
+
       {/* What You Did Good / Mistakes / Where to Improve */}
       <GlassSurface className="p-4">
         <div className="grid gap-6 md:grid-cols-3">
@@ -511,7 +527,23 @@ export function PostGameReviewView({
             <div className="space-y-2.5">
               {report.highlights.map((item) => (
                 <div key={item.id} className="t-caption">
-                  <div className="font-semibold text-white/[0.92]">{item.title}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-white/[0.92]">{item.title}</span>
+                    {item.timestampSec !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveSecondState({
+                            matchId: selectedMatch.matchId,
+                            second: Math.round(item.timestampSec!),
+                          })
+                        }
+                        className="tabular-nums shrink-0 rounded-[5px] border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-white/[0.72] hover:text-white"
+                      >
+                        Jump @ {formatClock(item.timestampSec)}
+                      </button>
+                    )}
+                  </div>
                   <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
                 </div>
               ))}
@@ -526,7 +558,23 @@ export function PostGameReviewView({
               {report.mistakes.length > 0 ? (
                 report.mistakes.map((item) => (
                   <div key={item.id} className="t-caption">
-                    <div className="font-semibold text-white/[0.92]">{item.title}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-white/[0.92]">{item.title}</span>
+                      {item.timestampSec !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveSecondState({
+                              matchId: selectedMatch.matchId,
+                              second: Math.round(item.timestampSec!),
+                            })
+                          }
+                          className="tabular-nums shrink-0 rounded-[5px] border border-rose-400/25 bg-rose-500/10 px-1.5 py-0.5 text-[11px] text-rose-200 hover:bg-rose-500/20"
+                        >
+                          Jump @ {formatClock(item.timestampSec)}
+                        </button>
+                      )}
+                    </div>
                     <p className="mt-0.5 text-white/[0.58]">{item.detail}</p>
                   </div>
                 ))

@@ -3,13 +3,21 @@ import type {
   ApiKeyHealthStatus,
   AppMetaInfo,
   ClimbGoal,
+  GameCfgReplayStatus,
+  HardwareEncoderStatus,
   HighEloMetaSnapshot,
   HudCorner,
   HudMonitorTarget,
   HudScalePercent,
   LpHistoryPoint,
+  MatchRecordingBundle,
   MinimapSide,
   OverlayMode,
+  RecordingClipRecord,
+  RecordingRecord,
+  RecordingRuntimeStatus,
+  RecordingSettings,
+  ReplaySeekResult,
   RunePageSpec,
   UpdateCheckResult,
   UserSettings,
@@ -29,6 +37,15 @@ declare global {
 export function isTauriEnvironment(): boolean {
   return typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__);
 }
+
+export const DEFAULT_RECORDING_SETTINGS: RecordingSettings = {
+  enabled: false,
+  preset: '720p30',
+  maxStorageGb: 5,
+  keepLastNGames: 10,
+  autoRecordRanked: true,
+  replayApiEnabled: false,
+};
 
 const DEFAULT_SETTINGS: UserSettings = {
   riotId: '',
@@ -50,6 +67,7 @@ const DEFAULT_SETTINGS: UserSettings = {
     endpoint: 'http://127.0.0.1:11434',
     hasApiKey: false,
   },
+  recording: DEFAULT_RECORDING_SETTINGS,
 };
 
 const GOALS_STORAGE_KEY = 'betterjungler_climb_goals_v2';
@@ -168,6 +186,10 @@ export async function loadSettings(): Promise<UserSettings> {
           aiCoach: {
             ...DEFAULT_SETTINGS.aiCoach,
             ...(parsed.aiCoach ?? {}),
+          },
+          recording: {
+            ...DEFAULT_RECORDING_SETTINGS,
+            ...(parsed.recording ?? {}),
           },
         };
       } catch {
@@ -403,4 +425,163 @@ export async function stageAppUpdate(): Promise<string> {
     return pkg.version;
   }
   return invokeTauri<string>('stage_update');
+}
+
+export async function toAssetUrl(filePath: string): Promise<string> {
+  if (!isTauriEnvironment()) {
+    return filePath;
+  }
+  const { convertFileSrc } = await import('@tauri-apps/api/core');
+  return convertFileSrc(filePath);
+}
+
+export async function probeHardwareEncoder(): Promise<HardwareEncoderStatus> {
+  if (!isTauriEnvironment()) {
+    return {
+      hardwareAvailable: false,
+      encoderNames: [],
+      recommendedPreset: '720p30',
+      message: 'Hardware GPU encoder probe runs inside the Windows desktop app.',
+      leagueWindowMode: 'unknown',
+    };
+  }
+  return invokeTauri<HardwareEncoderStatus>('probe_hardware_encoder');
+}
+
+export async function getRecordingStatus(): Promise<RecordingRuntimeStatus> {
+  if (!isTauriEnvironment()) {
+    return {
+      state: 'idle',
+      preset: '720p30',
+      elapsedSec: 0,
+      recordingId: null,
+      encoderName: null,
+      message: null,
+    };
+  }
+  return invokeTauri<RecordingRuntimeStatus>('get_recording_status');
+}
+
+export async function listRecordings(): Promise<RecordingRecord[]> {
+  if (!isTauriEnvironment()) {
+    return [];
+  }
+  return invokeTauri<RecordingRecord[]>('list_recordings');
+}
+
+export async function getMatchRecording(matchId: string): Promise<MatchRecordingBundle> {
+  if (!isTauriEnvironment()) {
+    return {
+      recording: null,
+      clips: [],
+      rofl: null,
+      replayApiConnected: false,
+      replayApiEnabled: false,
+    };
+  }
+  return invokeTauri<MatchRecordingBundle>('get_match_recording', { matchId });
+}
+
+export async function toggleRecordingPin(
+  recordingId: string,
+  pinned: boolean
+): Promise<RecordingRecord | null> {
+  if (!isTauriEnvironment()) {
+    return null;
+  }
+  return invokeTauri<RecordingRecord | null>('toggle_recording_pin', {
+    recordingId,
+    pinned,
+  });
+}
+
+export async function deleteRecording(recordingId: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invokeTauri<void>('delete_recording', { recordingId });
+}
+
+export async function saveRecordingClip(
+  recordingId: string,
+  matchId: string | null,
+  label: string,
+  kind: string,
+  gameTimeSec: number
+): Promise<RecordingClipRecord> {
+  if (!isTauriEnvironment()) {
+    const startSec = Math.max(0, Math.round(gameTimeSec) - 12);
+    return {
+      id: `clip-${Date.now()}`,
+      recordingId,
+      matchId,
+      label,
+      kind,
+      gameTimeSec,
+      startSec,
+      endSec: Math.round(gameTimeSec) + 6,
+      pinned: true,
+      createdAt: new Date().toISOString(),
+    };
+  }
+  return invokeTauri<RecordingClipRecord>('save_recording_clip', {
+    recordingId,
+    matchId,
+    label,
+    kind,
+    gameTimeSec,
+  });
+}
+
+export async function deleteRecordingClip(clipId: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invokeTauri<void>('delete_recording_clip', { clipId });
+}
+
+export async function openRecordingsFolder(): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invokeTauri<void>('open_recordings_folder');
+}
+
+export async function inspectReplayConfig(): Promise<GameCfgReplayStatus> {
+  if (!isTauriEnvironment()) {
+    return {
+      cfgExists: false,
+      cfgPath: 'C:\\Riot Games\\League of Legends\\Config\\game.cfg',
+      replayApiEnabled: false,
+      windowMode: 'unknown',
+      previewDiff: '[General]\nEnableReplayApi=1',
+    };
+  }
+  return invokeTauri<GameCfgReplayStatus>('inspect_replay_config');
+}
+
+export async function setReplayApiEnabled(enable: boolean): Promise<GameCfgReplayStatus> {
+  if (!isTauriEnvironment()) {
+    return {
+      cfgExists: true,
+      cfgPath: 'C:\\Riot Games\\League of Legends\\Config\\game.cfg',
+      replayApiEnabled: enable,
+      windowMode: 'borderless',
+      previewDiff: `[General]\nEnableReplayApi=${enable ? 1 : 0}`,
+    };
+  }
+  return invokeTauri<GameCfgReplayStatus>('set_replay_api_enabled', { enable });
+}
+
+export async function seekRiotReplay(
+  matchId: string,
+  timeSec: number,
+  launchIfClosed = true
+): Promise<ReplaySeekResult> {
+  if (!isTauriEnvironment()) {
+    return {
+      status: 'unavailable',
+      message: 'Riot Replay API deep-links run inside the Windows desktop app.',
+      targetSec: Math.max(0, Math.round(timeSec)),
+    };
+  }
+  return invokeTauri<ReplaySeekResult>('seek_riot_replay', {
+    matchId,
+    timeSec,
+    launchIfClosed,
+  });
 }

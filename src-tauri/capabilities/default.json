@@ -38,6 +38,18 @@
     "allow-open-logs-folder",
     "allow-check-update",
     "allow-install-update",
-    "allow-stage-update"
+    "allow-stage-update",
+    "allow-probe-hardware-encoder",
+    "allow-get-recording-status",
+    "allow-list-recordings",
+    "allow-get-match-recording",
+    "allow-toggle-recording-pin",
+    "allow-delete-recording",
+    "allow-save-recording-clip",
+    "allow-delete-recording-clip",
+    "allow-open-recordings-folder",
+    "allow-inspect-replay-config",
+    "allow-set-replay-api-enabled",
+    "allow-seek-riot-replay"
   ]
 }

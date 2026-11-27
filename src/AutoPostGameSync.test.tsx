@@ -105,6 +105,29 @@ vi.mock('./services/tauriBridge', () => ({
   saveRiotApiKey: vi.fn(),
   saveAiApiKey: vi.fn(),
   openLogsFolder: vi.fn(),
+  getMatchRecording: vi.fn().mockResolvedValue({
+    recording: null,
+    clips: [],
+    rofl: null,
+    replayApiConnected: false,
+    replayApiEnabled: false,
+  }),
+  toAssetUrl: vi.fn(async (p: string) => p),
+  probeHardwareEncoder: vi.fn().mockResolvedValue({
+    hardwareAvailable: false,
+    encoderNames: [],
+    recommendedPreset: '720p30',
+    message: 'test',
+    leagueWindowMode: 'unknown',
+  }),
+  inspectReplayConfig: vi.fn().mockResolvedValue({
+    cfgExists: false,
+    cfgPath: '',
+    replayApiEnabled: false,
+    windowMode: 'unknown',
+    previewDiff: '',
+  }),
+  listRecordings: vi.fn().mockResolvedValue([]),
 }));
 
 import { App } from './App';
