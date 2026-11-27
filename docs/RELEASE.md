@@ -50,10 +50,23 @@ Set these in **Repository → Settings → Secrets and variables → Actions** b
 ### Subsequent Automatic Updates
 - Once installed, BetterJungler checks `latest.json` silently 30 seconds after launch and every 6 hours while idle.
 - Updates **never auto-install or interrupt gameplay**: an update pill appears in the expanded sidebar only when idle, and Rust's safety gate rejects installation if League is in Champ Select, Loading, or In-Game (`gameflowPhase` check + 3-miss Live Client debounce).
+- Choose between **Manual** (`Install & Restart`) and **Download & Install on Quit** (`stage_update` downloads & verifies the installer in the background and applies it safely only when quitting from a safe non-match state).
 - Clicking **Install & Restart** verifies the Ed25519 signature against `plugins.updater.pubkey`, runs passive NSIS installation, and relaunches directly into the new version (with a one-time dismissible **What's New** banner).
 
 ## 4. Optional Windows Authenticode Code Signing
 
 When distributing publicly to eliminate first-install SmartScreen prompts:
-- Store `WINDOWS_CERTIFICATE` (base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` in GitHub Secrets (or configure Azure Trusted Signing), import into `Cert:\CurrentUser\My` in CI, and configure `bundle.windows.certificateThumbprint` / `timestampUrl` in `src-tauri/tauri.conf.json`.
+- Store `WINDOWS_CERTIFICATE` (base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` in GitHub Secrets. `.github/workflows/release.yml` decodes the `.pfx` into `$env:RUNNER_TEMP`, writes a temporary `authenticode.json` configuring `bundle.windows.signCommand` via `signtool.exe` (SHA-256 + DigiCert timestamp), passes `--config` into `tauri-apps/tauri-action@v0`, and deletes the temporary `.pfx` and `.json` in an `if: always()` cleanup step.
 - Never commit `.pfx`, `.key`, or private credentials into the repository.
+
+## 5. Winget Package Distribution (`packaging/winget/`)
+
+Winget 1.6 manifests live under `packaging/winget/` (`BetterJungler.BetterJungler.yaml`, `.installer.yaml`, `.locale.en-US.yaml`). After publishing a release asset on GitHub, run:
+```powershell
+node scripts/update-winget-manifest.mjs --version 1.0.0 --sha256 <64-char-hex-sha256>
+```
+Then submit the updated `packaging/winget/` manifests to `microsoft/winget-pkgs`.
+
+## 6. Optional Zero-Trust Riot API Proxy (`proxy/`)
+
+For public distributions using a Riot Production API Key, deploy the Cloudflare Worker in `proxy/` (`wrangler secret put RIOT_API_KEY && npx wrangler deploy`) and set the deployed `https://...` URL in **Settings → Riot API Proxy URL (HTTPS)**. See [proxy/README.md](../proxy/README.md) for security boundaries.

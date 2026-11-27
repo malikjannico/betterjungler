@@ -69,6 +69,7 @@ import {
   loadSettings,
   refreshHighEloMeta,
   setOverlayMode,
+  stageAppUpdate,
   subscribeGameState,
   syncDdragonPatch,
   syncRecentMatches,
@@ -182,6 +183,8 @@ export function App() {
     hudOpacity: 92,
     targetDivision: 'PLATINUM IV',
     hasApiKey: false,
+    updateMode: 'manual',
+    riotApiProxyUrl: '',
     aiCoach: {
       provider: 'off',
       model: 'gemini-2.5-flash',
@@ -200,6 +203,8 @@ export function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [stagingUpdate, setStagingUpdate] = useState(false);
+  const [stagedUpdateVersion, setStagedUpdateVersion] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => {
     try {
@@ -234,7 +239,7 @@ export function App() {
     void loadSettings().then((s) => {
       if (!active) return;
       setSettings(s);
-      if (isTauri && s.hasApiKey) {
+      if (isTauri && (s.hasApiKey || Boolean(s.riotApiProxyUrl?.trim()))) {
         void checkRiotApiKeyHealth(s.region)
           .then((h) => {
             if (active) setApiKeyHealth(h);
@@ -521,7 +526,9 @@ export function App() {
     if (!isTauri || autoPostGameToken === 0) return;
     const curSettings = settingsRef.current;
     const curProfile = profileRef.current;
-    if (!curSettings.hasApiKey || !curProfile?.puuid) return;
+    if ((!curSettings.hasApiKey && !curSettings.riotApiProxyUrl?.trim()) || !curProfile?.puuid) {
+      return;
+    }
 
     let cancelled = false;
     let activeTimer: number | null = null;
@@ -662,12 +669,36 @@ export function App() {
     }
   }
 
+  async function handleStageUpdate() {
+    setStagingUpdate(true);
+    setUpdateError(null);
+    try {
+      const version = await stageAppUpdate();
+      setStagedUpdateVersion(version);
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : 'Unable to stage update.');
+    } finally {
+      setStagingUpdate(false);
+    }
+  }
+
   useEffect(() => {
     if (!isTauri) return;
     const runIdleCheck = () => {
       if (!safeUpdateRef.current) return;
       void checkForAppUpdate()
-        .then((res) => setUpdateInfo(res))
+        .then((res) => {
+          setUpdateInfo(res);
+          if (
+            res.available &&
+            res.latestVersion &&
+            settingsRef.current.updateMode === 'install_on_quit'
+          ) {
+            void stageAppUpdate()
+              .then((ver) => setStagedUpdateVersion(ver))
+              .catch(() => {});
+          }
+        })
         .catch(() => {});
     };
     const bootTimer = window.setTimeout(runIdleCheck, 30_000);
@@ -825,7 +856,7 @@ export function App() {
     );
   }
 
-  const canSyncLive = isTauri && settings.hasApiKey;
+  const canSyncLive = isTauri && (settings.hasApiKey || Boolean(settings.riotApiProxyUrl?.trim()));
 
   return (
     <div
@@ -1188,6 +1219,8 @@ export function App() {
                 updateInfo={updateInfo}
                 checkingUpdate={checkingUpdate}
                 installingUpdate={installingUpdate}
+                stagingUpdate={stagingUpdate}
+                stagedUpdateVersion={stagedUpdateVersion}
                 updateError={updateError}
                 canInstallUpdateSafely={canInstallUpdateSafely}
                 isTauri={isTauri}
@@ -1200,6 +1233,7 @@ export function App() {
                 onApiKeyHealthChanged={setApiKeyHealth}
                 onCheckUpdate={handleCheckUpdate}
                 onInstallUpdate={handleInstallUpdate}
+                onStageUpdate={handleStageUpdate}
               />
             )}
           </div>

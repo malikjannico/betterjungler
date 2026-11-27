@@ -1,8 +1,24 @@
+use std::sync::Mutex;
+
 use serde::Serialize;
 use tauri::AppHandle;
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::error::{AppError, AppResult};
+
+pub struct PendingUpdate {
+    pub version: String,
+    pub update: Update,
+    pub bytes: Vec<u8>,
+}
+
+pub fn normalize_update_mode(mode: &str) -> String {
+    if mode.trim().eq_ignore_ascii_case("install_on_quit") {
+        "install_on_quit".to_string()
+    } else {
+        "manual".to_string()
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,6 +134,63 @@ where
     ))
 }
 
+pub async fn stage_update_for_quit(
+    app: &AppHandle,
+    pending: &Mutex<Option<PendingUpdate>>,
+) -> AppResult<String> {
+    let updater = app
+        .updater()
+        .map_err(|e| AppError::Updater(format!("Updater initialization failed: {e}")))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| AppError::Updater(format!("Update check failed: {e}")))?
+        .ok_or_else(|| AppError::Updater("BetterJungler is already up to date.".to_string()))?;
+
+    let target_version = update.version.clone();
+    if let Ok(guard) = pending.lock() {
+        if guard.as_ref().map(|p| p.version.as_str()) == Some(target_version.as_str()) {
+            return Ok(target_version);
+        }
+    }
+
+    let bytes = update
+        .download(|_chunk_len, _content_len| {}, || {})
+        .await
+        .map_err(|e| AppError::Updater(format!("Update download failed: {e}")))?;
+
+    let mut guard = pending
+        .lock()
+        .map_err(|e| AppError::Updater(format!("Pending update lock failed: {e}")))?;
+    *guard = Some(PendingUpdate {
+        version: target_version.clone(),
+        update,
+        bytes,
+    });
+    Ok(target_version)
+}
+
+pub fn apply_staged_update_if_safe(
+    pending: &Mutex<Option<PendingUpdate>>,
+    is_safe: bool,
+) -> AppResult<bool> {
+    if !is_safe {
+        return Ok(false);
+    }
+    let staged = pending
+        .lock()
+        .map_err(|e| AppError::Updater(format!("Pending update lock failed: {e}")))?
+        .take();
+    let Some(item) = staged else {
+        return Ok(false);
+    };
+    tracing::info!(version = %item.version, "Installing staged BetterJungler update on quit");
+    item.update
+        .install(&item.bytes)
+        .map_err(|e| AppError::Updater(format!("Update installation failed: {e}")))?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +212,21 @@ mod tests {
         assert!(!is_safe_to_install_update("idle", "Unknown", false, 5));
         assert!(!is_safe_to_install_update("idle", "", false, 5));
         assert!(!is_safe_to_install_update("post_game", "EndOfGame", false, 1));
+    }
+
+    #[test]
+    fn normalizes_update_mode_with_manual_fallback() {
+        assert_eq!(normalize_update_mode("install_on_quit"), "install_on_quit");
+        assert_eq!(normalize_update_mode(" INSTALL_ON_QUIT "), "install_on_quit");
+        assert_eq!(normalize_update_mode("manual"), "manual");
+        assert_eq!(normalize_update_mode("auto"), "manual");
+        assert_eq!(normalize_update_mode(""), "manual");
+    }
+
+    #[test]
+    fn apply_staged_update_respects_safety_gate_and_empty_state() {
+        let pending: Mutex<Option<PendingUpdate>> = Mutex::new(None);
+        assert!(!apply_staged_update_if_safe(&pending, false).expect("unsafe returns false"));
+        assert!(!apply_staged_update_if_safe(&pending, true).expect("empty returns false"));
     }
 }

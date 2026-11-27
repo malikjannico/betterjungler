@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: BetterJungler.BetterJungler
+PackageVersion: 1.0.0
+PackageLocale: en-US
+Publisher: BetterJungler
+PublisherUrl: https://github.com/malikjannico/betterjungler
+PublisherSupportUrl: https://github.com/malikjannico/betterjungler/issues
+PackageName: BetterJungler
+PackageUrl: https://github.com/malikjannico/betterjungler
+License: MIT
+ShortDescription: Riot-compliant League of Legends Jungle Companion and Windows HUD Overlay
+Description: >-
+  BetterJungler is a Riot-compliant League of Legends jungle companion and
+  lightweight Windows 11 HUD overlay providing Champ Select recommendations,
+  Summoner's Rift win-condition pathing, live objective timers, adaptive builds,
+  post-game timeline replay, and climb tracking.
+Tags:
+  - league-of-legends
+  - jungle
+  - overlay
+  - gaming
+  - esports
+ReleaseNotesUrl: https://github.com/malikjannico/betterjungler/releases/tag/v1.0.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

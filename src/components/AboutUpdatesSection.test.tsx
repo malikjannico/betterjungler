@@ -20,17 +20,24 @@ describe('AboutUpdatesSection', () => {
         }}
         checkingUpdate={false}
         installingUpdate={false}
+        stagingUpdate={false}
+        stagedUpdateVersion={null}
+        updateMode="manual"
         updateError={null}
         canInstallUpdateSafely={false}
         isTauri
+        onUpdateModeChange={vi.fn()}
         onCheckUpdate={vi.fn(async () => {})}
         onInstallUpdate={vi.fn(async () => {})}
+        onStageUpdate={vi.fn(async () => {})}
       />
     );
 
     expect(screen.getByText('v0.2.0')).toBeInTheDocument();
     expect(screen.getByText('build abc1234')).toBeInTheDocument();
     expect(screen.getByText(/Update available: v0\.2\.1/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Update Mode')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stage for Quit' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Install & Restart' })).toBeDisabled();
     expect(screen.getByText(/paused during Champ Select/i)).toBeInTheDocument();
 

@@ -26,6 +26,7 @@ fn main() {
             "open_logs_folder",
             "check_update",
             "install_update",
+            "stage_update",
         ]),
     );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");

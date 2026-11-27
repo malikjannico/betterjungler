@@ -1,0 +1,6 @@
+name = "betterjungler-riot-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[vars]
+ALLOWED_CLIENT = "betterjungler"

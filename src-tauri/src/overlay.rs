@@ -325,6 +325,7 @@ pub fn setup_overlay_controls(
     app: &AppHandle,
     controller: OverlayController,
     initial_hotkey: &str,
+    on_quit: Arc<dyn Fn(&AppHandle) + Send + Sync>,
 ) -> AppResult<()> {
     if let Err(err) = controller.rebind_hotkey(app, initial_hotkey) {
         tracing::warn!(
@@ -357,7 +358,7 @@ pub fn setup_overlay_controls(
                 let _ = ctrl_tray.toggle(handle);
             }
             "quit" => {
-                handle.exit(0);
+                on_quit(handle);
             }
             _ => {}
         });

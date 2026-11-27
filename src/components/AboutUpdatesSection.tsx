@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import changelogRaw from '../../CHANGELOG.md?raw';
 import { parseChangelog } from '../domain/changelogParser';
 import { openLogsFolder } from '../services/tauriBridge';
-import type { AppMetaInfo, UpdateCheckResult } from '../types/coaching';
+import type { AppMetaInfo, UpdateCheckResult, UpdateMode } from '../types/coaching';
 import { GlassSurface } from './GlassSurface';
 
 interface AboutUpdatesSectionProps {
@@ -10,11 +10,16 @@ interface AboutUpdatesSectionProps {
   updateInfo: UpdateCheckResult | null;
   checkingUpdate: boolean;
   installingUpdate: boolean;
+  stagingUpdate: boolean;
+  stagedUpdateVersion: string | null;
+  updateMode: UpdateMode;
   updateError: string | null;
   canInstallUpdateSafely: boolean;
   isTauri: boolean;
+  onUpdateModeChange: (mode: UpdateMode) => void;
   onCheckUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
+  onStageUpdate: () => Promise<void>;
 }
 
 export function AboutUpdatesSection({
@@ -22,11 +27,16 @@ export function AboutUpdatesSection({
   updateInfo,
   checkingUpdate,
   installingUpdate,
+  stagingUpdate,
+  stagedUpdateVersion,
+  updateMode,
   updateError,
   canInstallUpdateSafely,
   isTauri,
+  onUpdateModeChange,
   onCheckUpdate,
   onInstallUpdate,
+  onStageUpdate,
 }: AboutUpdatesSectionProps) {
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -58,9 +68,25 @@ export function AboutUpdatesSection({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
+            <span>Update Mode</span>
+            <select
+              aria-label="Update Mode"
+              value={updateMode}
+              onChange={(e) => onUpdateModeChange(e.target.value as UpdateMode)}
+              className="rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100 outline-none"
+            >
+              <option value="manual" className="bg-zinc-900">
+                Manual
+              </option>
+              <option value="install_on_quit" className="bg-zinc-900">
+                Download &amp; Install on Quit
+              </option>
+            </select>
+          </label>
           <button
             type="button"
-            disabled={checkingUpdate || installingUpdate}
+            disabled={checkingUpdate || installingUpdate || stagingUpdate}
             onClick={() => void onCheckUpdate()}
             className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
@@ -85,6 +111,12 @@ export function AboutUpdatesSection({
         </div>
       </div>
 
+      {stagedUpdateVersion && (
+        <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-200">
+          Staged v{stagedUpdateVersion} — installs on quit
+        </div>
+      )}
+
       {updateInfo && !updateInfo.available && (
         <div className="lg-inset px-3 py-2 text-[11px] text-slate-300">
           You are on the latest release (v{updateInfo.currentVersion}).
@@ -97,14 +129,32 @@ export function AboutUpdatesSection({
             <div className="text-xs font-semibold text-emerald-200">
               Update available: v{updateInfo.latestVersion}
             </div>
-            <button
-              type="button"
-              disabled={!canInstallUpdateSafely || installingUpdate}
-              onClick={() => void onInstallUpdate()}
-              className="lg-btn-glass px-3 py-1.5 text-xs font-semibold text-emerald-200 disabled:opacity-50"
-            >
-              {installingUpdate ? 'Installing...' : 'Install & Restart'}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={
+                  stagingUpdate ||
+                  installingUpdate ||
+                  stagedUpdateVersion === updateInfo.latestVersion
+                }
+                onClick={() => void onStageUpdate()}
+                className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-slate-100 disabled:opacity-50"
+              >
+                {stagingUpdate
+                  ? 'Staging...'
+                  : stagedUpdateVersion === updateInfo.latestVersion
+                    ? 'Staged for Quit'
+                    : 'Stage for Quit'}
+              </button>
+              <button
+                type="button"
+                disabled={!canInstallUpdateSafely || installingUpdate}
+                onClick={() => void onInstallUpdate()}
+                className="lg-btn-glass px-3 py-1.5 text-xs font-semibold text-emerald-200 disabled:opacity-50"
+              >
+                {installingUpdate ? 'Installing...' : 'Install & Restart'}
+              </button>
+            </div>
           </div>
           {!canInstallUpdateSafely && (
             <p className="text-[11px] text-amber-300">

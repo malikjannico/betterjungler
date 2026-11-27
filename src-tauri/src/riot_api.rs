@@ -137,6 +137,121 @@ pub fn parse_platform(region: &str) -> AppResult<Platform> {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub enum RiotAuth {
+    ApiKey(String),
+    ProxyUrl(String),
+}
+
+impl std::fmt::Debug for RiotAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RiotAuth::ApiKey(_) => f.debug_tuple("ApiKey").field(&"[REDACTED]").finish(),
+            RiotAuth::ProxyUrl(url) => f.debug_tuple("ProxyUrl").field(url).finish(),
+        }
+    }
+}
+
+fn is_allowed_riot_host_prefix(prefix: &str) -> bool {
+    matches!(
+        prefix,
+        "americas"
+            | "europe"
+            | "asia"
+            | "sea"
+            | "euw1"
+            | "eun1"
+            | "na1"
+            | "kr"
+            | "jp1"
+            | "br1"
+            | "la1"
+            | "la2"
+            | "oc1"
+            | "tr1"
+            | "ru"
+            | "ph2"
+            | "sg2"
+            | "th2"
+            | "tw2"
+            | "vn2"
+            | "me1"
+    )
+}
+
+pub fn validate_proxy_url(raw: &str) -> AppResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
+        return Err(AppError::SecurityPolicy(
+            "Riot API proxy URL cannot be empty or contain whitespace".to_string(),
+        ));
+    }
+    let parsed = url::Url::parse(trimmed)
+        .map_err(|_| AppError::SecurityPolicy("Invalid Riot API proxy URL".to_string()))?;
+    if parsed.scheme() != "https" {
+        return Err(AppError::SecurityPolicy(
+            "Riot API proxy URL must use HTTPS".to_string(),
+        ));
+    }
+    if parsed.host_str().map(str::is_empty).unwrap_or(true)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(AppError::SecurityPolicy(
+            "Riot API proxy URL must have a valid HTTPS host".to_string(),
+        ));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(AppError::SecurityPolicy(
+            "Riot API proxy URL cannot include query strings or fragments".to_string(),
+        ));
+    }
+    if !parsed.path().is_empty() && parsed.path() != "/" {
+        return Err(AppError::SecurityPolicy(
+            "Riot API proxy URL must be an origin-only HTTPS URL (no path)".to_string(),
+        ));
+    }
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
+}
+
+pub fn rewrite_riot_url_for_proxy(url: &str, proxy_base: &str) -> AppResult<String> {
+    let clean_base = validate_proxy_url(proxy_base)?;
+    let parsed = url::Url::parse(url)
+        .map_err(|_| AppError::SecurityPolicy("Invalid Riot API request URL".to_string()))?;
+    if parsed.scheme() != "https" {
+        return Err(AppError::SecurityPolicy(
+            "Riot API request must use HTTPS".to_string(),
+        ));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| AppError::SecurityPolicy("Missing Riot API host".to_string()))?;
+    let routing = host.strip_suffix(".api.riotgames.com").ok_or_else(|| {
+        AppError::SecurityPolicy("URL host is not an official Riot API host".to_string())
+    })?;
+    if !is_allowed_riot_host_prefix(routing) {
+        return Err(AppError::SecurityPolicy(format!(
+            "Unsupported Riot routing host: {routing}"
+        )));
+    }
+    let path = parsed.path();
+    let suffix = match parsed.query() {
+        Some(q) => format!("{path}?{q}"),
+        None => path.to_string(),
+    };
+    Ok(format!("{clean_base}/{routing}{suffix}"))
+}
+
+fn resolve_request_target(url: &str, auth: &RiotAuth) -> AppResult<(String, &'static str, String)> {
+    match auth {
+        RiotAuth::ApiKey(key) => Ok((url.to_string(), "X-Riot-Token", key.trim().to_string())),
+        RiotAuth::ProxyUrl(proxy_base) => {
+            let rewritten = rewrite_riot_url_for_proxy(url, proxy_base)?;
+            Ok((rewritten, "X-App-Client", "betterjungler".to_string()))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SummonerProfileSummary {
@@ -195,22 +310,25 @@ pub fn classify_probe_status(
     }
 }
 
-/// Probes the stored Riot API key against Status-V4 (`/lol/status/v4/platform-data`)
-/// to distinguish valid keys from expired/invalid (401/403), rate-limited (429), or offline states.
+/// Probes the stored Riot API key or proxy against Status-V4 (`/lol/status/v4/platform-data`)
+/// to distinguish valid auth from expired/invalid (401/403), rate-limited (429), or offline states.
 pub async fn probe_riot_api_key(
     client: &Client,
     limiter: &RiotRateLimiter,
-    api_key: &str,
+    auth: &RiotAuth,
     region: &str,
 ) -> ApiKeyHealthStatus {
     let checked_at = chrono::Utc::now().to_rfc3339();
-    if api_key.trim().is_empty() {
-        return ApiKeyHealthStatus {
-            status: "missing".to_string(),
-            message: "No Riot API key saved. Paste your key in Settings to sync live Riot data."
-                .to_string(),
-            checked_at,
-        };
+    if let RiotAuth::ApiKey(key) = auth {
+        if key.trim().is_empty() {
+            return ApiKeyHealthStatus {
+                status: "missing".to_string(),
+                message:
+                    "No Riot API key saved. Paste your key in Settings to sync live Riot data."
+                        .to_string(),
+                checked_at,
+            };
+        }
     }
 
     let platform = match parse_platform(region) {
@@ -224,15 +342,25 @@ pub async fn probe_riot_api_key(
         }
     };
 
-    limiter.acquire("status-v4").await;
-    let url = format!(
+    let raw_url = format!(
         "https://{}.api.riotgames.com/lol/status/v4/platform-data",
         platform.as_host()
     );
+    let (target_url, header_name, header_val) = match resolve_request_target(&raw_url, auth) {
+        Ok(parts) => parts,
+        Err(err) => {
+            return ApiKeyHealthStatus {
+                status: "offline".to_string(),
+                message: err.to_string(),
+                checked_at,
+            };
+        }
+    };
 
+    limiter.acquire("status-v4").await;
     match client
-        .get(&url)
-        .header("X-Riot-Token", api_key.trim())
+        .get(&target_url)
+        .header(header_name, &header_val)
         .send()
         .await
     {
@@ -288,16 +416,17 @@ pub async fn riot_get_json<T: for<'de> Deserialize<'de>>(
     limiter: &RiotRateLimiter,
     bucket: &str,
     url: &str,
-    api_key: &str,
+    auth: &RiotAuth,
 ) -> AppResult<T> {
     const MAX_ATTEMPTS: usize = 3;
+    let (target_url, header_name, header_val) = resolve_request_target(url, auth)?;
 
     for attempt in 0..MAX_ATTEMPTS {
         limiter.acquire(bucket).await;
 
         let res = client
-            .get(url)
-            .header("X-Riot-Token", api_key)
+            .get(&target_url)
+            .header(header_name, &header_val)
             .send()
             .await
             .map_err(|e| AppError::RiotApi(e.to_string()))?;
@@ -380,7 +509,7 @@ struct MasteryDto {
 pub async fn fetch_summoner_profile(
     client: &Client,
     limiter: &RiotRateLimiter,
-    api_key: &str,
+    auth: &RiotAuth,
     riot_id: &str,
     region: &str,
 ) -> AppResult<SummonerProfileSummary> {
@@ -403,7 +532,7 @@ pub async fn fetch_summoner_profile(
         urlencoding_segment(tag_line)
     );
     let account: AccountDto =
-        riot_get_json(client, limiter, "account-v1", &account_url, api_key).await?;
+        riot_get_json(client, limiter, "account-v1", &account_url, auth).await?;
 
     let encoded_puuid = urlencoding_segment(&account.puuid);
 
@@ -411,12 +540,12 @@ pub async fn fetch_summoner_profile(
         "https://{host}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{encoded_puuid}"
     );
     let summoner: SummonerDto =
-        riot_get_json(client, limiter, "summoner-v4", &summoner_url, api_key).await?;
+        riot_get_json(client, limiter, "summoner-v4", &summoner_url, auth).await?;
 
     let league_url =
         format!("https://{host}.api.riotgames.com/lol/league/v4/entries/by-puuid/{encoded_puuid}");
     let entries: Vec<LeagueEntryDto> =
-        match riot_get_json(client, limiter, "league-v4", &league_url, api_key).await {
+        match riot_get_json(client, limiter, "league-v4", &league_url, auth).await {
             Ok(val) => val,
             Err(err @ (AppError::RateLimited { .. } | AppError::Unauthorized)) => return Err(err),
             Err(_) => vec![],
@@ -430,7 +559,7 @@ pub async fn fetch_summoner_profile(
         "https://{host}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/{encoded_puuid}/top?count=8"
     );
     let masteries: Vec<MasteryDto> =
-        match riot_get_json(client, limiter, "mastery-v4", &mastery_url, api_key).await {
+        match riot_get_json(client, limiter, "mastery-v4", &mastery_url, auth).await {
             Ok(val) => val,
             Err(err @ (AppError::RateLimited { .. } | AppError::Unauthorized)) => return Err(err),
             Err(_) => vec![],
@@ -485,7 +614,7 @@ pub fn validate_match_id(match_id: &str) -> AppResult<&str> {
 pub async fn fetch_recent_ranked_match_ids(
     client: &Client,
     limiter: &RiotRateLimiter,
-    api_key: &str,
+    auth: &RiotAuth,
     puuid: &str,
     region: &str,
     count: usize,
@@ -497,13 +626,13 @@ pub async fn fetch_recent_ranked_match_ids(
         "https://{regional}.api.riotgames.com/lol/match/v5/matches/by-puuid/{encoded_puuid}/ids?queue=420&start=0&count={}",
         count.clamp(1, 20)
     );
-    riot_get_json(client, limiter, "match-v5-ids", &url, api_key).await
+    riot_get_json(client, limiter, "match-v5-ids", &url, auth).await
 }
 
 pub async fn fetch_match_detail_and_timeline(
     client: &Client,
     limiter: &RiotRateLimiter,
-    api_key: &str,
+    auth: &RiotAuth,
     match_id: &str,
     puuid: &str,
     region: &str,
@@ -518,9 +647,9 @@ pub async fn fetch_match_detail_and_timeline(
     );
 
     let match_json: Value =
-        riot_get_json(client, limiter, "match-v5-detail", &match_url, api_key).await?;
+        riot_get_json(client, limiter, "match-v5-detail", &match_url, auth).await?;
     let timeline_json: Value =
-        riot_get_json(client, limiter, "match-v5-timeline", &timeline_url, api_key).await?;
+        riot_get_json(client, limiter, "match-v5-timeline", &timeline_url, auth).await?;
 
     normalize_match_v5_detail(safe_match_id, puuid, &match_json, &timeline_json)
 }
@@ -812,5 +941,46 @@ mod tests {
         assert_eq!(rate.status, "rate_limited");
         assert!(rate.message.contains("12s"));
         assert_eq!(classify_probe_status(503, None, "EUW1", now).status, "offline");
+    }
+
+    #[test]
+    fn validates_https_proxy_urls_and_rewrites_riot_targets() {
+        assert_eq!(
+            validate_proxy_url("https://bj-proxy.example.workers.dev/").unwrap(),
+            "https://bj-proxy.example.workers.dev"
+        );
+        assert!(validate_proxy_url("http://insecure.example.com").is_err());
+        assert!(validate_proxy_url("https://bad host.example.com").is_err());
+        assert!(validate_proxy_url("https://proxy.example.com?token=1").is_err());
+        assert!(validate_proxy_url("https://proxy.example.com#frag").is_err());
+        assert!(validate_proxy_url("https://proxy.example.com/subpath").is_err());
+        assert!(validate_proxy_url("").is_err());
+        assert!(!format!("{:?}", RiotAuth::ApiKey("RGAPI-secret".to_string())).contains("RGAPI"));
+
+        let rewritten = rewrite_riot_url_for_proxy(
+            "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/abc/ids?queue=420",
+            "https://bj-proxy.example.workers.dev/",
+        )
+        .expect("valid rewrite");
+        assert_eq!(
+            rewritten,
+            concat!(
+                "https://bj-proxy.example.workers.dev",
+                "/europe/lol/match/v5/matches/by-puuid/abc/ids?queue=420"
+            )
+        );
+        assert!(rewrite_riot_url_for_proxy(
+            "https://evil.com/lol/status/v4/platform-data",
+            "https://bj-proxy.example.workers.dev",
+        )
+        .is_err());
+
+        let (_, hdr_name, hdr_val) = resolve_request_target(
+            "https://euw1.api.riotgames.com/lol/status/v4/platform-data",
+            &RiotAuth::ProxyUrl("https://bj-proxy.example.workers.dev".to_string()),
+        )
+        .expect("proxy target");
+        assert_eq!(hdr_name, "X-App-Client");
+        assert_eq!(hdr_val, "betterjungler");
     }
 }

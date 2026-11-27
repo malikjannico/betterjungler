@@ -2,6 +2,13 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [1.0.0] - 2026-11-27
+
+### Added
+- **Install-on-Quit Auto-Updater & Safe Quit Persistence**: Added `Manual` vs `Download & Install on Quit` update mode with `stage_update`, verified background staging, safe tray-quit installation (only when not in Champ Select, Loading, or In-Game), and shared main window geometry persistence on both window close and tray quit.
+- **Optional Windows Authenticode Signing & Winget Distribution**: Extended `.github/workflows/release.yml` with optional CI PFX code signing (`WINDOWS_CERTIFICATE` / `WINDOWS_CERTIFICATE_PASSWORD`) and guaranteed temporary-file cleanup, plus Winget 1.6 manifests (`packaging/winget/`) and `scripts/update-winget-manifest.mjs`.
+- **Zero-Trust Cloudflare Worker Riot API Proxy & HTTPS Proxy Mode**: Added a deployable `proxy/` Worker relay enforcing `X-App-Client: betterjungler`, `GET`-only routing, strict Riot host & path-prefix allowlists, traversal blocking, bounded per-IP rate limiting, and optional `Riot API Proxy URL (HTTPS)` client support in Settings.
+
 ## [0.4.0] - 2026-11-27
 
 ### Added

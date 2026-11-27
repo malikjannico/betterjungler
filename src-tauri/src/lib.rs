@@ -65,7 +65,7 @@ struct ApplyActionResult {
     message: String,
 }
 
-struct SharedState {
+pub struct SharedState {
     db: Mutex<Connection>,
     runtime: Mutex<AppRuntimeState>,
     overlay: OverlayController,
@@ -75,6 +75,7 @@ struct SharedState {
     riot_limiter: Arc<RiotRateLimiter>,
     install_path: Arc<RwLock<String>>,
     live_miss_streak: Arc<AtomicU8>,
+    pending_update: Mutex<Option<updater::PendingUpdate>>,
     log_dir: PathBuf,
 }
 
@@ -108,6 +109,13 @@ fn get_settings(state: State<'_, Arc<SharedState>>) -> AppResult<UserSettings> {
 
 #[tauri::command]
 fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings) -> AppResult<()> {
+    settings.update_mode = updater::normalize_update_mode(&settings.update_mode);
+    let trimmed_proxy = settings.riot_api_proxy_url.trim().to_string();
+    settings.riot_api_proxy_url = if trimmed_proxy.is_empty() {
+        String::new()
+    } else {
+        riot_api::validate_proxy_url(&trimmed_proxy)?
+    };
     let conn = state
         .db
         .lock()
@@ -130,6 +138,23 @@ fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings)
         *path_guard = settings.lol_install_path.clone();
     }
     Ok(())
+}
+
+fn resolve_riot_auth(state: &SharedState) -> AppResult<riot_api::RiotAuth> {
+    let proxy_url = state
+        .db
+        .lock()
+        .ok()
+        .and_then(|conn| storage::load_settings(&conn).ok())
+        .map(|s| s.riot_api_proxy_url)
+        .unwrap_or_default();
+    let trimmed_proxy = proxy_url.trim();
+    if !trimmed_proxy.is_empty() {
+        let clean = riot_api::validate_proxy_url(trimmed_proxy)?;
+        return Ok(riot_api::RiotAuth::ProxyUrl(clean));
+    }
+    let api_key = storage::load_riot_api_key()?;
+    Ok(riot_api::RiotAuth::ApiKey(api_key))
 }
 
 #[tauri::command]
@@ -164,7 +189,9 @@ fn record_lp_if_changed(
     let abs_lp = tier_rank_to_absolute_lp(&profile.tier, &profile.rank, profile.league_points);
     let latest = storage::get_latest_lp_snapshot(conn).ok().flatten();
     let should_insert = match &latest {
-        Some(prev) => prev.absolute_lp != abs_lp || recent_win.is_some(),
+        Some(prev) => {
+            prev.absolute_lp != abs_lp || (recent_win.is_some() && prev.league_points == 0)
+        }
         None => true,
     };
     if should_insert {
@@ -196,11 +223,11 @@ async fn fetch_summoner_profile(
     recent_win: Option<bool>,
     match_id: Option<String>,
 ) -> AppResult<SummonerProfileSummary> {
-    let api_key = storage::load_riot_api_key()?;
+    let auth = resolve_riot_auth(&state)?;
     let profile = riot_api::fetch_summoner_profile(
         &state.riot_web_client,
         &state.riot_limiter,
-        &api_key,
+        &auth,
         &riot_id,
         &region,
     )
@@ -271,11 +298,11 @@ async fn sync_recent_matches(
     region: String,
     count: usize,
 ) -> AppResult<Vec<Value>> {
-    let api_key = storage::load_riot_api_key()?;
+    let auth = resolve_riot_auth(&state)?;
     let ids = riot_api::fetch_recent_ranked_match_ids(
         &state.riot_web_client,
         &state.riot_limiter,
-        &api_key,
+        &auth,
         &puuid,
         &region,
         count,
@@ -300,7 +327,7 @@ async fn sync_recent_matches(
         let detail = match riot_api::fetch_match_detail_and_timeline(
             &state.riot_web_client,
             &state.riot_limiter,
-            &api_key,
+            &auth,
             &match_id,
             &puuid,
             &region,
@@ -408,7 +435,7 @@ async fn refresh_high_elo_meta(
     max_matches: usize,
     patch: Option<String>,
 ) -> AppResult<Value> {
-    let api_key = storage::load_riot_api_key()?;
+    let auth = resolve_riot_auth(&state)?;
     let active_patch = patch
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())
@@ -422,7 +449,7 @@ async fn refresh_high_elo_meta(
     let snap = high_elo_sampler::sample_high_elo_jungle_meta(
         &state.riot_web_client,
         &state.riot_limiter,
-        &api_key,
+        &auth,
         &region,
         &active_patch,
         max_matches,
@@ -557,19 +584,31 @@ async fn check_riot_api_key_health(
     state: State<'_, Arc<SharedState>>,
     region: String,
 ) -> AppResult<ApiKeyHealthStatus> {
-    if !storage::has_riot_api_key() {
-        return Ok(ApiKeyHealthStatus {
-            status: "missing".to_string(),
-            message: "No Riot API key saved. Paste your key in Settings to sync live Riot data."
-                .to_string(),
-            checked_at: chrono::Utc::now().to_rfc3339(),
-        });
-    }
-    let api_key = storage::load_riot_api_key()?;
+    let auth = match resolve_riot_auth(&state) {
+        Ok(a) => a,
+        Err(AppError::Credential(_)) => {
+            let msg = concat!(
+                "No Riot API key or HTTPS proxy URL saved. ",
+                "Configure one in Settings to sync live Riot data."
+            );
+            return Ok(ApiKeyHealthStatus {
+                status: "missing".to_string(),
+                message: msg.to_string(),
+                checked_at: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+        Err(err) => {
+            return Ok(ApiKeyHealthStatus {
+                status: "offline".to_string(),
+                message: err.to_string(),
+                checked_at: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+    };
     let status = riot_api::probe_riot_api_key(
         &state.riot_web_client,
         &state.riot_limiter,
-        &api_key,
+        &auth,
         &region,
     )
     .await;
@@ -629,6 +668,39 @@ async fn install_update(app: AppHandle, state: State<'_, Arc<SharedState>>) -> A
         Ok(())
     })
     .await
+}
+
+#[tauri::command]
+async fn stage_update(app: AppHandle, state: State<'_, Arc<SharedState>>) -> AppResult<String> {
+    updater::stage_update_for_quit(&app, &state.pending_update).await
+}
+
+pub fn persist_main_window_bounds(app: &AppHandle, shared: &SharedState) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let minimized = window.is_minimized().unwrap_or(false);
+    let maximized = window.is_maximized().unwrap_or(false);
+    if minimized || maximized {
+        return;
+    }
+    let win_bounds = (window.inner_size(), window.outer_position());
+    if let (Ok(size), Ok(pos)) = win_bounds {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let w = f64::from(size.width) / scale;
+        let h = f64::from(size.height) / scale;
+        if w >= 960.0 && h >= 680.0 && pos.x > -10_000 && pos.y > -10_000 {
+            if let Ok(conn) = shared.db.lock() {
+                if let Ok(mut s) = storage::load_settings(&conn) {
+                    s.window_width = Some(w);
+                    s.window_height = Some(h);
+                    s.window_x = Some(pos.x);
+                    s.window_y = Some(pos.y);
+                    let _ = storage::save_settings(&conn, &s);
+                }
+            }
+        }
+    }
 }
 
 fn is_terminal_post_game_flow(gameflow: &str) -> bool {
@@ -802,28 +874,8 @@ pub fn run() {
                 }
                 if window.label() == "main" {
                     api.prevent_close();
-                    let minimized = window.is_minimized().unwrap_or(false);
-                    let maximized = window.is_maximized().unwrap_or(false);
-                    if !minimized && !maximized {
-                        let win_bounds = (window.inner_size(), window.outer_position());
-                        if let (Ok(size), Ok(pos)) = win_bounds {
-                            let scale = window.scale_factor().unwrap_or(1.0);
-                            let w = f64::from(size.width) / scale;
-                            let h = f64::from(size.height) / scale;
-                            if w >= 960.0 && h >= 680.0 && pos.x > -10_000 && pos.y > -10_000 {
-                                let shared = window.state::<Arc<SharedState>>();
-                                if let Ok(conn) = shared.db.lock() {
-                                    if let Ok(mut s) = storage::load_settings(&conn) {
-                                        s.window_width = Some(w);
-                                        s.window_height = Some(h);
-                                        s.window_x = Some(pos.x);
-                                        s.window_y = Some(pos.y);
-                                        let _ = storage::save_settings(&conn, &s);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    let shared = window.state::<Arc<SharedState>>();
+                    persist_main_window_bounds(window.app_handle(), &shared);
                     let _ = window.hide();
                 }
             }
@@ -882,29 +934,56 @@ pub fn run() {
                 }
             }
 
-            if let Err(err) = overlay::setup_overlay_controls(
-                app.handle(),
-                overlay_ctrl.clone(),
-                &initial_settings.overlay_hotkey,
-            ) {
-                tracing::warn!(
-                    error = %err,
-                    "Failed to register initial overlay hotkey; continuing with tray controls"
-                );
-            }
-
+            let initial_hotkey = initial_settings.overlay_hotkey.clone();
             let shared = Arc::new(SharedState {
                 db: Mutex::new(conn),
                 runtime: Mutex::new(AppRuntimeState::default()),
-                overlay: overlay_ctrl,
+                overlay: overlay_ctrl.clone(),
                 loopback_client,
                 riot_web_client,
                 ai_client,
                 riot_limiter: Arc::new(RiotRateLimiter::with_default_pacing()),
                 install_path: Arc::new(RwLock::new(initial_settings.lol_install_path)),
                 live_miss_streak: Arc::new(AtomicU8::new(0)),
+                pending_update: Mutex::new(None),
                 log_dir,
             });
+
+            let quit_shared = shared.clone();
+            let on_quit: Arc<dyn Fn(&AppHandle) + Send + Sync> = Arc::new(move |handle| {
+                persist_main_window_bounds(handle, &quit_shared);
+                let is_safe = quit_shared
+                    .runtime
+                    .lock()
+                    .map(|rt| {
+                        let misses = quit_shared.live_miss_streak.load(Ordering::SeqCst);
+                        updater::is_safe_to_install_update(
+                            &rt.phase,
+                            &rt.gameflow_phase,
+                            rt.live_client_connected,
+                            misses,
+                        )
+                    })
+                    .unwrap_or(false);
+                if let Err(err) =
+                    updater::apply_staged_update_if_safe(&quit_shared.pending_update, is_safe)
+                {
+                    tracing::warn!(error = %err, "Failed to install staged update on quit");
+                }
+                handle.exit(0);
+            });
+
+            if let Err(err) = overlay::setup_overlay_controls(
+                app.handle(),
+                overlay_ctrl,
+                &initial_hotkey,
+                on_quit,
+            ) {
+                tracing::warn!(
+                    error = %err,
+                    "Failed to register initial overlay hotkey; continuing with tray controls"
+                );
+            }
 
             app.manage(shared.clone());
             spawn_local_poller(app.handle().clone(), shared);
@@ -935,7 +1014,8 @@ pub fn run() {
             get_app_meta,
             open_logs_folder,
             check_update,
-            install_update
+            install_update,
+            stage_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running BetterJungler");
@@ -993,12 +1073,26 @@ mod tests {
             Some(false),
             Some("M3".to_string()),
         );
+        // Non-zero same-LP snapshot before League-V4 settles must be skipped
+        record_lp_if_changed(
+            &conn,
+            &sample_profile("GOLD", "IV", 42),
+            Some(true),
+            Some("M4".to_string()),
+        );
+        record_lp_if_changed(
+            &conn,
+            &sample_profile("GOLD", "IV", 42),
+            Some(true),
+            Some("M5".to_string()),
+        );
 
         let hist = storage::list_lp_history(&conn, 10).expect("list lp");
-        assert_eq!(hist.len(), 3);
+        assert_eq!(hist.len(), 4);
         assert!(hist[0].win);
         assert!(!hist[1].win);
         assert!(!hist[2].win);
         assert_eq!(hist[2].match_id.as_deref(), Some("M3"));
+        assert_eq!(hist[3].match_id.as_deref(), Some("M4"));
     }
 }

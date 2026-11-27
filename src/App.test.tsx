@@ -217,6 +217,13 @@ describe('BetterJungler App Integration', () => {
       fireEvent.change(screen.getByLabelText('HUD Scale'), { target: { value: '125' } });
       expect(riotIdInput.value).toBe('UnsavedSmurf#EUW');
       expect(screen.getByLabelText('In-Game Minimap Side')).toBeInTheDocument();
+      expect(screen.getByLabelText('Update Mode')).toBeInTheDocument();
+
+      const proxyInput = screen.getByLabelText('Riot API Proxy URL (HTTPS)') as HTMLInputElement;
+      fireEvent.change(proxyInput, { target: { value: 'http://insecure.example.com' } });
+      expect(screen.getByText(/Riot API Proxy URL must use HTTPS/i)).toBeInTheDocument();
+      fireEvent.change(proxyInput, { target: { value: '' } });
+
       fireEvent.click(screen.getByRole('button', { name: /View Changelog/i }));
       expect(screen.getByText(/Dedicated Two-Window HUD & Windows 11 Mica/i)).toBeInTheDocument();
     } finally {

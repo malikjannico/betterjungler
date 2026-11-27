@@ -7,7 +7,9 @@ use serde_json::Value;
 
 use crate::error::{AppError, AppResult};
 use crate::rate_limiter::RiotRateLimiter;
-use crate::riot_api::{parse_platform, riot_get_json, urlencoding_segment, validate_match_id};
+use crate::riot_api::{
+    parse_platform, riot_get_json, urlencoding_segment, validate_match_id, RiotAuth,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,7 +134,7 @@ pub fn aggregate_jungle_samples(
 pub async fn sample_high_elo_jungle_meta(
     client: &Client,
     limiter: &RiotRateLimiter,
-    api_key: &str,
+    auth: &RiotAuth,
     region: &str,
     patch: &str,
     max_matches: usize,
@@ -146,7 +148,7 @@ pub async fn sample_high_elo_jungle_meta(
         "https://{host}.api.riotgames.com/lol/league/v4/challengerleagues/by-queue/RANKED_SOLO_5x5"
     );
     let league: ChallengerLeagueDto =
-        riot_get_json(client, limiter, "league-v4-challenger", &league_url, api_key).await?;
+        riot_get_json(client, limiter, "league-v4-challenger", &league_url, auth).await?;
 
     let puuids: Vec<String> = league
         .entries
@@ -165,9 +167,7 @@ pub async fn sample_high_elo_jungle_meta(
         let ids_url = format!(
             "https://{regional}.api.riotgames.com/lol/match/v5/matches/by-puuid/{encoded}/ids?queue=420&start=0&count=3"
         );
-        match riot_get_json::<Vec<String>>(client, limiter, "match-v5-ids", &ids_url, api_key)
-            .await
-        {
+        match riot_get_json::<Vec<String>>(client, limiter, "match-v5-ids", &ids_url, auth).await {
             Ok(ids) => {
                 for id in ids {
                     if !match_ids.contains(&id) {
@@ -187,7 +187,7 @@ pub async fn sample_high_elo_jungle_meta(
             continue;
         };
         let url = format!("https://{regional}.api.riotgames.com/lol/match/v5/matches/{safe_id}");
-        match riot_get_json::<Value>(client, limiter, "match-v5-detail", &url, api_key).await {
+        match riot_get_json::<Value>(client, limiter, "match-v5-detail", &url, auth).await {
             Ok(val) => payloads.push(val),
             Err(AppError::RateLimited { .. }) => break,
             Err(_) => continue,

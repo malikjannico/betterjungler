@@ -285,6 +285,7 @@ export type OverlayHotkeyPreset = 'Alt+J' | 'Alt+B' | 'Ctrl+Shift+J' | 'F8';
 export type HudScalePercent = 100 | 125 | 150;
 export type HudMonitorTarget = 'primary' | 'active';
 export type MinimapSide = 'right' | 'left';
+export type UpdateMode = 'manual' | 'install_on_quit';
 
 export interface AiCoachConfig {
   provider: AiProvider;
@@ -309,6 +310,8 @@ export interface UserSettings {
   windowY?: number | null;
   targetDivision: string;
   hasApiKey: boolean;
+  updateMode?: UpdateMode;
+  riotApiProxyUrl?: string;
   aiCoach: AiCoachConfig;
 }
 

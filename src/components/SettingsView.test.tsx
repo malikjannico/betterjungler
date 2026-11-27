@@ -42,6 +42,8 @@ describe('SettingsView overlay rollback', () => {
         updateInfo={null}
         checkingUpdate={false}
         installingUpdate={false}
+        stagingUpdate={false}
+        stagedUpdateVersion={null}
         updateError={null}
         canInstallUpdateSafely
         isTauri
@@ -51,6 +53,7 @@ describe('SettingsView overlay rollback', () => {
         onApiKeyHealthChanged={vi.fn()}
         onCheckUpdate={vi.fn(async () => {})}
         onInstallUpdate={vi.fn(async () => {})}
+        onStageUpdate={vi.fn(async () => {})}
       />
     );
 

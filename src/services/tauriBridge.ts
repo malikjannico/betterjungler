@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   minimapSide: 'right',
   targetDivision: 'PLATINUM IV',
   hasApiKey: false,
+  updateMode: 'manual',
+  riotApiProxyUrl: '',
   aiCoach: {
     provider: 'off',
     model: 'gemini-2.5-flash',
@@ -386,4 +388,11 @@ export async function installAppUpdate(): Promise<string> {
     return 'Demo mode: updates install inside the Windows desktop app.';
   }
   return invokeTauri<string>('install_update');
+}
+
+export async function stageAppUpdate(): Promise<string> {
+  if (!isTauriEnvironment()) {
+    return pkg.version;
+  }
+  return invokeTauri<string>('stage_update');
 }

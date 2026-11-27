@@ -12,6 +12,9 @@ jobs:
   publish-tauri:
     name: Build & Publish BetterJungler Windows NSIS Installer
     runs-on: windows-latest
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +63,43 @@ jobs:
           $body | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$delim" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Prepare Optional Windows Authenticode Signing
+        if: ${{ env.WINDOWS_CERTIFICATE != '' && env.WINDOWS_CERTIFICATE_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          [IO.File]::WriteAllBytes($pfxPath, $bytes)
+
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) {
+            throw 'signtool.exe not found in Windows Kits 10'
+          }
+
+          $signScriptPath = Join-Path $env:RUNNER_TEMP 'codesign.ps1'
+          @(
+            'param([Parameter(Mandatory=$true)][string]$Target)'
+            "& '$signtool' sign /f `"`$env:WINDOWS_PFX_PATH`" /p `"`$env:WINDOWS_CERTIFICATE_PASSWORD`" /fd sha256 /tr http://timestamp.digicert.com /td sha256 `"`$Target`""
+            'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'
+          ) | Set-Content -Path $signScriptPath -Encoding utf8
+
+          $configPath = Join-Path $env:RUNNER_TEMP 'authenticode.json'
+          @{
+            bundle = @{
+              windows = @{
+                signCommand = @{
+                  cmd = 'powershell'
+                  args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $signScriptPath, '%1')
+                }
+              }
+            }
+          } | ConvertTo-Json -Depth 5 | Set-Content -Path $configPath -Encoding utf8
+
+          "WINDOWS_PFX_PATH=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TAURI_BUILD_ARGS=--config $configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build Signed Windows NSIS Installer & Updater Manifest
         uses: tauri-apps/tauri-action@v0
         env:
@@ -75,3 +115,10 @@ jobs:
           prerelease: false
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
+          args: ${{ env.TAURI_BUILD_ARGS }}
+
+      - name: Clean Up Temporary Signing Files
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -Path "$env:RUNNER_TEMP\codesign.pfx", "$env:RUNNER_TEMP\codesign.ps1", "$env:RUNNER_TEMP\authenticode.json" -Force -ErrorAction SilentlyContinue

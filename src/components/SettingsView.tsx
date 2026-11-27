@@ -20,6 +20,7 @@ import type {
   MinimapSide,
   OverlayHotkeyPreset,
   UpdateCheckResult,
+  UpdateMode,
   UserSettings,
 } from '../types/coaching';
 import type { SummonerProfileSummary } from '../types/riot';
@@ -35,6 +36,8 @@ interface SettingsViewProps {
   updateInfo: UpdateCheckResult | null;
   checkingUpdate: boolean;
   installingUpdate: boolean;
+  stagingUpdate: boolean;
+  stagedUpdateVersion: string | null;
   updateError: string | null;
   canInstallUpdateSafely: boolean;
   isTauri: boolean;
@@ -44,6 +47,34 @@ interface SettingsViewProps {
   onApiKeyHealthChanged: (health: ApiKeyHealthStatus) => void;
   onCheckUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
+  onStageUpdate: () => Promise<void>;
+}
+
+export function validateHttpsProxyUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/\s/.test(trimmed)) {
+    return 'Proxy URL cannot contain whitespace.';
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return 'Enter a valid HTTPS URL (e.g. https://your-worker.workers.dev).';
+  }
+  if (parsed.protocol !== 'https:') {
+    return 'Riot API Proxy URL must use HTTPS.';
+  }
+  if (!parsed.hostname || parsed.username || parsed.password) {
+    return 'Proxy URL must have a valid HTTPS host without embedded credentials.';
+  }
+  if (parsed.search || parsed.hash) {
+    return 'Proxy URL cannot include query parameters or fragments.';
+  }
+  if (parsed.pathname && parsed.pathname !== '/') {
+    return 'Proxy URL must be an origin-only HTTPS URL (no path).';
+  }
+  return null;
 }
 
 const REGIONS = [
@@ -91,6 +122,8 @@ export function SettingsView({
   updateInfo,
   checkingUpdate,
   installingUpdate,
+  stagingUpdate,
+  stagedUpdateVersion,
   updateError,
   canInstallUpdateSafely,
   isTauri,
@@ -100,12 +133,14 @@ export function SettingsView({
   onApiKeyHealthChanged,
   onCheckUpdate,
   onInstallUpdate,
+  onStageUpdate,
 }: SettingsViewProps) {
   const [draft, setDraft] = useState<UserSettings>(settings);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [aiKeyInput, setAiKeyInput] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const proxyValidationError = validateHttpsProxyUrl(draft.riotApiProxyUrl ?? '');
 
   const prevSettingsRef = useRef<UserSettings>(settings);
   const persistedOverlayRef = useRef<
@@ -136,6 +171,12 @@ export function SettingsView({
         cur.targetDivision !== prev.targetDivision
           ? cur.targetDivision
           : settings.targetDivision,
+      updateMode:
+        cur.updateMode !== prev.updateMode ? cur.updateMode : settings.updateMode,
+      riotApiProxyUrl:
+        cur.riotApiProxyUrl !== prev.riotApiProxyUrl
+          ? cur.riotApiProxyUrl
+          : settings.riotApiProxyUrl,
       aiCoach:
         cur.aiCoach.provider !== prev.aiCoach.provider ||
         cur.aiCoach.model !== prev.aiCoach.model ||
@@ -149,27 +190,52 @@ export function SettingsView({
   async function handleSaveSettings() {
     setErrorMessage(null);
     setStatusMessage(null);
+    const proxyErr = validateHttpsProxyUrl(draft.riotApiProxyUrl ?? '');
+    if (proxyErr) {
+      setErrorMessage(proxyErr);
+      return;
+    }
+    const normalizedDraft: UserSettings = {
+      ...draft,
+      riotApiProxyUrl: (draft.riotApiProxyUrl ?? '').trim().replace(/\/+$/, ''),
+    };
     try {
-      await updateOverlayPreferences(draft.hudCorner, draft.overlayHotkey, {
-        hudOpacity: draft.hudOpacity,
-        hudScale: draft.hudScale ?? 100,
-        hudMonitor: draft.hudMonitor ?? 'primary',
-        minimapSide: draft.minimapSide ?? 'right',
+      await updateOverlayPreferences(normalizedDraft.hudCorner, normalizedDraft.overlayHotkey, {
+        hudOpacity: normalizedDraft.hudOpacity,
+        hudScale: normalizedDraft.hudScale ?? 100,
+        hudMonitor: normalizedDraft.hudMonitor ?? 'primary',
+        minimapSide: normalizedDraft.minimapSide ?? 'right',
       });
-      await saveSettings(draft);
+      await saveSettings(normalizedDraft);
       persistedOverlayRef.current = {
-        hudCorner: draft.hudCorner,
-        overlayHotkey: draft.overlayHotkey,
-        hudOpacity: draft.hudOpacity,
-        hudScale: draft.hudScale,
-        hudMonitor: draft.hudMonitor,
-        minimapSide: draft.minimapSide,
+        hudCorner: normalizedDraft.hudCorner,
+        overlayHotkey: normalizedDraft.overlayHotkey,
+        hudOpacity: normalizedDraft.hudOpacity,
+        hudScale: normalizedDraft.hudScale,
+        hudMonitor: normalizedDraft.hudMonitor,
+        minimapSide: normalizedDraft.minimapSide,
       };
-      onSettingsChanged(draft);
+      setDraft(normalizedDraft);
+      onSettingsChanged(normalizedDraft);
+      if (isTauri && normalizedDraft.riotApiProxyUrl) {
+        void checkRiotApiKeyHealth(normalizedDraft.region)
+          .then(onApiKeyHealthChanged)
+          .catch(() => {});
+      }
       setStatusMessage('Preferences & Overlay Ergonomics saved.');
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to save preferences.');
     }
+  }
+
+  function handleUpdateModeChange(mode: UpdateMode) {
+    setErrorMessage(null);
+    const nextPersisted: UserSettings = { ...settings, updateMode: mode };
+    setDraft((prev) => ({ ...prev, updateMode: mode }));
+    onSettingsChanged(nextPersisted);
+    void saveSettings(nextPersisted).catch((err) => {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to save update mode.');
+    });
   }
 
   function handleImmediateOverlayPatch(
@@ -405,7 +471,7 @@ export function SettingsView({
                     ? 'text-amber-300'
                     : apiKeyHealth?.status === 'valid'
                       ? 'text-emerald-300'
-                      : draft.hasApiKey
+                      : draft.hasApiKey || (draft.riotApiProxyUrl?.trim() && !proxyValidationError)
                         ? 'text-slate-300'
                         : 'text-amber-300'
               }`}
@@ -416,9 +482,11 @@ export function SettingsView({
                   ? 'Expired / Invalid (401/403)'
                   : apiKeyHealth?.status === 'rate_limited'
                     ? 'Rate Limited (429)'
-                    : draft.hasApiKey
-                      ? 'Key Stored (Unverified)'
-                      : 'No Key Saved'}
+                    : draft.riotApiProxyUrl?.trim() && !proxyValidationError
+                      ? 'HTTPS Proxy Configured'
+                      : draft.hasApiKey
+                        ? 'Key Stored (Unverified)'
+                        : 'No Key Saved'}
             </span>
           </div>
 
@@ -448,6 +516,29 @@ export function SettingsView({
                 Save Key
               </button>
             </div>
+          </label>
+
+          <label className="block text-xs">
+            <span className="text-slate-300">Riot API Proxy URL (HTTPS)</span>
+            <input
+              type="url"
+              aria-label="Riot API Proxy URL (HTTPS)"
+              value={draft.riotApiProxyUrl ?? ''}
+              onChange={(e) => setDraft({ ...draft, riotApiProxyUrl: e.target.value })}
+              placeholder="https://betterjungler-riot-proxy.your-subdomain.workers.dev"
+              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
+            />
+            {proxyValidationError ? (
+              <span role="alert" className="mt-1 block text-[11px] text-rose-300">
+                {proxyValidationError}
+              </span>
+            ) : (
+              <span className="mt-1 block text-[11px] text-slate-400">
+                Optional zero-trust Cloudflare Worker relay. When set, Riot requests route over
+                HTTPS with <code className="font-mono text-slate-300">X-App-Client</code> instead
+                of a personal key.
+              </span>
+            )}
           </label>
 
           <div className="lg-inset flex items-center justify-between px-3 py-2.5 text-xs">
@@ -710,11 +801,16 @@ export function SettingsView({
         updateInfo={updateInfo}
         checkingUpdate={checkingUpdate}
         installingUpdate={installingUpdate}
+        stagingUpdate={stagingUpdate}
+        stagedUpdateVersion={stagedUpdateVersion}
+        updateMode={draft.updateMode ?? 'manual'}
         updateError={updateError}
         canInstallUpdateSafely={canInstallUpdateSafely}
         isTauri={isTauri}
+        onUpdateModeChange={handleUpdateModeChange}
         onCheckUpdate={onCheckUpdate}
         onInstallUpdate={onInstallUpdate}
+        onStageUpdate={onStageUpdate}
       />
 
       {statusMessage && (

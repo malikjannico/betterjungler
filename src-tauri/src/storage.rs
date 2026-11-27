@@ -48,6 +48,10 @@ fn default_minimap_side() -> String {
     "right".to_string()
 }
 
+fn default_update_mode() -> String {
+    "manual".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSettings {
@@ -74,6 +78,10 @@ pub struct UserSettings {
     pub window_y: Option<i32>,
     pub target_division: String,
     pub has_api_key: bool,
+    #[serde(default = "default_update_mode")]
+    pub update_mode: String,
+    #[serde(default)]
+    pub riot_api_proxy_url: String,
     #[serde(default)]
     pub ai_coach: AiCoachConfig,
 }
@@ -96,6 +104,8 @@ impl Default for UserSettings {
             window_y: None,
             target_division: "PLATINUM IV".to_string(),
             has_api_key: false,
+            update_mode: default_update_mode(),
+            riot_api_proxy_url: String::new(),
             ai_coach: AiCoachConfig::default(),
         }
     }
@@ -608,6 +618,8 @@ mod tests {
         let loaded = load_settings(&conn).expect("load settings");
         assert_eq!(loaded.riot_id, "Jungler#EUW");
         assert_eq!(loaded.target_division, "DIAMOND IV");
+        assert_eq!(loaded.update_mode, "manual");
+        assert_eq!(loaded.riot_api_proxy_url, "");
     }
 
     #[test]
