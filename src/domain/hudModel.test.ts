@@ -138,5 +138,97 @@ describe('hudModel', () => {
     expect(earlyPostRoute.objectiveCard?.shortName).toBe('SCT');
     expect(earlyPostRoute.objectiveCard?.secondary?.kind).toBe('dragon');
     expect(earlyPostRoute.objectiveCard?.secondary?.shortName).toBe('DRG');
+
+    // Off-role live mode hides opening route, build buyCard, and jungle cueCard while keeping global objectives
+    const offRoleHud = deriveHudCards({
+      phase: 'in_game',
+      gameTime: 45,
+      objectives: earlyPostRoute.objectiveCard ? [
+        {
+          id: 'dragon',
+          name: 'Elemental Dragon',
+          status: 'upcoming',
+          secondsRemaining: 255,
+          nextSpawnFormatted: '5:00',
+          priority: 'medium',
+          actionText: 'Global objective',
+        },
+      ] : [],
+      buildPlan: null,
+      topCue: {
+        id: 'c1',
+        category: 'clear',
+        priority: 'urgent',
+        title: 'Jungle Cue',
+        detail: 'Should be suppressed off-role',
+      },
+      openingRoute: clear1,
+      hotkey: 'Alt+J',
+      isOffRole: true,
+    });
+    expect(offRoleHud.statusChip.isOffRole).toBe(true);
+    expect(offRoleHud.routeCard).toBeNull();
+    expect(offRoleHud.buyCard).toBeNull();
+    expect(offRoleHud.cueCard).toBeNull();
+    expect(offRoleHud.objectiveCard?.shortName).toBe('DRG');
+
+    // Coached ADC live mode hides jungle opening route/Smite while showing Objective + ADC Next Item + ADC Cue
+    const adcHud = deriveHudCards({
+      phase: 'in_game',
+      gameTime: 650,
+      objectives: [
+        {
+          id: 'dragon',
+          name: 'Elemental Dragon',
+          status: 'prep_vision',
+          secondsRemaining: 42,
+          nextSpawnFormatted: '11:32',
+          priority: 'high',
+          actionText: 'Shove bot wave',
+        },
+      ],
+      buildPlan: {
+        threats: {
+          healingThreat: false,
+          apThreat: false,
+          adThreat: true,
+          critThreat: false,
+          tankThreat: false,
+          ccThreat: false,
+          reasons: [],
+        },
+        nextItem: {
+          item: { id: 3032, name: 'Yun Tal Wildarrows', cost: 3000, tags: [], shortReason: '' },
+          reason: 'Core',
+          affordableNow: false,
+          goldNeeded: 650,
+          affordableComponents: [],
+        },
+        upcomingQueue: [],
+        trinketAdvice: {
+          item: { id: 3363, name: 'Farsight Alteration', cost: 0, tags: ['trinket'], shortReason: '' },
+          reason: 'Safe ward',
+        },
+        consumableAdvice: [],
+        isFullBuild: false,
+        fullBuildAlternatives: [],
+      },
+      topCue: {
+        id: 'adc-recall-spike',
+        category: 'clear',
+        priority: 'high',
+        title: 'Recall spike: 1350g',
+        detail: 'B.F. Sword spike — crash wave and reset.',
+      },
+      openingRoute: clear1,
+      hotkey: 'Alt+J',
+      activeRole: 'bottom',
+    });
+    expect(adcHud.statusChip.isOffRole).toBe(false);
+    expect(adcHud.statusChip.activeRole).toBe('bottom');
+    expect(adcHud.routeCard).toBeNull();
+    expect(adcHud.objectiveCard?.shortName).toBe('DRG');
+    expect(adcHud.buyCard?.itemId).toBe(3032);
+    expect(adcHud.cueCard?.title).toContain('Recall spike');
   });
 });

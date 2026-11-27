@@ -59,6 +59,10 @@ export interface LivePlayer {
   items: LiveItem[];
   scores: LiveScores;
   rawChampionName?: string;
+  summonerSpells?: {
+    summonerSpellOne?: { displayName?: string; rawDisplayName?: string };
+    summonerSpellTwo?: { displayName?: string; rawDisplayName?: string };
+  };
 }
 
 export interface LiveActivePlayer {
@@ -108,6 +112,7 @@ export interface SummonerProfileSummary {
   puuid: string;
   region: string;
   summonerLevel: number;
+  profileIconId?: number;
   tier: string;
   rank: string;
   leaguePoints: number;
@@ -140,7 +145,9 @@ export type MatchV5EventType =
   | 'WARD_PLACED'
   | 'WARD_KILL'
   | 'ELITE_MONSTER_KILL'
-  | 'ITEM_PURCHASED';
+  | 'ITEM_PURCHASED'
+  | 'TURRET_PLATE_DESTROYED'
+  | 'LEVEL_UP';
 
 export interface MatchV5TimelineEvent {
   type: MatchV5EventType;
@@ -155,18 +162,28 @@ export interface MatchV5TimelineEvent {
   monsterType?: string;
   killerTeamId?: number;
   itemId?: number;
+  level?: number;
 }
 
 export interface MatchV5FramePoint {
   minute: number;
   position: MatchV5TimelinePosition;
   enemyJunglerPosition?: MatchV5TimelinePosition | null;
+  laneOpponentPosition?: MatchV5TimelinePosition | null;
   totalGold: number;
   xp: number;
   cs: number;
   enemyJunglerGold: number;
   enemyJunglerXp: number;
   enemyJunglerCs: number;
+  laneOpponentGold?: number;
+  laneOpponentXp?: number;
+  laneOpponentCs?: number;
+  /**
+   * Positions of the player's 4 allies at this frame (player excluded). Optional: only needed by
+   * the ADC `adc_isolated_death` detector, which stays silent when the field is absent.
+   */
+  allyPositions?: MatchV5TimelinePosition[] | null;
 }
 
 export interface MatchV5Detail {
@@ -183,12 +200,18 @@ export interface MatchV5Detail {
   championName: string;
   enemyJunglerChampionId: number;
   enemyJunglerName: string;
+  laneOpponentChampionId?: number;
+  laneOpponentName?: string;
   kills: number;
   deaths: number;
   assists: number;
   cs: number;
   visionScore: number;
   controlWardsBought: number;
+  damageDealtToChampions?: number;
+  teamTotalDamage?: number;
+  turretPlatesTaken?: number;
+  level2TimeSec?: number | null;
   teamKills: number;
   teamObjectives: number;
   enemyObjectives: number;

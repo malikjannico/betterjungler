@@ -159,7 +159,7 @@ export const DEMO_HIGH_ELO_SNAPSHOT: HighEloMetaSnapshot = {
   champions: [
     { championId: 234, games: 7, wins: 4, winRate: 57.1, topItemIds: [6672, 6610, 3053] },
     { championId: 59, games: 6, wins: 4, winRate: 66.7, topItemIds: [6692, 6610, 3071] },
-    { championId: 32, games: 4, wins: 3, winRate: 75.0, topItemIds: [6653, 3068, 3001] },
+    { championId: 32, games: 4, wins: 3, winRate: 75.0, topItemIds: [6653, 3068, 8020] },
     { championId: 64, games: 5, wins: 2, winRate: 40.0, topItemIds: [6692, 6610, 3071] },
     { championId: 876, games: 4, wins: 2, winRate: 50.0, topItemIds: [6653, 3157, 3089] },
   ],

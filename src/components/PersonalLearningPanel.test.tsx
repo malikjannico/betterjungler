@@ -28,10 +28,10 @@ describe('PersonalLearningPanel', () => {
     expect(screen.getByText(/Recommended Match Focus:/i)).toBeInTheDocument();
     expect(screen.getByText(/Multi-Session Stamina & Tilt/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Adopt as Match Focus/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Set as Match Focus/i }));
     await waitFor(() => {
       expect(onAdoptFocusGoal).toHaveBeenCalledTimes(1);
-      expect(screen.getByRole('button', { name: /Adopt as Match Focus/i })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: /Set as Match Focus/i })).not.toBeDisabled();
     });
     expect(onAdoptFocusGoal.mock.calls[0]?.[0]?.isFocusGoal).toBe(true);
   });
@@ -52,7 +52,7 @@ describe('PersonalLearningPanel', () => {
     });
 
     render(<PersonalLearningPanel snapshot={snapshot} onAdoptFocusGoal={failingAdopt} />);
-    fireEvent.click(screen.getByRole('button', { name: /Adopt as Match Focus/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Set as Match Focus/i }));
     expect(await screen.findByText(/SQLite focus update failed/i)).toBeInTheDocument();
   });
 });

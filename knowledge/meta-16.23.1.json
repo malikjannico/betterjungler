@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "kind": "meta",
   "patch": "16.23.1",
-  "issuedAt": "2026-11-27T00:00:00Z",
+  "issuedAt": "2026-11-27T20:30:00Z",
   "payloadJson": "{\"patch\":\"16.23.1\",\"region\":\"GLOBAL\",\"sampleMatches\":2500,\"updatedAt\":\"2026-11-27T00:00:00Z\",\"topJunglers\":[{\"championId\":234,\"championName\":\"Viego\",\"winRate\":52.1,\"pickRate\":14.3,\"tier\":\"S+\"},{\"championId\":64,\"championName\":\"Lee Sin\",\"winRate\":51.2,\"pickRate\":16.8,\"tier\":\"S\"},{\"championId\":121,\"championName\":\"Kha'Zix\",\"winRate\":51.8,\"pickRate\":10.4,\"tier\":\"S\"},{\"championId\":62,\"championName\":\"Wukong\",\"winRate\":51.6,\"pickRate\":8.7,\"tier\":\"S\"}]}",
-  "signatureB64": "HSB5uMMFPe1CTxE9EdTUetuhDSzQKKep9EyREypBFYIibSe7LB94hlb+9wC0nZNIJUJ5gVM6wVBeo2rLuI2yAw=="
+  "signatureB64": "QOefHO28Cjuf/6lsoho2UPfeHWjEqS4849+78IbFMVrwYhfX4dunV94bz1i8/BlhrgtF6OfW6H6L2CGwl+9hCQ=="
 }

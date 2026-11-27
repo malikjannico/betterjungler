@@ -21,7 +21,7 @@ interface RouteModeProps {
   mode: 'route';
   mapSide: MapSide;
   patchVersion: string;
-  route: JungleRoute;
+  route?: JungleRoute | null;
   wardSpots: WardSpot[];
   compact?: boolean;
 }
@@ -41,7 +41,7 @@ export type RiftMapProps = RouteModeProps | ReplayModeProps;
 
 export function RiftMap(props: RiftMapProps) {
   if (props.mode === 'route') {
-    return <RouteRiftMap key={props.route.id} {...props} />;
+    return <RouteRiftMap key={props.route?.id ?? `wards-${props.mapSide}`} {...props} />;
   }
   const replayKey = `${props.durationSeconds}-${props.markers.length}-${props.markers[0]?.timestampSec ?? 0}`;
   return <ReplayRiftMap key={replayKey} {...props} />;
@@ -61,9 +61,9 @@ function RouteRiftMap({
   );
   const [selectedStepOrder, setSelectedStepOrder] = useState<number | null>(null);
 
-  const polylinePoints = route.steps.map((s) => `${s.x},${s.y}`).join(' ');
-  const activeStep =
-    route.steps.find((s) => s.order === selectedStepOrder) ?? null;
+  const steps = route?.steps ?? [];
+  const polylinePoints = steps.map((s) => `${s.x},${s.y}`).join(' ');
+  const activeStep = steps.find((s) => s.order === selectedStepOrder) ?? null;
   const selectedWard =
     wardSpots.find((w) => w.id === selectedWardId) ?? wardSpots[0] ?? null;
 
@@ -73,13 +73,15 @@ function RouteRiftMap({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-xs font-semibold text-white">
-              Summoner&apos;s Rift Route &amp; Vision ({mapSide.toUpperCase()} Side)
+              Summoner&apos;s Rift {route ? 'Route & ' : ''}Vision ({mapSide.toUpperCase()} Side)
             </h3>
-            <span className="rounded-full border border-white/12 bg-white/[0.06] px-2.5 py-0.5 text-[10px] font-medium text-slate-300">
-              {route.stageLabel} · {route.timeWindow}
-            </span>
+            {route && (
+              <span className="rounded-full border border-white/12 bg-white/[0.06] px-2.5 py-0.5 text-[10px] font-medium text-slate-300">
+                {route.stageLabel} · {route.timeWindow}
+              </span>
+            )}
           </div>
-          <p className="mt-1 text-[11px] text-slate-400">{route.whyThisClear}</p>
+          {route && <p className="mt-1 text-[11px] text-slate-400">{route.whyThisClear}</p>}
         </div>
       </div>
 
@@ -177,11 +179,11 @@ function RouteRiftMap({
             })}
 
           {/* Accessible 40px Camp Waypoints (rendered above wards so camp steps stay clickable) */}
-          {route.steps.map((step) => {
+          {steps.map((step) => {
             const isSelected = selectedStepOrder === step.order;
             return (
               <button
-                key={`${route.id}-${step.order}`}
+                key={`${route?.id ?? 'wards'}-${step.order}`}
                 type="button"
                 aria-label={`Step ${step.order}: ${step.campName} at ${step.targetTime}`}
                 onClick={() => {
@@ -250,39 +252,47 @@ function RouteRiftMap({
         {/* Route Sequence & Selected Ward Detail */}
         <div className="flex min-w-0 flex-col justify-between gap-3 text-xs">
           <div>
-            <div className="text-xs font-semibold text-white">{route.label}</div>
-            <p className="mt-1 text-[11px] text-slate-400">{route.summary}</p>
-            <ol className="mt-3 divide-y divide-white/[0.06] border-t border-b border-white/[0.06]">
-              {route.steps.map((step) => {
-                const isSelected = selectedStepOrder === step.order;
-                return (
-                  <li key={step.order}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSelectedStepOrder((prev) =>
-                          prev === step.order ? null : step.order
-                        )
-                      }
-                      className={`flex w-full items-start justify-between gap-3 px-1.5 py-2 text-left text-[11px] transition motion-reduce:transition-none ${
-                        isSelected ? 'bg-white/[0.06] text-white' : 'hover:bg-white/[0.03]'
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <span className="tabular-nums mr-2 font-semibold text-slate-400">
-                          {step.order}.
+            <div className="text-xs font-semibold text-white">
+              {route ? route.label : 'Bot Lane Vision Targets'}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {route
+                ? route.summary
+                : 'Click a ward marker on the map to inspect placement timing and safety goal.'}
+            </p>
+            {steps.length > 0 && (
+              <ol className="mt-3 divide-y divide-white/[0.06] border-t border-b border-white/[0.06]">
+                {steps.map((step) => {
+                  const isSelected = selectedStepOrder === step.order;
+                  return (
+                    <li key={step.order}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedStepOrder((prev) =>
+                            prev === step.order ? null : step.order
+                          )
+                        }
+                        className={`flex w-full items-start justify-between gap-3 px-1.5 py-2 text-left text-[11px] transition motion-reduce:transition-none ${
+                          isSelected ? 'bg-white/[0.06] text-white' : 'hover:bg-white/[0.03]'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <span className="tabular-nums mr-2 font-semibold text-slate-400">
+                            {step.order}.
+                          </span>
+                          <span className="font-semibold text-white">{step.campName}</span>
+                          <span className="ml-2 text-slate-400">{step.note}</span>
+                        </div>
+                        <span className="tabular-nums shrink-0 font-mono text-[10px] text-slate-300">
+                          {step.targetTime}
                         </span>
-                        <span className="font-semibold text-white">{step.campName}</span>
-                        <span className="ml-2 text-slate-400">{step.note}</span>
-                      </div>
-                      <span className="tabular-nums shrink-0 font-mono text-[10px] text-slate-300">
-                        {step.targetTime}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
           </div>
 
           {showWards && selectedWard && (

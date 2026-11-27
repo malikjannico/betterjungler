@@ -273,9 +273,10 @@ export interface ObjectiveTimingsConfig {
   dragonRespawnSec: number;
   elderRespawnSec: number;
   voidgrubsSpawnSec: number;
+  voidgrubsDespawnSec?: number;
   heraldSpawnSec: number;
   heraldDespawnSec: number;
-  atakhanSpawnSec: number;
+  atakhanSpawnSec?: number;
   baronSpawnSec: number;
   baronRespawnSec: number;
 }
@@ -295,10 +296,34 @@ export interface ChampionTierOverride {
   metaScore: number;
 }
 
+export type CoachedRole = 'jungle' | 'bottom';
+
+export type AdcKpiKey =
+  | 'csAt10'
+  | 'csPerMin'
+  | 'goldDiffAt15'
+  | 'damageSharePct'
+  | 'deathsPre14'
+  | 'turretPlates'
+  | 'killParticipationPct';
+
+export interface AdcDivisionBenchmark {
+  csAt10: number;
+  csPerMin: number;
+  goldDiffAt15: number;
+  damageSharePct: number;
+  deathsPre14: number;
+  turretPlates: number;
+  killParticipationPct: number;
+}
+
 export interface KnowledgePackPayload {
   objectiveTimings: ObjectiveTimingsConfig;
   smiteThresholds: SmiteThresholdsConfig;
   metaTierOverrides: ChampionTierOverride[];
+  roleBenchmarks?: {
+    bottom?: Record<string, AdcDivisionBenchmark>;
+  };
 }
 
 export interface ActivePatchPackStatus {
@@ -469,6 +494,12 @@ export interface UserSettings {
   hudScale?: HudScalePercent;
   hudMonitor?: HudMonitorTarget;
   minimapSide?: MinimapSide;
+  hudX?: number | null;
+  hudY?: number | null;
+  hudLocked?: boolean;
+  primaryRole?: CoachedRole;
+  secondaryRole?: CoachedRole;
+  autoDetectRole?: boolean;
   windowWidth?: number | null;
   windowHeight?: number | null;
   windowX?: number | null;
@@ -623,8 +654,9 @@ export interface DivisionBenchmarkComparison {
 
 export interface ClimbGoal {
   id: string;
+  role?: CoachedRole;
   targetDivision: string;
-  metric: JungleKpiKey;
+  metric: JungleKpiKey | AdcKpiKey;
   title: string;
   targetValue: number;
   currentValue: number;

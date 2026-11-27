@@ -541,6 +541,7 @@ pub async fn fetch_lcu_profile(
     };
     let puuid = s_val["puuid"].as_str().unwrap_or_default().to_string();
     let summoner_level = s_val["summonerLevel"].as_u64().unwrap_or(1);
+    let profile_icon_id = s_val["profileIconId"].as_i64().filter(|&id| id > 0);
 
     let ranked_url = assert_loopback_url(&format!(
         "{}://127.0.0.1:{}/lol-ranked/v1/current-ranked-stats",
@@ -580,6 +581,7 @@ pub async fn fetch_lcu_profile(
         puuid,
         region: platform.as_code().to_string(),
         summoner_level,
+        profile_icon_id,
         tier,
         rank,
         league_points,

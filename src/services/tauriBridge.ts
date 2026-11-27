@@ -60,6 +60,12 @@ const DEFAULT_SETTINGS: UserSettings = {
   hudScale: 100,
   hudMonitor: 'primary',
   minimapSide: 'right',
+  hudX: null,
+  hudY: null,
+  hudLocked: true,
+  primaryRole: 'jungle',
+  secondaryRole: 'bottom',
+  autoDetectRole: true,
   targetDivision: 'PLATINUM IV',
   hasApiKey: false,
   updateMode: 'manual',
@@ -130,6 +136,24 @@ export interface HudPreferencesEvent {
   hudScale: HudScalePercent;
   hudMonitor: HudMonitorTarget;
   minimapSide: MinimapSide;
+  hudX?: number | null;
+  hudY?: number | null;
+  hudLocked?: boolean;
+}
+
+export async function setHudLocked(locked: boolean): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invokeTauri<void>('set_hud_locked', { locked });
+}
+
+export async function saveHudPosition(): Promise<[number, number] | null> {
+  if (!isTauriEnvironment()) return null;
+  return invokeTauri<[number, number]>('save_hud_position');
+}
+
+export async function resetHudPosition(): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invokeTauri<void>('reset_hud_position');
 }
 
 export async function subscribeHudPreferences(
@@ -616,13 +640,15 @@ export async function seekRiotReplay(
 export type { SqlPersonalLearningSummary };
 
 export async function getPersonalLearningSnapshot(
-  puuid?: string | null
+  puuid?: string | null,
+  role: 'JUNGLE' | 'BOTTOM' = 'JUNGLE'
 ): Promise<SqlPersonalLearningSummary> {
   if (!isTauriEnvironment()) {
     return { jungleMatchCount: 0, baselines: [], mistakeSignatures: [] };
   }
   return invokeTauri<SqlPersonalLearningSummary>('get_personal_learning_snapshot', {
     puuid: puuid ?? null,
+    role,
   });
 }
 

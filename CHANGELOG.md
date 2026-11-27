@@ -2,6 +2,26 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [2.1.0] - 2026-11-27
+
+### Added
+- **ADC (`BOTTOM`) Secondary Role Parity**:
+  - **Champ Select**: 22-ADC Patch `16.23.1` knowledge pack (`adcKnowledgePack.ts`), `Jungle | ADC` switcher (`Auto-detected` via LCU/spells or manual), Support Synergy evaluation, `Likely` 2v2 bot-lane matchup insights, and 1-click LCU rune/spell apply (`Heal`/`Barrier`/`Cleanse` + `Flash`).
+  - **Win Plan & Map**: 2v2 matchup verdict, Support Synergy playbook, Season 2026 `0:30` Level-2 wave plan (`Push for Lv2 All-In` vs `Concede & Trim`), `2:15–2:55` enemy jungler gank threat window, `14:00` plate deadline, `5:00` first Dragon priority, Bot-to-Mid swap trigger, and Bot lane ward targets on Summoner's Rift.
+  - **Live Coach & Role-Aware Compact HUD**: Adaptive ADC builds (reactive Grievous Wounds/armor pen/QSS/Lifeline pivots without Jungle/bruiser items like Chempunk), B.F. Sword `1300g` recall spikes, CS/min pacing, plate/Mid-swap cues, and Farsight Alteration reminders.
+  - **Climb & Goals + SQLite v6 Isolation (`PRAGMA user_version = 6`)**: Provisional ADC benchmarks (`IRON`–`MASTER`) embedded in signed patch packs (`roleBenchmarks.bottom`), 5 ADC mistake detectors (`adc_cs_deficit_10`, `adc_lane_death_pre_14`, `adc_low_damage_share`, `adc_pre_obj_death`, `adc_isolated_death`), EWM baselines strictly isolated per role (`JUNGLE` vs `BOTTOM`), and `Roles & Preferences` Settings section.
+  - **Post-Game Review (ADC & Debrief)**: Evaluates `CS@10`, `CS/min`, Lane Gold Diff @15 (vs `laneOpponentGold` with enemy jungler fallback badge), Damage Share %, Pre-14 Deaths, Turret Plates, KP%, and grounded ADC AI Coach debriefs.
+
+### Changed
+- **Material Design 3 Expressive Desktop UI Redesign**: Unified left navigation rail (`M3NavRail`), `48px` top app bar (`M3TopAppBar`) with aligned `32px` Summoner Profile Pill (`SummonerProfilePill` + profile icon), Expressive cards/chips/segmented controls, and preserved isolated dark glass Compact HUD (`hud.html`).
+- **Stacked Master-Detail Post-Game & Settings Navigation**: Replaced match tabs in Post-Game Review with stacked clickable Match Summary Cards (`All | Jungle | ADC` filters) opening dedicated detail subpages (`← All Matches` + `Esc` + Newer/Older), and replaced Settings tabs with stacked grouped Category Cards opening dedicated subpages (`← Back to Settings` + `Esc` + deep-linking).
+
+### Fixed
+- **Season 2026 Patch `16.23.1` Timers & Atakhan Removal**: Removed Atakhan (`#[serde(default)]` kept for legacy packs), aligned buff spawn (`0:55`), Scuttle (`2:55`), Voidgrubs (`8:00–14:45`), Rift Herald (`15:00–19:45`), Baron (`20:00`), Smite (`600`/`1000`/`1400` at `20`/`35` stacks), and post-game/learning spawn windows (`[175, 300, 480, 900, 1200]`).
+- **Off-Role Live Suppression (`TOP` / `MIDDLE` / `UTILITY`)**: Suppresses role-specific items, Smite, and lane/jungle cues during Top/Mid/Support games (`OFF-ROLE · GLOBALS`), keeping global objective timers and ungraded post-game scoreboard/VOD views.
+- **Draggable Compact HUD & League HUD Guidance**: Added HUD Unlock/Lock drag positioning (`set_hud_locked`, persisted coordinates, `Reset HUD Position`, tray toggle) and a Recommended In-Game League HUD Settings guide.
+- **Windows Taskbar Application Icon**: Regenerated multi-size `icon.ico` and applied it via `build.rs` and `main_win.set_icon(...)`.
+
 ## [2.0.0] - 2026-11-27
 
 ### Added

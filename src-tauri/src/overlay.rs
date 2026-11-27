@@ -22,6 +22,9 @@ pub struct HudPreferencesPayload {
     pub hud_scale: u16,
     pub hud_monitor: String,
     pub minimap_side: String,
+    pub hud_x: Option<i32>,
+    pub hud_y: Option<i32>,
+    pub hud_locked: bool,
 }
 
 #[derive(Clone)]
@@ -42,6 +45,9 @@ impl Default for OverlayController {
                 hud_scale: 100,
                 hud_monitor: "primary".to_string(),
                 minimap_side: "right".to_string(),
+                hud_x: None,
+                hud_y: None,
+                hud_locked: true,
             })),
             current_hotkey: Arc::new(Mutex::new(None)),
         }
@@ -129,9 +135,52 @@ pub fn compute_physical_hud_rect(
     (phys_w, phys_h, phys_x, phys_y)
 }
 
+/// Clamps custom `(x, y)` HUD coordinates into the nearest monitor's physical bounds
+/// so display changes or resolution drops never push the overlay off-screen.
+pub fn clamp_custom_hud_pos(
+    x: i32,
+    y: i32,
+    hud_w: u32,
+    hud_h: u32,
+    monitors: &[(i32, i32, u32, u32)],
+) -> Option<(i32, i32)> {
+    if monitors.is_empty() {
+        return None;
+    }
+    let center_x = i64::from(x) + i64::from(hud_w) / 2;
+    let center_y = i64::from(y) + i64::from(hud_h) / 2;
+
+    let chosen = monitors
+        .iter()
+        .find(|&&(mx, my, mw, mh)| {
+            center_x >= i64::from(mx)
+                && center_x <= i64::from(mx) + i64::from(mw)
+                && center_y >= i64::from(my)
+                && center_y <= i64::from(my) + i64::from(mh)
+        })
+        .or_else(|| {
+            monitors.iter().min_by_key(|&&(mx, my, mw, mh)| {
+                let mcx = i64::from(mx) + i64::from(mw) / 2;
+                let mcy = i64::from(my) + i64::from(mh) / 2;
+                let dx = center_x - mcx;
+                let dy = center_y - mcy;
+                dx * dx + dy * dy
+            })
+        })?;
+
+    let (mx, my, mw, mh) = *chosen;
+    let max_x = mx.saturating_add((mw.saturating_sub(hud_w)) as i32).max(mx);
+    let max_y = my.saturating_add((mh.saturating_sub(hud_h)) as i32).max(my);
+    Some((x.clamp(mx, max_x), y.clamp(my, max_y)))
+}
+
 impl OverlayController {
     pub fn mark_hud_hidden(&self) {
         self.hud_visible.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_hud_locked(&self) -> bool {
+        self.prefs.lock().map(|g| g.hud_locked).unwrap_or(true)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -145,6 +194,12 @@ impl OverlayController {
         monitor: &str,
         minimap_side: &str,
     ) {
+        let prev = self
+            .prefs
+            .lock()
+            .ok()
+            .map(|g| (g.hud_x, g.hud_y, g.hud_locked));
+        let (hud_x, hud_y, hud_locked) = prev.unwrap_or((None, None, true));
         let next = HudPreferencesPayload {
             hud_corner: corner.to_string(),
             overlay_hotkey: hotkey.to_string(),
@@ -160,6 +215,9 @@ impl OverlayController {
             } else {
                 "right".to_string()
             },
+            hud_x,
+            hud_y,
+            hud_locked,
         };
         if let Ok(mut guard) = self.prefs.lock() {
             *guard = next.clone();
@@ -174,8 +232,67 @@ impl OverlayController {
         }
     }
 
-    /// Shows or hides the dedicated click-through `hud` overlay window without resizing
-    /// or stealing focus from the `main` desktop window.
+    pub fn set_custom_position(
+        &self,
+        app: Option<&AppHandle>,
+        x: Option<i32>,
+        y: Option<i32>,
+        reposition: bool,
+    ) {
+        let next = if let Ok(mut guard) = self.prefs.lock() {
+            guard.hud_x = x;
+            guard.hud_y = y;
+            guard.clone()
+        } else {
+            return;
+        };
+        if let Some(handle) = app {
+            if reposition {
+                if let Some(hud_window) = handle.get_webview_window("hud") {
+                    self.position_hud_window(handle, &hud_window, &next);
+                }
+            }
+            let _ = handle.emit("hud-preferences-changed", next);
+        }
+    }
+
+    pub fn set_hud_locked(&self, app: &AppHandle, locked: bool) -> AppResult<()> {
+        let hud_window = app
+            .get_webview_window("hud")
+            .ok_or_else(|| AppError::Overlay("Dedicated HUD window not found".to_string()))?;
+
+        let prefs = if let Ok(mut guard) = self.prefs.lock() {
+            guard.hud_locked = locked;
+            guard.clone()
+        } else {
+            return Err(AppError::Overlay("Overlay state lock poisoned".to_string()));
+        };
+
+        if !locked {
+            self.position_hud_window(app, &hud_window, &prefs);
+            hud_window
+                .set_ignore_cursor_events(false)
+                .map_err(|e| AppError::Overlay(e.to_string()))?;
+            let _ = hud_window.set_focusable(true);
+            hud_window
+                .show()
+                .map_err(|e| AppError::Overlay(e.to_string()))?;
+            self.hud_visible.store(true, Ordering::SeqCst);
+            let _ = app.emit("overlay-mode-changed", "compact");
+        } else {
+            hud_window
+                .set_ignore_cursor_events(true)
+                .map_err(|e| AppError::Overlay(e.to_string()))?;
+            let _ = hud_window.set_focusable(false);
+        }
+
+        if let Err(err) = app.emit("hud-preferences-changed", prefs) {
+            tracing::warn!(error = %err, "Failed to emit hud-preferences-changed");
+        }
+        Ok(())
+    }
+
+    /// Shows or hides the dedicated `hud` overlay window without stealing focus when locked.
     pub fn set_mode(&self, app: &AppHandle, show_hud: bool) -> AppResult<()> {
         let hud_window = app
             .get_webview_window("hud")
@@ -192,13 +309,17 @@ impl OverlayController {
                     hud_scale: 100,
                     hud_monitor: "primary".to_string(),
                     minimap_side: "right".to_string(),
+                    hud_x: None,
+                    hud_y: None,
+                    hud_locked: true,
                 });
 
         if show_hud {
             self.position_hud_window(app, &hud_window, &prefs);
             hud_window
-                .set_ignore_cursor_events(true)
+                .set_ignore_cursor_events(prefs.hud_locked)
                 .map_err(|e| AppError::Overlay(e.to_string()))?;
+            let _ = hud_window.set_focusable(!prefs.hud_locked);
             hud_window
                 .show()
                 .map_err(|e| AppError::Overlay(e.to_string()))?;
@@ -247,7 +368,7 @@ impl OverlayController {
             let scale = monitor.scale_factor();
             let size = monitor.size();
             let pos = monitor.position();
-            let (pw, ph, px, py) = compute_physical_hud_rect(
+            let (pw, ph, default_px, default_py) = compute_physical_hud_rect(
                 &prefs.hud_corner,
                 &prefs.minimap_side,
                 prefs.hud_scale,
@@ -257,6 +378,22 @@ impl OverlayController {
                 size.height,
                 scale,
             );
+            let (px, py) = if let (Some(cx), Some(cy)) = (prefs.hud_x, prefs.hud_y) {
+                let monitors_rects: Vec<(i32, i32, u32, u32)> = app
+                    .available_monitors()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|m| {
+                        let mp = m.position();
+                        let ms = m.size();
+                        (mp.x, mp.y, ms.width, ms.height)
+                    })
+                    .collect();
+                clamp_custom_hud_pos(cx, cy, pw, ph, &monitors_rects)
+                    .unwrap_or((default_px, default_py))
+            } else {
+                (default_px, default_py)
+            };
             if let Err(err) = hud_window.set_size(PhysicalSize::new(pw, ph)) {
                 tracing::warn!(error = %err, "Failed to size HUD window");
             }
@@ -325,6 +462,7 @@ pub fn setup_overlay_controls(
     app: &AppHandle,
     controller: OverlayController,
     initial_hotkey: &str,
+    on_toggle_lock: Arc<dyn Fn(&AppHandle) + Send + Sync>,
     on_quit: Arc<dyn Fn(&AppHandle) + Send + Sync>,
 ) -> AppResult<()> {
     if let Err(err) = controller.rebind_hotkey(app, initial_hotkey) {
@@ -338,11 +476,27 @@ pub fn setup_overlay_controls(
         .map_err(|e| AppError::Overlay(e.to_string()))?;
     let toggle_hud_item = MenuItem::with_id(app, "toggle_hud", "Toggle HUD", true, None::<&str>)
         .map_err(|e| AppError::Overlay(e.to_string()))?;
+    let toggle_lock_item = MenuItem::with_id(
+        app,
+        "toggle_hud_lock",
+        "Unlock / Lock HUD Drag",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| AppError::Overlay(e.to_string()))?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit BetterJungler", true, None::<&str>)
         .map_err(|e| AppError::Overlay(e.to_string()))?;
 
-    let menu = Menu::with_items(app, &[&expand_item, &toggle_hud_item, &quit_item])
-        .map_err(|e| AppError::Overlay(e.to_string()))?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &expand_item,
+            &toggle_hud_item,
+            &toggle_lock_item,
+            &quit_item,
+        ],
+    )
+    .map_err(|e| AppError::Overlay(e.to_string()))?;
 
     let ctrl_tray = controller;
     let ver = env!("CARGO_PKG_VERSION");
@@ -356,6 +510,9 @@ pub fn setup_overlay_controls(
             }
             "toggle_hud" => {
                 let _ = ctrl_tray.toggle(handle);
+            }
+            "toggle_hud_lock" => {
+                on_toggle_lock(handle);
             }
             "quit" => {
                 on_quit(handle);
@@ -412,5 +569,25 @@ mod tests {
             1920 + ((2560.0_f64 - 530.0 - 16.0) * 1.5).round() as i32
         );
         assert_eq!(py, ((1440.0_f64 - 230.0 - 16.0) * 1.5).round() as i32);
+    }
+
+    #[test]
+    fn clamps_custom_hud_position_to_monitor_bounds() {
+        let monitors = [(0, 0, 1920, 1080), (1920, 0, 2560, 1440)];
+        // Inside primary monitor -> preserved
+        assert_eq!(
+            clamp_custom_hud_pos(500, 400, 424, 184, &monitors),
+            Some((500, 400))
+        );
+        // Way off top-left -> clamped to (0, 0)
+        assert_eq!(
+            clamp_custom_hud_pos(-900, -200, 424, 184, &monitors),
+            Some((0, 0))
+        );
+        // Inside secondary monitor near right edge -> clamped inside secondary monitor
+        assert_eq!(
+            clamp_custom_hud_pos(4400, 1400, 424, 184, &monitors),
+            Some((1920 + 2560 - 424, 1440 - 184))
+        );
     }
 }

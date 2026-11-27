@@ -20,36 +20,36 @@ import type {
   ThreatAssessment,
   WinConditionPlan,
 } from '../types/coaching';
-import type { LiveGameData, LivePlayer } from '../types/riot';
+import type { LiveGameData, LivePlayer, LcuChampSelectSession } from '../types/riot';
 
 export const DEFAULT_OBJECTIVE_TIMINGS: ObjectiveTimingsConfig = {
-  scuttleInitialSec: 210,
+  scuttleInitialSec: 175,
   dragonFirstSpawnSec: 300,
   dragonRespawnSec: 300,
   elderRespawnSec: 360,
-  voidgrubsSpawnSec: 360,
-  heraldSpawnSec: 840,
-  heraldDespawnSec: 1485,
-  atakhanSpawnSec: 1200,
-  baronSpawnSec: 1500,
+  voidgrubsSpawnSec: 480,
+  voidgrubsDespawnSec: 885,
+  heraldSpawnSec: 900,
+  heraldDespawnSec: 1185,
+  baronSpawnSec: 1200,
   baronRespawnSec: 360,
 };
 
 export const DEFAULT_SMITE_THRESHOLDS: SmiteThresholdsConfig = {
   baseDamage: 600,
-  unleashedDamage: 900,
-  primalDamage: 1200,
+  unleashedDamage: 1000,
+  primalDamage: 1400,
   unleashedStacks: 20,
-  primalStacks: 40,
+  primalStacks: 35,
 };
 
 const ANTI_HEAL_ITEM_IDS = new Set([3123, 3916, 3076, 3075, 6609, 3165]);
-const MR_ITEM_IDS = new Set([3111, 3155, 3156, 2504, 3001, 6664, 3102]);
+const MR_ITEM_IDS = new Set([3111, 3155, 3156, 2504, 8020, 6664, 3102]);
 const ARMOR_ITEM_IDS = new Set([3047, 3068, 3075, 3143, 3110, 6333, 3157, 3026, 3742]);
 const PEN_ITEM_IDS = new Set([3071, 3153, 6694, 3036, 3135, 6653]);
 
 // Locale-independent enemy threat item ID sets (Riot official item IDs)
-const HEALING_THREAT_ITEM_IDS = new Set([3072, 6610, 6692, 4633, 6617, 3153, 3074, 6630]);
+const HEALING_THREAT_ITEM_IDS = new Set([3072, 6610, 6692, 4633, 6617, 3153, 3074]);
 const CRIT_THREAT_ITEM_IDS = new Set([3031, 6676, 3046, 3094, 3085, 3087, 3036, 3033, 6672]);
 const TANK_THREAT_ITEM_IDS = new Set([3068, 3084, 3075, 2504, 6665, 3110, 3143, 3742]);
 
@@ -83,6 +83,62 @@ export function resolveSelfPlayer(liveData: LiveGameData): LivePlayer | null {
   }
 
   return null;
+}
+
+const JUNGLE_PET_ITEM_IDS = new Set([1101, 1102, 1103]);
+
+function hasSmiteInLivePlayer(player: LivePlayer): boolean {
+  const s1 = `${player.summonerSpells?.summonerSpellOne?.rawDisplayName ?? ''} ${player.summonerSpells?.summonerSpellOne?.displayName ?? ''}`;
+  const s2 = `${player.summonerSpells?.summonerSpellTwo?.rawDisplayName ?? ''} ${player.summonerSpells?.summonerSpellTwo?.displayName ?? ''}`;
+  if (/smite/i.test(s1) || /smite/i.test(s2)) {
+    return true;
+  }
+  return player.items.some((i) => JUNGLE_PET_ITEM_IDS.has(i.itemID));
+}
+
+/**
+ * Determines whether the local player is actively playing Jungle in a live game.
+ * Checks Smite / jungle pet first (catches Champ Select role swaps), then explicit
+ * live position or LCU assignedPosition, avoiding false-positive jungle items on off-role games.
+ */
+export function isSelfJungleInLiveGame(
+  liveData: LiveGameData,
+  champSelect?: LcuChampSelectSession | null
+): boolean {
+  const self = resolveSelfPlayer(liveData);
+  const localSlot = champSelect?.myTeam.find((s) => s.isLocalPlayer);
+  if (localSlot && (localSlot.spell1Id === 11 || localSlot.spell2Id === 11)) {
+    return true;
+  }
+  if (self && hasSmiteInLivePlayer(self)) {
+    return true;
+  }
+
+  const normalizedPos = self?.position?.trim().toUpperCase() ?? '';
+  if (normalizedPos === 'JUNGLE') {
+    return true;
+  }
+  if (
+    normalizedPos === 'TOP' ||
+    normalizedPos === 'MIDDLE' ||
+    normalizedPos === 'MID' ||
+    normalizedPos === 'BOTTOM' ||
+    normalizedPos === 'BOT' ||
+    normalizedPos === 'UTILITY' ||
+    normalizedPos === 'SUPPORT'
+  ) {
+    return false;
+  }
+
+  if (localSlot && localSlot.assignedPosition !== 'unknown') {
+    return localSlot.assignedPosition === 'jungle';
+  }
+
+  if (self?.summonerSpells?.summonerSpellOne || self?.summonerSpells?.summonerSpellTwo) {
+    return false;
+  }
+
+  return Boolean(self && findJungleChampionByName(self.championName));
 }
 
 export function formatClock(totalSeconds: number): string {
@@ -199,35 +255,19 @@ export function computeObjectiveWindows(
           : 'Cycle camps toward bot side ahead of Dragon spawn.',
   });
 
-  // 2b. Atakhan (until slain)
-  const atakhanKills = events.filter((e) => e.EventName === 'AtakhanKill');
-  if (gameTime >= Math.max(0, timings.atakhanSpawnSec - 180) && atakhanKills.length === 0) {
-    const atakhanRem = Math.max(0, timings.atakhanSpawnSec - gameTime);
-    const atakhanClock = formatClock(timings.atakhanSpawnSec);
-    windows.push({
-      id: 'atakhan',
-      name: 'Atakhan',
-      status: atakhanRem === 0 ? 'live' : atakhanRem <= 60 ? 'prep_vision' : 'upcoming',
-      secondsRemaining: atakhanRem,
-      nextSpawnFormatted: atakhanClock,
-      priority: atakhanRem <= 60 ? 'critical' : 'high',
-      actionText:
-        atakhanRem === 0
-          ? 'Atakhan is LIVE — clear side waves & secure river vision before starting.'
-          : `Prepare side-river Control Ward ahead of ${atakhanClock} Atakhan spawn.`,
-    });
-  }
-
-  // 3. Voidgrubs / Rift Herald / Baron
+  // 2. Top River Objective Progression: Voidgrubs (8:00–14:45) -> Rift Herald (15:00–19:45) -> Baron Nashor (20:00+)
   const voidgrubKills = events.filter((e) => e.EventName === 'HordeKill');
   const heraldKills = events.filter((e) => e.EventName === 'HeraldKill');
   const baronKills = events.filter((e) => e.EventName === 'BaronKill');
+  const voidgrubsDespawnSec =
+    timings.voidgrubsDespawnSec ??
+    Math.max(timings.voidgrubsSpawnSec + 60, timings.heraldSpawnSec - 15);
 
   if (gameTime < timings.heraldSpawnSec) {
     const grubsSpawn = timings.voidgrubsSpawnSec;
     const grubRem = Math.max(0, grubsSpawn - gameTime);
     const grubsClock = formatClock(grubsSpawn);
-    if (gameTime < timings.heraldSpawnSec - 180 && voidgrubKills.length < 3) {
+    if (gameTime < voidgrubsDespawnSec && voidgrubKills.length < 3) {
       windows.push({
         id: 'voidgrubs',
         name: 'Voidgrubs',
@@ -237,8 +277,8 @@ export function computeObjectiveWindows(
         priority: grubRem <= 50 ? 'high' : 'medium',
         actionText:
           grubRem === 0
-            ? 'Voidgrubs LIVE — secure at least 3+ grubs for turret siege plates.'
-            : `Path top-side with top/mid prio before ${grubsClock}.`,
+            ? `Voidgrubs LIVE (despawn ${formatClock(voidgrubsDespawnSec)}) — secure all 3 grubs for turret siege.`
+            : `Path top-side with top/mid prio before ${grubsClock} Voidgrubs.`,
       });
     } else {
       const heraldRem = Math.max(0, timings.heraldSpawnSec - gameTime);
@@ -723,7 +763,7 @@ export function computeMacroGuidance(
       title: `Spend ${currentGold}g before next objective`,
       detail: 'Clear remaining quadrant camps -> Reset & spend gold so you arrive at full strength.',
     });
-  } else if (gameTime < 225) {
+  } else if (gameTime < 190) {
     cues.push({
       id: 'first-clear',
       category: 'clear',
@@ -732,7 +772,7 @@ export function computeMacroGuidance(
       title: winPlan
         ? `Execute ${winPlan.strongSide.toUpperCase()} pathing tempo`
         : 'Execute disciplined opening clear',
-      detail: 'Do not force low-percentage ganks before finishing your quadrant; keep Smite for 3:30 Scuttle.',
+      detail: 'Do not force low-percentage ganks before finishing your quadrant; keep Smite for 2:55 Scuttle.',
     });
   } else {
     cues.push({

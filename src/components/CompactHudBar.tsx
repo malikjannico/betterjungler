@@ -21,6 +21,11 @@ interface CompactHudBarProps {
   hotkey: string;
   scalePercent?: HudScalePercent;
   clickThrough?: boolean;
+  hudLocked?: boolean;
+  isOffRole?: boolean;
+  activeRole?: 'jungle' | 'bottom' | 'off_role';
+  onStartDrag?: () => void;
+  onLockHud?: () => void;
   onExpand: () => void;
 }
 
@@ -34,11 +39,9 @@ function ObjectiveBroadcastBadge({ kind }: { kind: ObjectiveBadgeKind }) {
           ? 'border-fuchsia-400/55 bg-fuchsia-500/20 text-fuchsia-300'
           : kind === 'baron'
             ? 'border-purple-400/60 bg-purple-500/25 text-purple-200'
-            : kind === 'atakhan'
-              ? 'border-rose-400/60 bg-rose-500/25 text-rose-200'
-              : kind === 'objective'
-                ? 'border-slate-400/55 bg-slate-500/20 text-slate-200'
-                : 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300';
+            : kind === 'objective'
+              ? 'border-slate-400/55 bg-slate-500/20 text-slate-200'
+              : 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300';
 
   return (
     <span
@@ -63,10 +66,6 @@ function ObjectiveBroadcastBadge({ kind }: { kind: ObjectiveBadgeKind }) {
       ) : kind === 'herald' ? (
         <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current">
           <polygon points="8,1.5 14,8 8,14.5 2,8" />
-        </svg>
-      ) : kind === 'atakhan' ? (
-        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current">
-          <path d="M3 3L6.5 7.5L8 4.5L9.5 7.5L13 3L11.5 13H4.5L3 3Z" />
         </svg>
       ) : kind === 'objective' ? (
         <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current">
@@ -96,6 +95,11 @@ export function CompactHudBar({
   hotkey,
   scalePercent = 100,
   clickThrough = false,
+  hudLocked = true,
+  isOffRole = false,
+  activeRole,
+  onStartDrag,
+  onLockHud,
   onExpand,
 }: CompactHudBarProps) {
   const model = deriveHudCards({
@@ -106,6 +110,8 @@ export function CompactHudBar({
     topCue,
     openingRoute,
     hotkey,
+    isOffRole,
+    activeRole,
   });
 
   const zoomFactor = scalePercent / 100;
@@ -116,10 +122,20 @@ export function CompactHudBar({
       data-phase={phase}
       data-urgent={model.isUrgent ? 'true' : 'false'}
       data-scale={scalePercent}
+      data-locked={hudLocked ? 'true' : 'false'}
+      onMouseDown={(e) => {
+        if (!hudLocked && e.button === 0 && !(e.target as HTMLElement).closest('button')) {
+          onStartDrag?.();
+        }
+      }}
       style={{
         zoom: zoomFactor !== 1 ? zoomFactor : undefined,
       }}
-      className="flex h-full w-full flex-col-reverse items-end justify-start gap-1.5 bg-transparent p-2 text-xs text-white select-none"
+      className={`flex h-full w-full flex-col-reverse items-end justify-start gap-1.5 bg-transparent p-2 text-xs text-white select-none ${
+        !hudLocked
+          ? 'cursor-move rounded-md border-2 border-dashed border-amber-400/80 bg-black/25'
+          : ''
+      }`}
     >
       {/* Broadcast Header Strip: Live Clock & Hotkey */}
       <HudCard
@@ -139,6 +155,34 @@ export function CompactHudBar({
         <span className="tabular-nums whitespace-nowrap text-xs font-bold tracking-wide text-white">
           {model.statusChip.label}
         </span>
+
+        {!hudLocked && (
+          <button
+            type="button"
+            onClick={onLockHud}
+            className="shrink-0 whitespace-nowrap rounded-[2px] border border-amber-400/60 bg-amber-500/20 px-2 py-0.5 text-xs font-bold text-amber-200 transition hover:bg-amber-500/35"
+            title="Lock HUD position & restore click-through"
+          >
+            Drag · Lock HUD
+          </button>
+        )}
+
+        {model.statusChip.isOffRole && phase === 'in_game' && (
+          <span
+            data-testid="hud-offrole-badge"
+            className="shrink-0 whitespace-nowrap rounded-[2px] border border-sky-400/35 bg-sky-500/15 px-1.5 py-0.5 text-xs font-semibold text-sky-200"
+          >
+            OFF-ROLE · GLOBALS
+          </span>
+        )}
+        {!model.statusChip.isOffRole && model.statusChip.activeRole === 'bottom' && phase === 'in_game' && (
+          <span
+            data-testid="hud-adc-badge"
+            className="shrink-0 whitespace-nowrap rounded-[2px] border border-amber-400/35 bg-amber-500/15 px-1.5 py-0.5 text-xs font-semibold text-amber-200"
+          >
+            ADC · BOT
+          </span>
+        )}
 
         {clickThrough ? (
           <kbd

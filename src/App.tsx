@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { motion } from 'motion/react';
 import {
   Activity,
   History,
   Info,
   Map as MapIcon,
-  Minus,
-  PanelLeftClose,
-  PanelLeftOpen,
   Settings,
-  SlidersHorizontal,
   Sparkles,
   Swords,
   TrendingUp,
@@ -26,15 +21,22 @@ import { LiveCoachView } from './components/LiveCoachView';
 import { PostGameReviewView } from './components/PostGameReviewView';
 import { SettingsView, type SettingsSectionId } from './components/SettingsView';
 import { WinConditionView } from './components/WinConditionView';
+import { M3NavRail, M3TopAppBar } from './components/m3';
+import type { M3NavRailItem, SummonerProfilePillProps } from './components/m3';
+import { computeAdcPersonalLearningSnapshot } from './domain/adc/adcDetectors';
+import { isAdcMatch } from './domain/adc/adcKpis';
 import { computePersonalChampStats } from './domain/champSelectEngine';
 import { parseChangelog } from './domain/changelogParser';
 import { setSingleFocusGoal } from './domain/climbLadderEngine';
-import { formatClock } from './domain/liveCoachEngine';
 import { computePersonalLearningSnapshot } from './domain/personalLearningEngine';
+import { formatCoachedRoleLabel } from './domain/roles/types';
+import type { CoachedRole } from './domain/roles/types';
 import { deriveSessionContext } from './domain/sessionContext';
 import { useInterpolatedGameTime } from './hooks/useInterpolatedGameTime';
 import {
   fetchLatestPatchVersion,
+  getChampionIconUrl,
+  loadCachedDdragonCatalog,
   syncFullDdragonCatalog,
 } from './services/ddragonService';
 import {
@@ -142,14 +144,38 @@ function cornerAlignmentClasses(corner: HudCorner): string {
   }
 }
 
-const NAV_ITEMS: Array<{ id: ActiveTab; label: string; icon: typeof Swords }> = [
-  { id: 'climb_goals', label: 'Climb & Goals', icon: TrendingUp },
-  { id: 'champ_select', label: 'Champ Select', icon: Swords },
-  { id: 'win_plan', label: 'Win Plan & Map', icon: MapIcon },
-  { id: 'live_coach', label: 'Live Coach', icon: Activity },
-  { id: 'post_game', label: 'Post-Game Review', icon: History },
+type NavItemDef = Omit<M3NavRailItem<ActiveTab>, 'live'>;
+
+const NAV_ITEMS: NavItemDef[] = [
+  { id: 'champ_select', label: 'Champ Select', shortLabel: 'Draft', icon: Swords },
+  { id: 'win_plan', label: 'Win Plan & Map', shortLabel: 'Win Plan', icon: MapIcon },
+  { id: 'live_coach', label: 'Live Coach', shortLabel: 'Live', icon: Activity },
+  { id: 'climb_goals', label: 'Climb & Goals', shortLabel: 'Climb', icon: TrendingUp },
+  { id: 'post_game', label: 'Post-Game Review', shortLabel: 'Review', icon: History },
+];
+
+const NAV_BOTTOM_ITEMS: NavItemDef[] = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
+
+const ALL_NAV_ITEMS: NavItemDef[] = [...NAV_ITEMS, ...NAV_BOTTOM_ITEMS];
+
+/**
+ * Loads one role-isolated SQLite personal-learning summary. `jungleMatchCount` carries the
+ * role's match count for both scopes, so an empty scope resolves to `null`.
+ */
+function fetchRoleLearning(
+  puuid: string | null,
+  role: 'JUNGLE' | 'BOTTOM',
+  apply: (summary: SqlPersonalLearningSummary | null) => void,
+  isActive: () => boolean = () => true
+): void {
+  void getPersonalLearningSnapshot(puuid, role)
+    .then((snap) => {
+      if (isActive()) apply(snap.jungleMatchCount > 0 ? snap : null);
+    })
+    .catch(() => {});
+}
 
 function tabMatchesLivePhase(tab: ActiveTab, phase: GamePhase): boolean {
   if (phase === 'champ_select') return tab === 'champ_select';
@@ -178,6 +204,9 @@ export function App() {
   const [sqlPersonalLearning, setSqlPersonalLearning] = useState<SqlPersonalLearningSummary | null>(
     null
   );
+  const [adcSqlPersonalLearning, setAdcSqlPersonalLearning] =
+    useState<SqlPersonalLearningSummary | null>(null);
+  const [manualRole, setManualRole] = useState<CoachedRole | null>(null);
   const [patchPackStatus, setPatchPackStatus] = useState<ActivePatchPackStatus | null>(null);
   const [settings, setSettings] = useState<UserSettings>({
     riotId: '',
@@ -243,6 +272,8 @@ export function App() {
   const hadActiveMatchRef = useRef(false);
   const inEndOfGameCycleRef = useRef(false);
   const endOfGameAtMsRef = useRef<number>(0);
+  /** `true` while ADC is the active role or ADC games are synced (gates BOTTOM SQL loads). */
+  const shouldLoadAdcLearningRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -390,13 +421,8 @@ export function App() {
         if (active) setMatches(cached);
       })
       .catch(() => {});
-    void getPersonalLearningSnapshot(nextPuuid)
-      .then((snap) => {
-        if (active) {
-          setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
-        }
-      })
-      .catch(() => {});
+    // BOTTOM-scoped summary is loaded by the ADC lazy-load effect below (keyed on the puuid too).
+    fetchRoleLearning(nextPuuid, 'JUNGLE', setSqlPersonalLearning, () => active);
     return () => {
       active = false;
     };
@@ -443,6 +469,7 @@ export function App() {
         return;
       }
       if (e.key === 'Escape' && simulatorOpen) {
+        e.preventDefault();
         setSimulatorOpen(false);
         simButtonRef.current?.focus();
         return;
@@ -497,11 +524,26 @@ export function App() {
     [demoScenario, matches, settings.targetDivision, sqlPersonalLearning]
   );
 
+  const adcRoleBenchmarks = patchPackStatus?.payload.roleBenchmarks?.bottom;
+
+  // Role-isolated ADC learning: only ADC (BOTTOM) games and the BOTTOM-scoped SQL summary.
+  const adcPersonalLearning = useMemo(() => {
+    if (demoScenario !== 'idle') return null;
+    const snap = computeAdcPersonalLearningSnapshot(
+      matches,
+      settings.targetDivision,
+      adcSqlPersonalLearning,
+      adcRoleBenchmarks
+    );
+    return snap.adcMatchCount > 0 ? snap : null;
+  }, [demoScenario, matches, settings.targetDivision, adcSqlPersonalLearning, adcRoleBenchmarks]);
+
   const sessionCtx = useMemo(
     () =>
       deriveSessionContext({
         demoScenario,
         liveState,
+        manualRole,
         settings,
         summonerProfile,
         matches,
@@ -510,10 +552,12 @@ export function App() {
         interpolatedGameTime: demoScenario === 'idle' && liveMatchActive ? interpolatedLiveTime : undefined,
         objectiveTimings: patchPackStatus?.payload.objectiveTimings,
         personalLearning: livePersonalLearning,
+        adcPersonalLearning,
       }),
     [
       demoScenario,
       liveState,
+      manualRole,
       settings,
       summonerProfile,
       matches,
@@ -523,10 +567,28 @@ export function App() {
       interpolatedLiveTime,
       patchPackStatus,
       livePersonalLearning,
+      adcPersonalLearning,
     ]
   );
 
   const { runtimeState, resolvedMapSide, playerChampionName } = sessionCtx;
+
+  const shouldLoadAdcLearning =
+    sessionCtx.activeRole === 'bottom' || sessionCtx.climb.adcMatches.length > 0;
+  useEffect(() => {
+    shouldLoadAdcLearningRef.current = shouldLoadAdcLearning;
+  }, [shouldLoadAdcLearning]);
+
+  // Lazily load the BOTTOM-scoped SQL summary once ADC becomes relevant (Jungle stays cached).
+  const accountPuuid = summonerProfile?.puuid?.trim() || null;
+  useEffect(() => {
+    if (!isTauri || !shouldLoadAdcLearning) return;
+    let active = true;
+    fetchRoleLearning(accountPuuid, 'BOTTOM', setAdcSqlPersonalLearning, () => active);
+    return () => {
+      active = false;
+    };
+  }, [isTauri, shouldLoadAdcLearning, accountPuuid]);
 
   const focusGoal = useMemo(
     () =>
@@ -540,6 +602,18 @@ export function App() {
     () => computePersonalChampStats(sessionCtx.climb.jungleMatches),
     [sessionCtx.climb.jungleMatches]
   );
+
+  // Data Dragon icon for the top-bar context chip (catalog keys are DDragon ids, e.g. "LeeSin").
+  const championIconUrl = useMemo(() => {
+    if (!playerChampionName || catalogCounts.champions === 0) return null;
+    const catalog = loadCachedDdragonCatalog();
+    if (!catalog) return null;
+    const wanted = playerChampionName.trim().toLowerCase();
+    const champ = Object.values(catalog.championsById).find(
+      (c) => c.name.toLowerCase() === wanted
+    );
+    return champ ? getChampionIconUrl(champ.key, patchVersion) : null;
+  }, [playerChampionName, catalogCounts.champions, patchVersion]);
 
   function openSettingsSection(section: SettingsSectionId = 'account') {
     setSettingsNavState((prev) => ({ section, token: prev.token + 1 }));
@@ -603,13 +677,20 @@ export function App() {
             setMatches((prev) => mergeMatchesById(prev, synced, 30));
             setLastAutoSyncedMatchId(newest.matchId);
             setAutoSyncNotice(null);
-            void getPersonalLearningSnapshot(curProfile.puuid)
-              .then((snap) => {
-                if (!cancelled) {
-                  setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
-                }
-              })
-              .catch(() => {});
+            fetchRoleLearning(
+              curProfile.puuid,
+              'JUNGLE',
+              setSqlPersonalLearning,
+              () => !cancelled
+            );
+            if (shouldLoadAdcLearningRef.current || synced.some(isAdcMatch)) {
+              fetchRoleLearning(
+                curProfile.puuid,
+                'BOTTOM',
+                setAdcSqlPersonalLearning,
+                () => !cancelled
+              );
+            }
           } else {
             if (isFinalAttempt) {
               setAutoSyncNotice(
@@ -803,11 +884,10 @@ export function App() {
     if (synced.length > 0) {
       setMatches((prev) => mergeMatchesById(prev, synced, 30));
       setAutoSyncNotice(null);
-      void getPersonalLearningSnapshot(profilePuuid ?? null)
-        .then((snap) => {
-          setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
-        })
-        .catch(() => {});
+      fetchRoleLearning(profilePuuid ?? null, 'JUNGLE', setSqlPersonalLearning);
+      if (shouldLoadAdcLearningRef.current || synced.some(isAdcMatch)) {
+        fetchRoleLearning(profilePuuid ?? null, 'BOTTOM', setAdcSqlPersonalLearning);
+      }
     }
   }
 
@@ -857,6 +937,7 @@ export function App() {
     if (nextPuuid && lastAccountPuuidRef.current && lastAccountPuuidRef.current !== nextPuuid) {
       setMatches([]);
       setSqlPersonalLearning(null);
+      setAdcSqlPersonalLearning(null);
     }
     if (nextPuuid) {
       lastAccountPuuidRef.current = nextPuuid;
@@ -871,11 +952,10 @@ export function App() {
           setMatches(cached);
         })
         .catch(() => {});
-      void getPersonalLearningSnapshot(nextPuuid)
-        .then((snap) => {
-          setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
-        })
-        .catch(() => {});
+      fetchRoleLearning(nextPuuid, 'JUNGLE', setSqlPersonalLearning);
+      if (shouldLoadAdcLearningRef.current) {
+        fetchRoleLearning(nextPuuid, 'BOTTOM', setAdcSqlPersonalLearning);
+      }
     }
   }
 
@@ -913,10 +993,12 @@ export function App() {
             objectives={liveCoachPayload?.objectives ?? []}
             buildPlan={liveCoachPayload?.buildPlan ?? null}
             topCue={liveCoachPayload?.macroCues[0] ?? null}
-            openingRoute={winPlanPayload?.plan.routes[0] ?? null}
+            openingRoute={liveCoachPayload?.isJungleRole !== false ? (winPlanPayload?.plan.routes[0] ?? null) : null}
             patchVersion={patchVersion}
             hotkey={settings.overlayHotkey}
             scalePercent={settings.hudScale ?? 100}
+            activeRole={liveCoachPayload?.playedRole}
+            isOffRole={liveCoachPayload ? liveCoachPayload.playedRole === 'off_role' : false}
             onExpand={() => void toggleOverlayMode('expanded')}
           />
         </div>
@@ -925,7 +1007,7 @@ export function App() {
   }
 
   const canSyncLive = isTauri && (settings.hasApiKey || Boolean(settings.riotApiProxyUrl?.trim()));
-  const activeNavLabel = NAV_ITEMS.find((n) => n.id === activeTab)?.label ?? 'BetterJungler';
+  const activeNavLabel = ALL_NAV_ITEMS.find((n) => n.id === activeTab)?.label ?? 'BetterJungler';
 
   const showApiBanner =
     apiKeyHealth &&
@@ -933,6 +1015,85 @@ export function App() {
     activeTab !== 'settings';
   const showWhatsNewBanner =
     !showApiBanner && Boolean(whatsNewEntry && canInstallUpdateSafely);
+
+  const withLive = (item: NavItemDef): M3NavRailItem<ActiveTab> => ({
+    ...item,
+    live: tabMatchesLivePhase(item.id, runtimeState.phase),
+  });
+  const navItems = NAV_ITEMS.map(withLive);
+  const navBottomItems = NAV_BOTTOM_ITEMS.map(withLive);
+
+  const contextRoleLabel =
+    liveCoachPayload?.playedRole === 'off_role'
+      ? 'Off-role'
+      : formatCoachedRoleLabel(sessionCtx.activeRole);
+
+  const pillProfile = sessionCtx.climb.profile ?? summonerProfile;
+  const profileLoading = !pillProfile && isTauri && runtimeState.lcuConnected;
+  const profilePill: SummonerProfilePillProps = pillProfile
+    ? {
+        riotId: pillProfile.riotId,
+        tier: pillProfile.tier,
+        rank: pillProfile.rank,
+        leaguePoints: pillProfile.leaguePoints,
+        profileIconId: pillProfile.profileIconId,
+        patchVersion,
+        onClick: () => openSettingsSection('account'),
+      }
+    : {
+        riotId:
+          settings.riotId.trim() || (profileLoading ? 'Loading profile…' : 'Connect account'),
+        tier: null,
+        rank: null,
+        leaguePoints: null,
+        patchVersion,
+        title: profileLoading
+          ? 'Loading your League Client profile…'
+          : 'Connect your Riot account in Settings',
+        onClick: () => openSettingsSection('account'),
+      };
+
+  const latestVersion = updateInfo?.latestVersion ?? null;
+  const showUpdateBadge = Boolean(
+    updateInfo?.available &&
+      latestVersion &&
+      canInstallUpdateSafely &&
+      dismissedUpdateVersion !== latestVersion
+  );
+
+  const updateBadge =
+    showUpdateBadge && latestVersion ? (
+      navCollapsed ? (
+        <button
+          type="button"
+          aria-label={`Update v${latestVersion}`}
+          title={`Update v${latestVersion}`}
+          onClick={() => openSettingsSection('updates')}
+          className="m3-icon-btn m3-state bg-[var(--md-ext-success-container)] text-[var(--md-ext-on-success-container)]"
+        >
+          <Sparkles className="h-4 w-4" />
+        </button>
+      ) : (
+        <div className="m3-label-l flex h-10 items-center gap-1 rounded-full bg-[var(--md-ext-success-container)] pr-1 pl-3.5 text-[var(--md-ext-on-success-container)]">
+          <Sparkles className="h-4 w-4 shrink-0" />
+          <button
+            type="button"
+            onClick={() => openSettingsSection('updates')}
+            className="m3-focus-ring min-w-0 flex-1 truncate rounded-full px-1 text-left font-semibold hover:underline"
+          >
+            Update v{latestVersion}
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss update notification"
+            onClick={() => handleDismissUpdatePill(latestVersion)}
+            className="m3-icon-btn m3-state h-8 w-8 text-[var(--md-ext-on-success-container)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )
+    ) : undefined;
 
   return (
     <div
@@ -943,309 +1104,81 @@ export function App() {
       <div
         data-phase={runtimeState.phase}
         data-urgent={hasUrgentObjective ? 'true' : 'false'}
-        className={`mat-chrome flex w-full overflow-hidden text-white/[0.92] ${
-          isTauri ? 'h-screen rounded-none' : 'h-[min(92vh,800px)] max-w-[1100px]'
+        className={`m3-shell flex w-full overflow-hidden ${
+          isTauri
+            ? 'h-screen rounded-none'
+            : 'h-[min(92vh,800px)] max-w-[1280px] rounded-[28px]'
         }`}
       >
-        {/* Collapsible Architectural Left Navigation Rail */}
-        <aside
-          data-collapsed={navCollapsed ? 'true' : 'false'}
-          className={`flex shrink-0 flex-col justify-between border-r border-white/[0.08] bg-black/20 transition-[width,padding] duration-200 ${
-            navCollapsed ? 'w-[68px] p-2.5' : 'w-[204px] p-4'
-          }`}
-        >
-          <div className="space-y-4">
-            <div
-              className={`flex items-center ${
-                navCollapsed ? 'flex-col gap-2' : 'justify-between gap-2 px-1'
-              }`}
-            >
-              <div
-                data-tauri-drag-region
-                className={`flex min-w-0 cursor-grab items-center gap-2.5 select-none active:cursor-grabbing ${
-                  navCollapsed ? 'justify-center' : ''
-                }`}
-                title={`BetterJungler · Patch ${patchVersion}`}
-              >
-                <BrandMark size={navCollapsed ? 28 : 26} />
-                {!navCollapsed && (
-                  <div className="pointer-events-none min-w-0">
-                    <h1 className="t-title truncate text-white">BetterJungler</h1>
-                    <div className="t-caption truncate text-white/[0.45]">
-                      Patch {patchVersion}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button
-                type="button"
-                aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
-                title={`${navCollapsed ? 'Expand' : 'Collapse'} sidebar (Ctrl+B)`}
-                onClick={() => setNavCollapsed((v) => !v)}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-white/[0.58] transition hover:bg-white/[0.08] hover:text-white"
-              >
-                {navCollapsed ? (
-                  <PanelLeftOpen className="h-3.5 w-3.5" />
-                ) : (
-                  <PanelLeftClose className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </div>
-
-            <nav aria-label="Primary navigation" className="space-y-1">
-              {NAV_ITEMS.map((tab) => {
-                const active = activeTab === tab.id;
-                const livePhaseHit = tabMatchesLivePhase(tab.id, runtimeState.phase);
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    aria-label={tab.label}
-                    title={tab.label}
-                    aria-current={active ? 'page' : undefined}
-                    onClick={() =>
-                      tab.id === 'settings'
-                        ? openSettingsSection('account')
-                        : setActiveTab(tab.id)
-                    }
-                    className={`relative flex h-8 w-full items-center rounded-[7px] text-xs font-medium transition-colors ${
-                      navCollapsed
-                        ? 'justify-center px-0'
-                        : 'justify-between gap-2 px-2.5 text-left'
-                    } ${
-                      active
-                        ? 'text-white'
-                        : 'text-white/[0.58] hover:bg-white/[0.04] hover:text-white/[0.92]'
-                    }`}
-                  >
-                    {active && (
-                      <motion.span
-                        layoutId="nav-pill"
-                        transition={{ type: 'spring', stiffness: 400, damping: 34 }}
-                        className="lg-segment-active absolute inset-0"
-                      />
-                    )}
-                    <span className="relative z-10 flex min-w-0 items-center gap-2.5">
-                      <Icon className="h-3.5 w-3.5 shrink-0" />
-                      {!navCollapsed && <span className="truncate">{tab.label}</span>}
-                    </span>
-                    {livePhaseHit && (
-                      <span
-                        title="Active match phase"
-                        className={
-                          navCollapsed
-                            ? 'absolute top-1.5 right-1.5 z-10 h-1.5 w-1.5 rounded-full bg-emerald-400'
-                            : 'relative z-10 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400'
-                        }
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-
-          <div className="space-y-2.5 border-t border-white/[0.08] pt-3.5 t-caption">
-            {navCollapsed ? (
-              <div className="flex flex-col items-center gap-2 text-white/[0.58]">
-                <span
-                  title={`League Client: ${runtimeState.lcuConnected ? 'Ready' : 'Standby'}`}
-                  className={`h-2 w-2 rounded-full ${
-                    runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-white/25'
-                  }`}
-                />
-                <span
-                  title={`Live Match: ${runtimeState.liveClientConnected ? 'Active' : 'Standby'}`}
-                  className={`h-2 w-2 rounded-full ${
-                    runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-white/25'
-                  }`}
-                />
-              </div>
-            ) : (
-              <div className="space-y-1.5 px-2 text-white/[0.58]">
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-2">
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        runtimeState.lcuConnected ? 'bg-emerald-400' : 'bg-white/25'
-                      }`}
-                    />
-                    League Client
-                  </span>
-                  <span className="text-[11px] text-white/[0.4]">
-                    {runtimeState.lcuConnected ? 'Ready' : 'Standby'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-2">
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        runtimeState.liveClientConnected ? 'bg-emerald-400' : 'bg-white/25'
-                      }`}
-                    />
-                    Live Match
-                  </span>
-                  <span className="text-[11px] text-white/[0.4]">
-                    {runtimeState.liveClientConnected ? 'Active' : 'Standby'}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {updateInfo?.available &&
-              updateInfo.latestVersion &&
-              canInstallUpdateSafely &&
-              dismissedUpdateVersion !== updateInfo.latestVersion &&
-              (navCollapsed ? (
-                <div className="flex justify-center">
-                  <button
-                    type="button"
-                    aria-label={`Update v${updateInfo.latestVersion}`}
-                    title={`Update v${updateInfo.latestVersion}`}
-                    onClick={() => openSettingsSection('updates')}
-                    className="flex h-7 w-7 items-center justify-center rounded-[7px] border border-emerald-400/35 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1 rounded-[7px] border border-emerald-400/30 bg-emerald-500/12 px-2.5 py-1.5 text-xs text-emerald-200">
-                  <button
-                    type="button"
-                    onClick={() => openSettingsSection('updates')}
-                    className="flex-1 truncate text-left font-medium hover:underline"
-                  >
-                    Update v{updateInfo.latestVersion}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Dismiss update notification"
-                    onClick={() => handleDismissUpdatePill(updateInfo.latestVersion!)}
-                    className="text-emerald-300/80 hover:text-white"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-          </div>
-        </aside>
+        {/* M3 Expressive collapsible navigation rail (Ctrl+B) */}
+        <M3NavRail<ActiveTab>
+          items={navItems}
+          bottomItems={navBottomItems}
+          activeId={activeTab}
+          onSelect={(id) => {
+            if (id === 'settings') {
+              setSettingsNavState((prev) => ({ ...prev, token: 0 }));
+            }
+            setActiveTab(id);
+          }}
+          collapsed={navCollapsed}
+          onToggleCollapsed={() => setNavCollapsed((v) => !v)}
+          brand={<BrandMark size={navCollapsed ? 28 : 26} />}
+          brandText={
+            <span className="block min-w-0" title={`BetterJungler · Patch ${patchVersion}`}>
+              <span className="m3-title-m block truncate">BetterJungler</span>
+              <span className="m3-label-m m3-faint num block truncate">Patch {patchVersion}</span>
+            </span>
+          }
+          phase={runtimeState.phase}
+          lcuConnected={runtimeState.lcuConnected}
+          liveClientConnected={runtimeState.liveClientConnected}
+          footer={updateBadge}
+        />
 
         {/* Main Workspace Canvas */}
         <div className="relative flex min-w-0 flex-1 flex-col">
-          {/* 40px Top Window Drag & Controls Strip */}
-          <div
-            data-tauri-drag-region
-            className="flex h-10 shrink-0 cursor-grab items-center justify-between gap-3 border-b border-white/[0.06] px-6 select-none active:cursor-grabbing"
-          >
-            <div className="pointer-events-none flex min-w-0 items-center gap-2.5">
-              <span className="truncate text-xs font-semibold text-white/[0.92]">
-                {activeNavLabel}
-              </span>
-              {playerChampionName && resolvedMapSide && (
-                <span className="t-caption truncate text-white/[0.45]">
-                  · {playerChampionName} ({resolvedMapSide === 'blue' ? 'Blue' : 'Red'})
-                </span>
-              )}
-            </div>
+          {/* 48px draggable M3 top app bar — every action shares the unified 32px pill */}
+          <M3TopAppBar
+            title={activeNavLabel}
+            championName={playerChampionName && resolvedMapSide ? playerChampionName : null}
+            championIconUrl={championIconUrl}
+            roleLabel={contextRoleLabel}
+            mapSide={resolvedMapSide}
+            recordingElapsedSec={
+              runtimeState.recordingStatus === 'recording'
+                ? (runtimeState.recordingElapsedSec ?? 0)
+                : null
+            }
+            simulationLabel={sessionCtx.simulationLabel}
+            onExitSimulation={() => handleScenarioChange('idle')}
+            onToggleSimulator={() => setSimulatorOpen((v) => !v)}
+            simulatorOpen={simulatorOpen}
+            simulatorActive={demoScenario !== 'idle'}
+            simulatorButtonRef={simButtonRef}
+            onToggleHud={() =>
+              void toggleOverlayMode(overlayMode === 'compact' ? 'expanded' : 'compact')
+            }
+            hudVisible={overlayMode === 'compact'}
+            hudHotkey={settings.overlayHotkey}
+            profile={profilePill}
+            showWindowControls={isTauri}
+          />
 
-            <div className="flex shrink-0 items-center gap-2">
-              {runtimeState.recordingStatus === 'recording' && (
-                <div
-                  title="Opt-in League HWND GPU recording active"
-                  className="tabular-nums flex items-center gap-1.5 rounded-full border border-rose-400/35 bg-rose-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-rose-200"
-                >
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-400" />
-                  <span>REC {formatClock(runtimeState.recordingElapsedSec ?? 0)}</span>
-                </div>
-              )}
-
-              {sessionCtx.simulationLabel && (
-                <div className="flex items-center gap-2 rounded-full border border-amber-400/35 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-medium text-amber-200">
-                  <span>Simulation · {sessionCtx.simulationLabel}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleScenarioChange('idle')}
-                    className="font-semibold text-amber-100 underline-offset-2 hover:underline"
-                  >
-                    Exit
-                  </button>
-                </div>
-              )}
-
-              <button
-                ref={simButtonRef}
-                type="button"
-                aria-expanded={simulatorOpen}
-                onClick={() => setSimulatorOpen((v) => !v)}
-                className={`lg-btn-glass flex h-7 items-center gap-1.5 px-2.5 text-xs font-medium ${
-                  demoScenario !== 'idle' ? 'text-amber-200' : 'text-white/[0.72]'
-                }`}
-                title="Preview simulated match scenarios (Ctrl+K)"
-              >
-                <SlidersHorizontal className="h-3 w-3" />
-                <span>Simulator</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  void toggleOverlayMode(overlayMode === 'compact' ? 'expanded' : 'compact')
-                }
-                className="lg-btn-glass flex h-7 items-center gap-2 px-2.5 text-xs font-medium text-white/[0.88]"
-              >
-                <span>{overlayMode === 'compact' ? 'Hide HUD' : 'Compact HUD'}</span>
-                <kbd className="font-mono text-[11px] text-white/[0.45]">
-                  {settings.overlayHotkey}
-                </kbd>
-              </button>
-
-              {isTauri && (
-                <div className="ml-1 flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Minimize window"
-                    onClick={() => {
-                      void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
-                        getCurrentWindow().minimize()
-                      );
-                    }}
-                    className="flex h-7 w-7 items-center justify-center rounded-[7px] text-white/[0.58] hover:bg-white/[0.08] hover:text-white"
-                  >
-                    <Minus className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Close window"
-                    onClick={() => {
-                      void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
-                        getCurrentWindow().close()
-                      );
-                    }}
-                    className="flex h-7 w-7 items-center justify-center rounded-[7px] text-white/[0.58] hover:bg-rose-500/20 hover:text-rose-200"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Simulator Popover (Ctrl+K or header button) */}
+          {/* Simulator Popover (Ctrl+K or top-bar pill) */}
           {simulatorOpen && (
             <div
               ref={simPopoverRef}
               role="dialog"
               aria-label="Scenario Simulator"
-              className="mat-glass mat-lens absolute top-11 right-6 z-30 w-72 p-3.5 text-xs"
+              className="absolute top-[52px] right-6 z-30 w-72 rounded-[16px] bg-[var(--md-sys-color-surface-container-high)] p-4 text-[var(--md-sys-color-on-surface)] shadow-[0_4px_8px_3px_rgba(0,0,0,0.15),0_1px_3px_rgba(0,0,0,0.3)]"
             >
-              <div className="mb-2 flex items-center justify-between">
-                <span className="t-caption font-semibold text-white/[0.85]">Scenario Simulator</span>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="m3-title-s">Scenario Simulator</span>
                 <button
                   type="button"
                   onClick={() => setSimulatorOpen(false)}
-                  className="t-caption text-white/[0.55] hover:text-white"
+                  className="m3-label-l m3-focus-ring rounded-full px-2 py-1 text-[var(--md-sys-color-primary)] hover:underline"
                 >
                   Close
                 </button>
@@ -1258,7 +1191,7 @@ export function App() {
                   handleScenarioChange(e.target.value as DemoScenarioId);
                   setSimulatorOpen(false);
                 }}
-                className="w-full rounded-[7px] border border-white/15 bg-black/70 px-2.5 py-2 text-xs text-white outline-none"
+                className="m3-body-m w-full rounded-[12px] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2.5 text-[var(--md-sys-color-on-surface)] outline-none focus:border-[var(--md-sys-color-primary)]"
               >
                 {DEMO_OPTIONS.map((opt) => (
                   <option key={opt.id} value={opt.id} className="bg-zinc-900 text-slate-100">
@@ -1270,8 +1203,8 @@ export function App() {
           )}
 
           {/* Scrollable Tab Workspace */}
-          <main className="hud-scroll flex-1 overflow-y-auto px-6 py-5">
-            <div className="mx-auto max-w-[920px] space-y-6">
+          <main className="hud-scroll min-h-0 flex-1 overflow-y-auto px-6 pt-2 pb-5">
+            <div className="mx-auto max-w-[1180px] space-y-6">
               {/* Single Priority Notification Slot */}
               {showApiBanner && apiKeyHealth && (
                 <div
@@ -1326,6 +1259,13 @@ export function App() {
                     allMatchesForSessions={sessionCtx.climb.matches}
                     sqlPersonalLearning={demoScenario === 'idle' ? sqlPersonalLearning : null}
                     offRoleExcludedCount={sessionCtx.climb.offRoleExcludedCount}
+                    activeRole={sessionCtx.activeRole}
+                    roleSource={sessionCtx.roleSource}
+                    onSelectRole={setManualRole}
+                    adcMatches={sessionCtx.climb.adcMatches}
+                    adcOffRoleExcludedCount={sessionCtx.climb.adcOffRoleExcludedCount}
+                    adcSqlPersonalLearning={demoScenario === 'idle' ? adcSqlPersonalLearning : null}
+                    roleBenchmarks={adcRoleBenchmarks}
                     lpHistory={sessionCtx.climb.lpHistory}
                     patchVersion={patchVersion}
                     goals={climbGoals}
@@ -1362,6 +1302,9 @@ export function App() {
                     personalStats={personalStats}
                     metaTierOverrides={patchPackStatus?.payload.metaTierOverrides}
                     focusGoal={focusGoal}
+                    activeRole={sessionCtx.activeRole}
+                    roleSource={sessionCtx.roleSource}
+                    onSelectRole={setManualRole}
                     onPreviewSample={handleScenarioChange}
                   />
                 )}
@@ -1384,12 +1327,16 @@ export function App() {
                         ? sessionCtx.winPlan.progress
                         : undefined
                     }
+                    activeRole={sessionCtx.activeRole}
+                    adcPlan={winPlanPayload?.adcPlan ?? null}
+                    onSelectRole={setManualRole}
                     onPreviewSample={handleScenarioChange}
                   />
                 )}
                 {activeTab === 'live_coach' && (
                   <LiveCoachView
                     phase={runtimeState.phase}
+                    isJungleRole={liveCoachPayload?.isJungleRole ?? true}
                     liveData={liveCoachPayload?.liveData ?? null}
                     objectives={liveCoachPayload?.objectives ?? []}
                     buildPlan={liveCoachPayload?.buildPlan ?? null}
@@ -1398,6 +1345,8 @@ export function App() {
                     mapSide={liveCoachPayload?.mapSide ?? null}
                     patchVersion={patchVersion}
                     smiteThresholds={patchPackStatus?.payload.smiteThresholds}
+                    playedRole={liveCoachPayload?.playedRole ?? sessionCtx.livePlayedRole}
+                    adcWinPlan={liveCoachPayload?.adcWinPlan ?? null}
                     onPreviewSample={handleScenarioChange}
                   />
                 )}
@@ -1417,6 +1366,7 @@ export function App() {
                     focusGoal={focusGoal}
                     lastAutoSyncedMatchId={lastAutoSyncedMatchId}
                     autoSyncNotice={autoSyncNotice}
+                    roleBenchmarks={adcRoleBenchmarks}
                     emptyReason={
                       sessionCtx.postGame.status === 'empty'
                         ? sessionCtx.postGame.reason
@@ -1465,9 +1415,12 @@ export function App() {
           </main>
 
           {/* Mandatory Riot Games Legal Disclaimer */}
-          <footer className="border-t border-white/[0.06] bg-black/25 px-6 py-2 text-[11px] leading-relaxed text-white/[0.42]">
-            <div className="flex items-center justify-between gap-2">
-              <span className={legalOpen ? '' : 'truncate'}>
+          <footer
+            role="contentinfo"
+            className="border-t border-[var(--md-sys-color-outline-variant)] px-6 py-1.5 text-[11px] leading-[15px] text-[var(--md-sys-color-outline)]"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className={legalOpen ? 'flex-1' : 'flex-1 truncate'}>
                 BetterJungler isn&apos;t endorsed by Riot Games and doesn&apos;t reflect the views
                 or opinions of Riot Games or anyone officially involved in producing or managing Riot
                 Games properties. Riot Games, and all associated properties are trademarks or
@@ -1478,7 +1431,7 @@ export function App() {
                 aria-expanded={legalOpen}
                 onClick={() => setLegalOpen((v) => !v)}
                 aria-label="Toggle legal disclaimer"
-                className="flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-[7px] p-1 text-white/[0.45] hover:bg-white/[0.06] hover:text-white"
+                className="m3-icon-btn m3-state h-7 w-7 shrink-0"
               >
                 <Info className="h-3.5 w-3.5" />
               </button>

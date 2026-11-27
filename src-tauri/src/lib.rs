@@ -138,6 +138,8 @@ fn get_settings(state: State<'_, Arc<SharedState>>) -> AppResult<UserSettings> {
 #[tauri::command]
 fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings) -> AppResult<()> {
     settings.update_mode = updater::normalize_update_mode(&settings.update_mode);
+    settings.primary_role = storage::normalize_coached_role(&settings.primary_role, "jungle");
+    settings.secondary_role = storage::normalize_coached_role(&settings.secondary_role, "bottom");
     settings.recording.preset = storage::normalize_recording_preset(&settings.recording.preset);
     settings.recording.max_storage_gb = settings.recording.max_storage_gb.clamp(1, 50);
     settings.recording.keep_last_n_games = settings.recording.keep_last_n_games.clamp(1, 100);
@@ -163,6 +165,9 @@ fn save_settings(state: State<'_, Arc<SharedState>>, mut settings: UserSettings)
         settings.hud_scale = existing.hud_scale;
         settings.hud_monitor = existing.hud_monitor;
         settings.minimap_side = existing.minimap_side;
+        settings.hud_x = existing.hud_x;
+        settings.hud_y = existing.hud_y;
+        settings.hud_locked = existing.hud_locked;
     }
     storage::save_settings(&conn, &settings)?;
     if let Ok(mut path_guard) = state.install_path.write() {
@@ -744,6 +749,92 @@ fn update_overlay_preferences(
     Ok(())
 }
 
+fn persist_current_hud_position(app: &AppHandle, shared: &SharedState) -> AppResult<(i32, i32)> {
+    let hud_window = app
+        .get_webview_window("hud")
+        .ok_or_else(|| AppError::Overlay("Dedicated HUD window not found".to_string()))?;
+    let pos = hud_window
+        .outer_position()
+        .map_err(|e| AppError::Overlay(e.to_string()))?;
+    let size = hud_window
+        .outer_size()
+        .map_err(|e| AppError::Overlay(e.to_string()))?;
+    let monitors: Vec<(i32, i32, u32, u32)> = app
+        .available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| {
+            let mp = m.position();
+            let ms = m.size();
+            (mp.x, mp.y, ms.width, ms.height)
+        })
+        .collect();
+    let (cx, cy) = overlay::clamp_custom_hud_pos(pos.x, pos.y, size.width, size.height, &monitors)
+        .unwrap_or((pos.x, pos.y));
+    {
+        let conn = shared
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut settings = storage::load_settings(&conn).unwrap_or_default();
+        settings.hud_x = Some(cx);
+        settings.hud_y = Some(cy);
+        storage::save_settings(&conn, &settings)?;
+    }
+    shared
+        .overlay
+        .set_custom_position(Some(app), Some(cx), Some(cy), false);
+    Ok((cx, cy))
+}
+
+fn apply_hud_lock_state(app: &AppHandle, shared: &SharedState, locked: bool) -> AppResult<()> {
+    if locked {
+        let _ = persist_current_hud_position(app, shared);
+    }
+    {
+        let conn = shared
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut settings = storage::load_settings(&conn).unwrap_or_default();
+        settings.hud_locked = locked;
+        storage::save_settings(&conn, &settings)?;
+    }
+    shared.overlay.set_hud_locked(app, locked)
+}
+
+#[tauri::command]
+fn set_hud_locked(
+    app: AppHandle,
+    state: State<'_, Arc<SharedState>>,
+    locked: bool,
+) -> AppResult<()> {
+    apply_hud_lock_state(&app, &state, locked)
+}
+
+#[tauri::command]
+fn save_hud_position(app: AppHandle, state: State<'_, Arc<SharedState>>) -> AppResult<(i32, i32)> {
+    persist_current_hud_position(&app, &state)
+}
+
+#[tauri::command]
+fn reset_hud_position(app: AppHandle, state: State<'_, Arc<SharedState>>) -> AppResult<()> {
+    {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut settings = storage::load_settings(&conn).unwrap_or_default();
+        settings.hud_x = None;
+        settings.hud_y = None;
+        storage::save_settings(&conn, &settings)?;
+    }
+    state
+        .overlay
+        .set_custom_position(Some(&app), None, None, true);
+    Ok(())
+}
+
 #[tauri::command]
 fn get_lp_history(state: State<'_, Arc<SharedState>>) -> AppResult<Vec<LpHistoryRecord>> {
     let conn = state
@@ -1149,6 +1240,7 @@ fn open_recordings_folder(state: State<'_, Arc<SharedState>>) -> AppResult<()> {
 fn get_personal_learning_snapshot(
     state: State<'_, Arc<SharedState>>,
     puuid: Option<String>,
+    role: Option<String>,
 ) -> AppResult<storage::PersonalLearningSummary> {
     let conn = state
         .db
@@ -1158,7 +1250,8 @@ fn get_personal_learning_snapshot(
         .as_deref()
         .map(str::trim)
         .filter(|p| !p.is_empty() && !riot_api::is_unencrypted_lcu_uuid(p));
-    storage::load_personal_learning_summary_for_account(&conn, effective_puuid)
+    let effective_role = role.as_deref().unwrap_or("JUNGLE");
+    storage::load_personal_learning_summary_for_role(&conn, effective_puuid, effective_role)
 }
 
 #[tauri::command]
@@ -1677,13 +1770,24 @@ pub fn run() {
                 &initial_settings.hud_monitor,
                 &initial_settings.minimap_side,
             );
-
-            let saved_dims = (
-                initial_settings.window_width,
-                initial_settings.window_height,
+            overlay_ctrl.set_custom_position(
+                None,
+                initial_settings.hud_x,
+                initial_settings.hud_y,
+                false,
             );
-            if let (Some(w), Some(h)) = saved_dims {
-                if let Some(main_win) = app.get_webview_window("main") {
+
+            if let Some(main_win) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    if let Err(err) = main_win.set_icon(icon) {
+                        tracing::warn!(error = %err, "Failed to bind main window taskbar icon");
+                    }
+                }
+                let saved_dims = (
+                    initial_settings.window_width,
+                    initial_settings.window_height,
+                );
+                if let (Some(w), Some(h)) = saved_dims {
                     if w >= 960.0 && h >= 680.0 {
                         let _ = main_win.set_size(tauri::LogicalSize::new(w, h));
                     }
@@ -1753,10 +1857,19 @@ pub fn run() {
                 handle.exit(0);
             });
 
+            let lock_shared = shared.clone();
+            let on_toggle_lock: Arc<dyn Fn(&AppHandle) + Send + Sync> = Arc::new(move |handle| {
+                let next_locked = !lock_shared.overlay.is_hud_locked();
+                if let Err(err) = apply_hud_lock_state(handle, &lock_shared, next_locked) {
+                    tracing::warn!(error = %err, "Failed to toggle HUD drag lock via tray");
+                }
+            });
+
             if let Err(err) = overlay::setup_overlay_controls(
                 app.handle(),
                 overlay_ctrl,
                 &initial_hotkey,
+                on_toggle_lock,
                 on_quit,
             ) {
                 tracing::warn!(
@@ -1791,6 +1904,9 @@ pub fn run() {
             generate_ai_debrief,
             test_ai_connection,
             update_overlay_preferences,
+            set_hud_locked,
+            save_hud_position,
+            reset_hud_position,
             get_lp_history,
             check_riot_api_key_health,
             get_app_meta,
@@ -1828,6 +1944,7 @@ mod tests {
             puuid: "puuid-test".to_string(),
             region: "EUW1".to_string(),
             summoner_level: 120,
+            profile_icon_id: Some(29),
             tier: tier.to_string(),
             rank: rank.to_string(),
             league_points: lp,

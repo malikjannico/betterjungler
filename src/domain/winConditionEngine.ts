@@ -75,7 +75,7 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
     enemyAnalysis.archetype === 'Dive & Pick'
       ? 'Enemy wants side-lane picks & chaotic dives — drop deep wards on flank angles and group before objectives.'
       : enemyAnalysis.archetype === 'Early Snowball'
-        ? 'Enemy wants early river skirmishes & invades — track their start with a 1:15 ward and trade opposite-side camps/objectives.'
+        ? 'Enemy wants early river skirmishes & invades — drop an early entrance ward before 0:55 buff spawn and trade opposite-side camps/objectives.'
         : 'Enemy wants to stall for 5v5 scaling — punish greedy wave clears, take Voidgrubs/Dragons on spawn, and deny free Baron setup.';
 
   const enemyJgProfile = input.enemyRoles.jungle
@@ -120,7 +120,7 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
   const wardSpots = buildWardSpotsForSide(input.mapSide);
 
   const phasePlaybook = {
-    early: `Start ${recommendedRoute.descriptor}. Ward enemy raptors/entrance at 1:15 if facing an early invader. Path toward ${strongSide.toUpperCase()} for 3:30 Scuttle and first Dragon/Grubs prio.`,
+    early: `Start ${recommendedRoute.descriptor}. Ward enemy raptors/entrance before 0:55 buff spawn if facing an early invader. Path toward ${strongSide.toUpperCase()} for 2:55 Scuttle and first Dragon/Grubs prio.`,
     mid: `Swap to Oracle Lens after first/second recall. Play around ${strongSide.toUpperCase()} Tier-1 turret push, sync camp clears with Dragon/Herald timers (arrive 45s early with a Control Ward).`,
     late: `Shadow your main carry, clear vision around Baron/Elder 60s before spawn, and never risk a 50/50 Smite while your strong side wave is pushed against you.`,
   };
@@ -128,15 +128,15 @@ export function generateWinConditionPlan(input: WinConditionInput): WinCondition
   const enemyJunglePlaybook: EnemyJunglePlaybook = {
     enemyChampionName: enemyJgName,
     expectedStart: earlyAggressive
-      ? `${enemyJgName} favors a 3-camp Level 3 rush -> expect 2:45 ${enemyBotFocus ? 'Bot' : 'Top'} gank or buff invade.`
-      : `${enemyJgName} typically full-clears ${enemyBotFocus ? 'Top → Bot' : 'Bot → Top'} for 3:30 Scuttle.`,
+      ? `${enemyJgName} favors a 3-camp Level 3 rush -> expect 2:30 ${enemyBotFocus ? 'Bot' : 'Top'} gank or buff invade.`
+      : `${enemyJgName} typically full-clears ${enemyBotFocus ? 'Top → Bot' : 'Bot → Top'} for 2:55 Scuttle.`,
     wardTarget115: earlyAggressive
-      ? 'Enemy Raptor bush or your opposite-side river pixel brush at 1:15'
-      : 'Enemy Raptor bush at 1:15 to reveal clear direction',
+      ? 'Enemy Raptor bush or your opposite-side river pixel brush before 0:55'
+      : 'Enemy Raptor bush before 0:55 to reveal clear direction',
     invadeRisk,
     counterPlan: earlyAggressive
-      ? 'Ping vulnerable side laners at 2:35, keep your second buff warded, or cross-invade if they show opposite.'
-      : 'Match their camp tempo, save 1 Smite charge for 3:30 Crab, and contest with adjacent lane priority.',
+      ? 'Ping vulnerable side laners at 2:20, keep your second buff warded, or cross-invade if they show opposite.'
+      : 'Match their camp tempo, save 1 Smite charge for 2:55 Crab, and contest with adjacent lane priority.',
   };
 
   const midScore = scoreLanePlayability(input.allyRoles.middle, input.enemyRoles.middle);

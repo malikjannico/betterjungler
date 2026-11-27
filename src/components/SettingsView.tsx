@@ -1,59 +1,173 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AI_MODEL_PRESETS,
-  findModelPreset,
-  getDefaultModelForProvider,
-} from '../domain/aiModelCatalog';
-import { syncFullDdragonCatalog } from '../services/ddragonService';
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  PictureInPicture2,
+  RefreshCw,
+  Search,
+  Sparkles,
+  UserRound,
+  Users,
+  Video,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import {
   DEFAULT_RECORDING_SETTINGS,
   checkRiotApiKeyHealth,
-  fetchSummonerProfile,
   inspectReplayConfig,
   isTauriEnvironment,
   listRecordings,
-  openRecordingsFolder,
   probeHardwareEncoder,
-  saveAiApiKey,
-  saveRiotApiKey,
+  resetHudPosition,
   saveSettings,
-  setReplayApiEnabled,
-  syncDdragonPatch,
-  testAiConnection,
+  setHudLocked,
+  subscribeHudPreferences,
   updateOverlayPreferences,
 } from '../services/tauriBridge';
-import { formatStorageBytes } from '../domain/recordingSync';
 import type {
   ActivePatchPackStatus,
-  AiProvider,
   ApiKeyHealthStatus,
   AppMetaInfo,
   GameCfgReplayStatus,
   HardwareEncoderStatus,
-  HudCorner,
-  HudMonitorTarget,
-  HudScalePercent,
-  MinimapSide,
-  OverlayHotkeyPreset,
-  RecordingPreset,
   RecordingRecord,
+  RecordingSettings,
   UpdateCheckResult,
   UpdateMode,
   UserSettings,
 } from '../types/coaching';
 import type { SummonerProfileSummary } from '../types/riot';
-import { AboutUpdatesSection } from './AboutUpdatesSection';
-import { GlassSurface } from './GlassSurface';
+import { AboutUpdatesSection, describeUpdateStatus } from './AboutUpdatesSection';
+import { M3Button, M3Chip, M3ListItem, cx, type M3ChipTone } from './m3';
+import {
+  AccountSettingsSection,
+  SettingsNotice,
+  describeRiotApiStatus,
+  validateHttpsProxyUrl,
+  type SettingsNotifier,
+} from './settings/AccountSettingsSection';
+import { AiCoachSettingsSection, AI_PROVIDER_LABELS } from './settings/AiCoachSettingsSection';
+import { OverlaySettingsSection, type OverlayPatch } from './settings/OverlaySettingsSection';
+import { RecordingSettingsSection, shortEncoderLabel } from './settings/RecordingSettingsSection';
+import { RolesSettingsSection, describeRoles } from './settings/RolesSettingsSection';
 
-export type SettingsSectionId = 'account' | 'overlay' | 'recording' | 'ai' | 'updates';
+export { validateHttpsProxyUrl };
 
-const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> = [
-  { id: 'account', label: 'Account & API' },
-  { id: 'overlay', label: 'Overlay & HUD' },
-  { id: 'recording', label: 'Recording & Replays' },
-  { id: 'ai', label: 'AI Coach' },
-  { id: 'updates', label: 'Updates & About' },
+export type SettingsSectionId = 'account' | 'roles' | 'overlay' | 'recording' | 'ai' | 'updates';
+
+type CategoryGroup = 'Account & Coaching' | 'In-Game' | 'System';
+
+interface SettingsCategory {
+  id: SettingsSectionId;
+  group: CategoryGroup;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  /** Setting labels on the subpage — searchable from the category list. */
+  keywords: string[];
+}
+
+/** Display + Prev/Next order. */
+const SETTINGS_CATEGORIES: SettingsCategory[] = [
+  {
+    id: 'account',
+    group: 'Account & Coaching',
+    title: 'Account & Riot API',
+    description: 'Riot ID, region, climb target, API key / HTTPS proxy and Data Dragon catalog.',
+    icon: UserRound,
+    keywords: [
+      'Riot ID',
+      'Platform Region',
+      'Target Division',
+      'League Install Folder',
+      'Summoner Profile',
+      'Riot API Key',
+      'HTTPS Proxy URL',
+      'Data Dragon Patch & Catalog',
+    ],
+  },
+  {
+    id: 'roles',
+    group: 'Account & Coaching',
+    title: 'Roles & Preferences',
+    description: 'Primary / secondary coached role and auto-detect from Champ Select.',
+    icon: Users,
+    keywords: ['Primary Role', 'Secondary Role', 'Jungle', 'ADC', 'Auto-detect role', 'Champ Select'],
+  },
+  {
+    id: 'ai',
+    group: 'Account & Coaching',
+    title: 'AI Coach',
+    description: 'Optional bring-your-own-key debriefs. Deterministic coaching always runs offline.',
+    icon: Sparkles,
+    keywords: ['AI Provider', 'Gemini', 'OpenAI', 'Ollama', 'Model Preset', 'AI Key', 'Test Connection', 'Privacy'],
+  },
+  {
+    id: 'overlay',
+    group: 'In-Game',
+    title: 'Overlay & HUD',
+    description: 'Compact HUD position, drag Unlock / Lock, hotkey, scale and recommended LoL HUD settings.',
+    icon: PictureInPicture2,
+    keywords: [
+      'Global Hotkey',
+      'Compact HUD Corner',
+      'HUD Scale',
+      'HUD Opacity',
+      'HUD Monitor Target',
+      'Minimap Side',
+      'Unlock HUD for Dragging',
+      'Reset HUD Position',
+      'Recommended In-Game League HUD Settings',
+    ],
+  },
+  {
+    id: 'recording',
+    group: 'In-Game',
+    title: 'Recording & Replays',
+    description: 'Opt-in GPU gameplay capture, disk quota, clips and one-click Riot Replay API seek.',
+    icon: Video,
+    keywords: [
+      'Enable GPU Gameplay Recording',
+      'GPU Encoder NVENC QSV AMF',
+      'Quality Preset',
+      'Disk Quota',
+      'Keep Last N Games',
+      'Open Recordings Folder',
+      'Replay API game.cfg',
+    ],
+  },
+  {
+    id: 'updates',
+    group: 'System',
+    title: 'Updates & About',
+    description: 'App version, update mode, changelog, logs and Ed25519-signed patch packs.',
+    icon: RefreshCw,
+    keywords: ['Update Mode', 'Check for Updates', 'Changelog', 'Open Logs Folder', 'Signed Patch Pack'],
+  },
 ];
+
+const CATEGORY_GROUPS: CategoryGroup[] = ['Account & Coaching', 'In-Game', 'System'];
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || target.isContentEditable;
+}
+
+/** replayApiEnabled is written straight to game.cfg, so it never makes the draft dirty. */
+function recordingDraftDiffers(a: RecordingSettings | undefined, b: RecordingSettings | undefined) {
+  const x = a ?? DEFAULT_RECORDING_SETTINGS;
+  const y = b ?? DEFAULT_RECORDING_SETTINGS;
+  return (
+    x.enabled !== y.enabled ||
+    x.preset !== y.preset ||
+    x.maxStorageGb !== y.maxStorageGb ||
+    x.keepLastNGames !== y.keepLastNGames ||
+    x.autoRecordRanked !== y.autoRecordRanked
+  );
+}
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -82,69 +196,6 @@ interface SettingsViewProps {
   onInstallPatchPack?: (envelopeJson: string) => Promise<void>;
 }
 
-export function validateHttpsProxyUrl(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  if (/\s/.test(trimmed)) {
-    return 'Proxy URL cannot contain whitespace.';
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return 'Enter a valid HTTPS URL (e.g. https://your-worker.workers.dev).';
-  }
-  if (parsed.protocol !== 'https:') {
-    return 'Riot API Proxy URL must use HTTPS.';
-  }
-  if (!parsed.hostname || parsed.username || parsed.password) {
-    return 'Proxy URL must have a valid HTTPS host without embedded credentials.';
-  }
-  if (parsed.search || parsed.hash) {
-    return 'Proxy URL cannot include query parameters or fragments.';
-  }
-  if (parsed.pathname && parsed.pathname !== '/') {
-    return 'Proxy URL must be an origin-only HTTPS URL (no path).';
-  }
-  return null;
-}
-
-const REGIONS = [
-  'EUW1',
-  'EUN1',
-  'NA1',
-  'KR',
-  'JP1',
-  'BR1',
-  'LA1',
-  'LA2',
-  'OC1',
-  'TR1',
-  'RU',
-  'PH2',
-  'SG2',
-  'TH2',
-  'TW2',
-  'VN2',
-  'ME1',
-];
-const DIVISIONS = [
-  'SILVER IV',
-  'GOLD IV',
-  'PLATINUM IV',
-  'EMERALD IV',
-  'DIAMOND IV',
-  'MASTER',
-];
-const HUD_CORNERS: Array<{ value: HudCorner; label: string }> = [
-  { value: 'beside-minimap', label: 'Beside Minimap (LoL Safe)' },
-  { value: 'top-right', label: 'Top-Right' },
-  { value: 'top-left', label: 'Top-Left' },
-  { value: 'bottom-right', label: 'Bottom-Right' },
-  { value: 'bottom-left', label: 'Bottom-Left' },
-];
-const HOTKEY_PRESETS: OverlayHotkeyPreset[] = ['Alt+J', 'Alt+B', 'Ctrl+Shift+J', 'F8'];
-
 export function SettingsView({
   settings,
   patchVersion,
@@ -171,27 +222,108 @@ export function SettingsView({
   onStageUpdate,
   onInstallPatchPack,
 }: SettingsViewProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>(initialSection);
+  // null → stacked Category List (default); id → dedicated subpage.
+  const [activeSection, setActiveSection] = useState<SettingsSectionId | null>(() =>
+    initialSectionToken > 0 ? initialSection : null
+  );
+  const consumedTokenRef = useRef(initialSectionToken > 0 ? initialSectionToken : 0);
+  const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<UserSettings>(settings);
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [aiKeyInput, setAiKeyInput] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [hwStatus, setHwStatus] = useState<HardwareEncoderStatus | null>(null);
   const [replayCfg, setReplayCfg] = useState<GameCfgReplayStatus | null>(null);
   const [storedRecordings, setStoredRecordings] = useState<RecordingRecord[]>([]);
-  const [togglingReplay, setTogglingReplay] = useState(false);
-  const [testingAi, setTestingAi] = useState(false);
-  const [customAiModelMode, setCustomAiModelMode] = useState(false);
-  const proxyValidationError = validateHttpsProxyUrl(draft.riotApiProxyUrl ?? '');
+  const [hudLocked, setHudLockedState] = useState(settings.hudLocked ?? true);
+  const [customHudCoords, setCustomHudCoords] = useState<{ x: number; y: number } | null>(
+    settings.hudX != null && settings.hudY != null ? { x: settings.hudX, y: settings.hudY } : null
+  );
+  const searchRef = useRef<HTMLInputElement>(null);
+  const subHeadingRef = useRef<HTMLHeadingElement>(null);
+  const lastOpenedRef = useRef<SettingsSectionId | null>(null);
 
+  const notify = useMemo<SettingsNotifier>(
+    () => ({
+      status: (message) => {
+        setErrorMessage(null);
+        setStatusMessage(message);
+      },
+      error: (message) => {
+        setStatusMessage(null);
+        setErrorMessage(message);
+      },
+      clear: () => {
+        setStatusMessage(null);
+        setErrorMessage(null);
+      },
+    }),
+    []
+  );
+
+  function navigateTo(section: SettingsSectionId | null) {
+    setStatusMessage(null);
+    setErrorMessage(null);
+    if (section) lastOpenedRef.current = section;
+    setActiveSection(section);
+  }
+
+  // Deep-link: a fresh token (from "Open Settings → X" elsewhere) jumps straight into that subpage.
   useEffect(() => {
-    if (initialSectionToken > 0) {
+    if (initialSectionToken > consumedTokenRef.current) {
+      consumedTokenRef.current = initialSectionToken;
+      lastOpenedRef.current = initialSection;
       setActiveSection(initialSection);
     }
   }, [initialSection, initialSectionToken]);
 
-  const rec = draft.recording ?? DEFAULT_RECORDING_SETTINGS;
+  // Focus management: subpage heading on enter, originating category card on back.
+  useEffect(() => {
+    if (activeSection) {
+      subHeadingRef.current?.focus({ preventScroll: true });
+      subHeadingRef.current?.scrollIntoView?.({ block: 'nearest' });
+    } else if (lastOpenedRef.current) {
+      document
+        .querySelector<HTMLElement>(`[data-settings-category-item="${lastOpenedRef.current}"] button`)
+        ?.focus({ preventScroll: true });
+    }
+  }, [activeSection]);
+
+  // Keyboard: Esc → back (outside fields); "/" → focus the category filter.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (isEditableTarget(event.target)) return;
+      if (event.key === 'Escape' && activeSection) {
+        event.preventDefault();
+        navigateTo(null);
+      } else if (event.key === '/' && !activeSection) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let active = true;
+    const unsubPromise = subscribeHudPreferences((prefs) => {
+      if (!active) return;
+      if (typeof prefs.hudLocked === 'boolean') {
+        setHudLockedState(prefs.hudLocked);
+      }
+      if (prefs.hudX != null && prefs.hudY != null) {
+        setCustomHudCoords({ x: prefs.hudX, y: prefs.hudY });
+      } else if (prefs.hudX === null && prefs.hudY === null) {
+        setCustomHudCoords(null);
+      }
+    });
+    return () => {
+      active = false;
+      void unsubPromise.then((fn) => fn());
+    };
+  }, [isTauri]);
 
   useEffect(() => {
     if (!isTauri) return;
@@ -218,10 +350,7 @@ export function SettingsView({
 
   const prevSettingsRef = useRef<UserSettings>(settings);
   const persistedOverlayRef = useRef<
-    Pick<
-      UserSettings,
-      'hudCorner' | 'overlayHotkey' | 'hudOpacity' | 'hudScale' | 'hudMonitor' | 'minimapSide'
-    >
+    Pick<UserSettings, 'hudCorner' | 'overlayHotkey' | 'hudOpacity' | 'hudScale' | 'hudMonitor' | 'minimapSide'>
   >({
     hudCorner: settings.hudCorner,
     overlayHotkey: settings.overlayHotkey,
@@ -231,6 +360,7 @@ export function SettingsView({
     minimapSide: settings.minimapSide,
   });
 
+  // Merge incoming persisted settings while preserving unsaved draft edits across subpages.
   useEffect(() => {
     const prev = prevSettingsRef.current;
     setDraft((cur) => ({
@@ -238,19 +368,12 @@ export function SettingsView({
       riotId: cur.riotId !== prev.riotId ? cur.riotId : settings.riotId,
       region: cur.region !== prev.region ? cur.region : settings.region,
       lolInstallPath:
-        cur.lolInstallPath !== prev.lolInstallPath
-          ? cur.lolInstallPath
-          : settings.lolInstallPath,
+        cur.lolInstallPath !== prev.lolInstallPath ? cur.lolInstallPath : settings.lolInstallPath,
       targetDivision:
-        cur.targetDivision !== prev.targetDivision
-          ? cur.targetDivision
-          : settings.targetDivision,
-      updateMode:
-        cur.updateMode !== prev.updateMode ? cur.updateMode : settings.updateMode,
+        cur.targetDivision !== prev.targetDivision ? cur.targetDivision : settings.targetDivision,
+      updateMode: cur.updateMode !== prev.updateMode ? cur.updateMode : settings.updateMode,
       riotApiProxyUrl:
-        cur.riotApiProxyUrl !== prev.riotApiProxyUrl
-          ? cur.riotApiProxyUrl
-          : settings.riotApiProxyUrl,
+        cur.riotApiProxyUrl !== prev.riotApiProxyUrl ? cur.riotApiProxyUrl : settings.riotApiProxyUrl,
       aiCoach:
         cur.aiCoach.provider !== prev.aiCoach.provider ||
         cur.aiCoach.model !== prev.aiCoach.model ||
@@ -263,14 +386,30 @@ export function SettingsView({
           ? {
               ...(cur.recording ?? DEFAULT_RECORDING_SETTINGS),
               replayApiEnabled:
-                settings.recording?.replayApiEnabled ??
-                cur.recording?.replayApiEnabled ??
-                false,
+                settings.recording?.replayApiEnabled ?? cur.recording?.replayApiEnabled ?? false,
             }
           : (settings.recording ?? DEFAULT_RECORDING_SETTINGS),
     }));
     prevSettingsRef.current = settings;
   }, [settings]);
+
+  /* ---------- Dirty state per subpage ---------- */
+  const accountDirty =
+    draft.riotId !== settings.riotId ||
+    draft.region !== settings.region ||
+    draft.targetDivision !== settings.targetDivision ||
+    draft.lolInstallPath !== settings.lolInstallPath ||
+    (draft.riotApiProxyUrl ?? '') !== (settings.riotApiProxyUrl ?? '');
+  const recordingDirty = recordingDraftDiffers(draft.recording, settings.recording);
+  const aiDirty =
+    draft.aiCoach.provider !== settings.aiCoach.provider ||
+    draft.aiCoach.model !== settings.aiCoach.model ||
+    draft.aiCoach.endpoint !== settings.aiCoach.endpoint;
+  const dirtyBySection: Partial<Record<SettingsSectionId, boolean>> = {
+    account: accountDirty,
+    recording: recordingDirty,
+    ai: aiDirty,
+  };
 
   async function handleSaveSettings() {
     setErrorMessage(null);
@@ -313,6 +452,34 @@ export function SettingsView({
     }
   }
 
+  function discardAccountDraft() {
+    setDraft((prev) => ({
+      ...prev,
+      riotId: settings.riotId,
+      region: settings.region,
+      targetDivision: settings.targetDivision,
+      lolInstallPath: settings.lolInstallPath,
+      riotApiProxyUrl: settings.riotApiProxyUrl,
+    }));
+    notify.clear();
+  }
+
+  function discardRecordingDraft() {
+    setDraft((prev) => ({
+      ...prev,
+      recording: {
+        ...(settings.recording ?? DEFAULT_RECORDING_SETTINGS),
+        replayApiEnabled: prev.recording?.replayApiEnabled ?? settings.recording?.replayApiEnabled ?? false,
+      },
+    }));
+    notify.clear();
+  }
+
+  function discardAiDraft() {
+    setDraft((prev) => ({ ...prev, aiCoach: { ...settings.aiCoach } }));
+    notify.clear();
+  }
+
   function handleUpdateModeChange(mode: UpdateMode) {
     setErrorMessage(null);
     const nextPersisted: UserSettings = { ...settings, updateMode: mode };
@@ -323,15 +490,7 @@ export function SettingsView({
     });
   }
 
-  function handleImmediateOverlayPatch(
-    patch: Partial<
-      Pick<
-        UserSettings,
-        'hudCorner' | 'overlayHotkey' | 'hudOpacity' | 'hudScale' | 'hudMonitor' | 'minimapSide'
-      >
-    >,
-    persistNow = true
-  ) {
+  function handleImmediateOverlayPatch(patch: OverlayPatch, persistNow = true) {
     // Apply overlay change without committing unsaved Riot ID / install path edits
     const nextOverlaySettings: UserSettings = { ...settings, ...patch };
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -356,16 +515,12 @@ export function SettingsView({
       return;
     }
 
-    void updateOverlayPreferences(
-      nextOverlaySettings.hudCorner,
-      nextOverlaySettings.overlayHotkey,
-      {
-        hudOpacity: nextOverlaySettings.hudOpacity,
-        hudScale: nextOverlaySettings.hudScale ?? 100,
-        hudMonitor: nextOverlaySettings.hudMonitor ?? 'primary',
-        minimapSide: nextOverlaySettings.minimapSide ?? 'right',
-      }
-    )
+    void updateOverlayPreferences(nextOverlaySettings.hudCorner, nextOverlaySettings.overlayHotkey, {
+      hudOpacity: nextOverlaySettings.hudOpacity,
+      hudScale: nextOverlaySettings.hudScale ?? 100,
+      hudMonitor: nextOverlaySettings.hudMonitor ?? 'primary',
+      minimapSide: nextOverlaySettings.minimapSide ?? 'right',
+    })
       .then(() => {
         persistedOverlayRef.current = persistSuccessSnapshot;
       })
@@ -374,935 +529,346 @@ export function SettingsView({
         const rollback = persistedOverlayRef.current;
         setDraft((prev) => ({ ...prev, ...rollback }));
         onSettingsChanged({ ...settings, ...rollback });
-        setErrorMessage(
-          err instanceof Error ? err.message : 'Failed to update overlay preferences.'
-        );
+        setStatusMessage(null);
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to update overlay preferences.');
       });
   }
 
-  async function handleSaveApiKey() {
-    setErrorMessage(null);
-    setStatusMessage(null);
-    if (!apiKeyInput.trim()) {
-      setErrorMessage('Enter a Riot Developer API key first.');
-      return;
-    }
-    try {
-      const ok = await saveRiotApiKey(apiKeyInput.trim());
-      if (!ok) return;
-      const updated = { ...settings, hasApiKey: true };
-      setDraft((prev) => ({ ...prev, hasApiKey: true }));
-      await saveSettings(updated);
-      onSettingsChanged(updated);
-      setApiKeyInput('');
+  function handleToggleHudLock() {
+    const nextLocked = !hudLocked;
+    setHudLockedState(nextLocked);
+    void setHudLocked(nextLocked).catch((err) => {
+      setHudLockedState(!nextLocked);
+      notify.error(err instanceof Error ? err.message : 'Unable to toggle HUD lock.');
+    });
+  }
 
-      if (updated.riotApiProxyUrl?.trim()) {
-        setStatusMessage(
-          'Riot API Key stored in Windows Credential Manager (HTTPS Proxy URL is active, so live requests route through your proxy).'
-        );
-        return;
+  function handleResetHudPosition() {
+    void resetHudPosition()
+      .then(() => {
+        setCustomHudCoords(null);
+        notify.status('HUD position reset to corner preset.');
+      })
+      .catch((err) => {
+        notify.error(err instanceof Error ? err.message : 'Unable to reset HUD position.');
+      });
+  }
+
+  /* ---------- Live status badges for the category list ---------- */
+  function categoryStatus(id: SettingsSectionId): { label: string; tone: M3ChipTone } {
+    switch (id) {
+      case 'account': {
+        const api = describeRiotApiStatus(apiKeyHealth, settings.hasApiKey, settings.riotApiProxyUrl);
+        return { label: `${settings.region} · ${api.short}`, tone: api.tone };
       }
-
-      try {
-        const health = await checkRiotApiKeyHealth(updated.region);
-        onApiKeyHealthChanged(health);
-        if (health.status === 'valid') {
-          setStatusMessage(`Riot API Key stored. ${health.message}`);
-          const parts = updated.riotId.trim().split('#');
-          if (parts.length === 2 && Boolean(parts[0]?.trim()) && Boolean(parts[1]?.trim())) {
-            void fetchSummonerProfile(updated.riotId.trim(), updated.region)
-              .then(onProfileLoaded)
-              .catch(() => {});
-          }
-        } else if (health.status === 'expired') {
-          setStatusMessage(
-            'Riot API Key stored in Windows Credential Manager; verification returned 401/403 (see details below).'
-          );
-        } else {
-          setErrorMessage(
-            `Riot API Key stored in Windows Credential Manager, but live probe failed: ${health.message}`
-          );
-        }
-      } catch (probeErr) {
-        setErrorMessage(
-          `Riot API Key stored in Windows Credential Manager, but verification check failed: ${
-            probeErr instanceof Error ? probeErr.message : 'Unknown error'
-          }`
-        );
+      case 'roles':
+        return { label: describeRoles(settings), tone: 'primary' };
+      case 'overlay':
+        return hudLocked
+          ? { label: `Compact HUD · ${settings.overlayHotkey}`, tone: 'success' }
+          : { label: `HUD Unlocked · ${settings.overlayHotkey}`, tone: 'warning' };
+      case 'recording': {
+        const rec = settings.recording ?? DEFAULT_RECORDING_SETTINGS;
+        return rec.enabled
+          ? { label: `${shortEncoderLabel(hwStatus)} · ${rec.maxStorageGb} GB cap`, tone: 'error' }
+          : { label: 'Recording disabled', tone: 'plain' };
       }
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to store Riot API key.');
+      case 'ai':
+        return settings.aiCoach.provider === 'off'
+          ? { label: 'Off', tone: 'plain' }
+          : {
+              label: `${AI_PROVIDER_LABELS[settings.aiCoach.provider]} · ${settings.aiCoach.model}`,
+              tone: 'tertiary',
+            };
+      case 'updates':
+        return describeUpdateStatus(appMeta.version, updateInfo, stagedUpdateVersion);
     }
   }
 
-  async function handleLookupProfile() {
-    setErrorMessage(null);
-    setStatusMessage(null);
-    try {
-      const profile = await fetchSummonerProfile(draft.riotId, draft.region);
-      onProfileLoaded(profile);
-      setStatusMessage(`Synced profile: ${profile.riotId} (${profile.tier} ${profile.rank}).`);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to fetch Riot profile.');
-    }
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredCategories = SETTINGS_CATEGORIES.map((cat) => {
+    if (!normalizedQuery) return { cat, hit: null as string | null };
+    const keywordHit = cat.keywords.find((k) => k.toLowerCase().includes(normalizedQuery)) ?? null;
+    const matches =
+      keywordHit !== null ||
+      cat.title.toLowerCase().includes(normalizedQuery) ||
+      cat.description.toLowerCase().includes(normalizedQuery) ||
+      categoryStatus(cat.id).label.toLowerCase().includes(normalizedQuery);
+    return matches ? { cat, hit: keywordHit } : null;
+  }).filter((entry): entry is { cat: SettingsCategory; hit: string | null } => entry !== null);
+
+  const messages = (
+    <>
+      {statusMessage && (
+        <div role="status">
+          <SettingsNotice tone="success">{statusMessage}</SettingsNotice>
+        </div>
+      )}
+      {errorMessage && (
+        <SettingsNotice tone="error" role="alert">
+          {errorMessage}
+        </SettingsNotice>
+      )}
+    </>
+  );
+
+  /* ======================= VIEW A · Category list ======================= */
+  if (activeSection === null) {
+    return (
+      <div className="m3-view-enter max-w-[960px] space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="m3-headline-s text-[var(--md-sys-color-on-surface)]">Settings</h2>
+            <p className="m3-body-s m3-muted">Pick a category to open its settings page.</p>
+          </div>
+          <label
+            className="flex h-12 w-full max-w-[380px] cursor-text items-center gap-2.5 rounded-full bg-[var(--md-sys-color-surface-container-high)] pl-4 pr-2.5 focus-within:shadow-[inset_0_0_0_2px_var(--md-sys-color-primary)]"
+          >
+            <Search aria-hidden className="h-5 w-5 flex-none text-[var(--md-sys-color-on-surface)]" />
+            <input
+              ref={searchRef}
+              type="search"
+              aria-label="Filter settings"
+              placeholder="Search settings"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  if (query) setQuery('');
+                  else e.currentTarget.blur();
+                } else if (e.key === 'Enter' && filteredCategories[0]) {
+                  e.preventDefault();
+                  navigateTo(filteredCategories[0].cat.id);
+                }
+              }}
+              className="min-w-0 flex-1 bg-transparent text-[14px] text-[var(--md-sys-color-on-surface)] outline-none placeholder:text-[var(--md-sys-color-on-surface-variant)] [&::-webkit-search-cancel-button]:hidden"
+            />
+            {query ? (
+              <button
+                type="button"
+                aria-label="Clear filter"
+                onClick={() => {
+                  setQuery('');
+                  searchRef.current?.focus();
+                }}
+                className="m3-state grid h-8 w-8 place-items-center rounded-full text-[var(--md-sys-color-on-surface)]"
+              >
+                <X aria-hidden className="h-4 w-4" />
+              </button>
+            ) : (
+              <kbd
+                aria-hidden
+                className="rounded-md px-1.5 text-[11px] font-bold text-[var(--md-sys-color-on-surface)] opacity-70 shadow-[inset_0_0_0_1px_currentColor]"
+              >
+                /
+              </kbd>
+            )}
+          </label>
+        </div>
+
+        {filteredCategories.length === 0 ? (
+          <div className="rounded-[28px] bg-[var(--md-sys-color-surface-container-low)] p-8 text-center">
+            <p className="m3-title-m text-[var(--md-sys-color-on-surface)]">No settings match “{query}”</p>
+            <p className="m3-body-s m3-muted mt-1">Try “hotkey”, “API key”, “Replay” or “Gemini”.</p>
+          </div>
+        ) : (
+          CATEGORY_GROUPS.map((group) => {
+            const entries = filteredCategories.filter((entry) => entry.cat.group === group);
+            if (entries.length === 0) return null;
+            return (
+              <section key={group} aria-label={group}>
+                <h3 className="m3-label-m px-5 pb-1.5 uppercase tracking-[0.7px] text-[var(--md-sys-color-primary)]">
+                  {group}
+                </h3>
+                <ul className="flex flex-col gap-[3px]">
+                  {entries.map(({ cat, hit }, index) => {
+                    const Icon = cat.icon;
+                    const status = categoryStatus(cat.id);
+                    const dirty = dirtyBySection[cat.id];
+                    return (
+                      <li key={cat.id} data-settings-category-item={cat.id}>
+                        <M3ListItem
+                          onClick={() => navigateTo(cat.id)}
+                          ariaLabel={`${cat.title}: ${status.label}`}
+                          className={cx(
+                            'group !min-h-[68px] !rounded-[8px] !bg-[var(--md-sys-color-surface-container)] hover:!bg-[var(--md-sys-color-surface-container-high)]',
+                            index === 0 && '!rounded-t-[20px]',
+                            index === entries.length - 1 && '!rounded-b-[20px]'
+                          )}
+                          leading={
+                            <span className="grid h-11 w-11 place-items-center rounded-[16px] bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)] transition-[border-radius,background-color] duration-300 group-hover:rounded-[22px] group-hover:bg-[var(--md-sys-color-primary-container)] group-hover:text-[var(--md-sys-color-on-primary-container)]">
+                              <Icon aria-hidden className="h-5 w-5" />
+                            </span>
+                          }
+                          title={cat.title}
+                          description={hit ? `Matches “${hit}” · ${cat.description}` : cat.description}
+                          trailing={
+                            <span className="flex items-center gap-2">
+                              {dirty && <M3Chip tone="warning" size="sm" label="Unsaved" />}
+                              <M3Chip
+                                tone={status.tone}
+                                size="sm"
+                                label={status.label}
+                                className={cx(
+                                  'num max-w-[260px] truncate',
+                                  status.tone === 'plain' && '!text-[var(--md-sys-color-on-surface)]'
+                                )}
+                              />
+                              <ChevronRight
+                                aria-hidden
+                                className="h-5 w-5 text-[var(--md-sys-color-on-surface-variant)] transition-transform group-hover:translate-x-1"
+                              />
+                            </span>
+                          }
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })
+        )}
+        {messages}
+      </div>
+    );
   }
 
-  async function handleSyncPatch() {
-    setErrorMessage(null);
-    setStatusMessage(null);
-    try {
-      const patch = await syncDdragonPatch();
-      const catalog = await syncFullDdragonCatalog(patch);
-      const counts = {
-        champions: Object.keys(catalog.championsById).length,
-        items: Object.keys(catalog.itemsById).length,
-      };
-      onPatchSynced(catalog.patch, counts);
-      setStatusMessage(
-        `Data Dragon synced to patch ${catalog.patch} (${counts.champions} champions, ${counts.items} items).`
-      );
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to sync Data Dragon catalog.');
-    }
-  }
-
-  async function handleSaveAiKey() {
-    setErrorMessage(null);
-    setStatusMessage(null);
-    if (!aiKeyInput.trim()) {
-      setErrorMessage('Enter an AI provider API key first.');
-      return;
-    }
-    try {
-      const ok = await saveAiApiKey(aiKeyInput.trim());
-      if (ok) {
-        const persisted: UserSettings = {
-          ...settings,
-          aiCoach: { ...draft.aiCoach, hasApiKey: true },
-        };
-        setDraft((prev) => ({
-          ...prev,
-          aiCoach: { ...prev.aiCoach, hasApiKey: true },
-        }));
-        await saveSettings(persisted);
-        onSettingsChanged(persisted);
-        setAiKeyInput('');
-        setStatusMessage('AI Coach API key stored in Windows Credential Manager.');
-      }
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to store AI API key.');
-    }
-  }
-
-  async function handleTestAiConnection() {
-    setErrorMessage(null);
-    setStatusMessage(null);
-    setTestingAi(true);
-    try {
-      const result = await testAiConnection(
-        draft.aiCoach.provider,
-        draft.aiCoach.model,
-        draft.aiCoach.endpoint
-      );
-      setStatusMessage(result);
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'AI Coach connection check failed.'
-      );
-    } finally {
-      setTestingAi(false);
-    }
-  }
-
-  async function handleReprobeHardware() {
-    setErrorMessage(null);
-    try {
-      const next = await probeHardwareEncoder();
-      setHwStatus(next);
-      setStatusMessage(next.message);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Hardware encoder probe failed.');
-    }
-  }
-
-  async function handleToggleReplayApi() {
-    const nextEnable = !(replayCfg?.replayApiEnabled ?? rec.replayApiEnabled);
-    setTogglingReplay(true);
-    setErrorMessage(null);
-    setStatusMessage(null);
-    try {
-      const cfg = await setReplayApiEnabled(nextEnable);
-      setReplayCfg(cfg);
-      const baseRec = settings.recording ?? DEFAULT_RECORDING_SETTINGS;
-      const nextSettingsRec = { ...baseRec, replayApiEnabled: cfg.replayApiEnabled };
-      setDraft((prev) => ({
-        ...prev,
-        recording: { ...(prev.recording ?? DEFAULT_RECORDING_SETTINGS), replayApiEnabled: cfg.replayApiEnabled },
-      }));
-      onSettingsChanged({ ...settings, recording: nextSettingsRec });
-      setStatusMessage(
-        cfg.replayApiEnabled
-          ? `Enabled EnableReplayApi=1 in game.cfg (backup saved as game.cfg.bak).`
-          : `Disabled EnableReplayApi in game.cfg (backup saved as game.cfg.bak).`
-      );
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to update game.cfg.');
-    } finally {
-      setTogglingReplay(false);
-    }
-  }
-
-  const totalUsedBytes = storedRecordings.reduce((acc, row) => acc + row.sizeBytes, 0);
+  /* ======================= VIEW B · Dedicated subpage ======================= */
+  const rawIndex = SETTINGS_CATEGORIES.findIndex((c) => c.id === activeSection);
+  const currentIndex = rawIndex >= 0 ? rawIndex : 0;
+  const current = SETTINGS_CATEGORIES[currentIndex] ?? SETTINGS_CATEGORIES[0]!;
+  const prevCat = currentIndex > 0 ? SETTINGS_CATEGORIES[currentIndex - 1] ?? null : null;
+  const nextCat =
+    currentIndex < SETTINGS_CATEGORIES.length - 1
+      ? SETTINGS_CATEGORIES[currentIndex + 1] ?? null
+      : null;
+  const CurrentIcon = current.icon;
+  const currentStatus = categoryStatus(current.id);
 
   return (
-    <div className="space-y-4">
-      <div
-        role="tablist"
-        aria-label="Settings sections"
-        className="lg-segmented inline-flex flex-wrap items-center gap-1"
-      >
-        {SETTINGS_SECTIONS.map((sec) => {
-          const isActive = activeSection === sec.id;
-          return (
-            <button
-              key={sec.id}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => setActiveSection(sec.id)}
-              className={`rounded-[7px] px-3 py-1.5 text-xs font-medium transition ${
-                isActive
-                  ? 'lg-segment-active font-semibold'
-                  : 'text-white/[0.62] hover:bg-white/[0.04] hover:text-white'
-              }`}
+    <div key={activeSection} className="m3-view-enter max-w-[920px] space-y-3">
+      <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-2 bg-[var(--md-sys-color-surface)] px-1 pb-3 pt-1">
+        <M3Button
+          variant="tonal"
+          icon={<ArrowLeft aria-hidden className="h-5 w-5" />}
+          onClick={() => navigateTo(null)}
+          title="Back to Settings (Esc)"
+        >
+          Back to Settings
+        </M3Button>
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="grid h-11 w-11 flex-none place-items-center rounded-[20px] bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]">
+            <CurrentIcon aria-hidden className="h-6 w-6" />
+          </span>
+          <div className="min-w-0">
+            <h2
+              ref={subHeadingRef}
+              tabIndex={-1}
+              className="m3-title-l truncate text-[var(--md-sys-color-on-surface)] outline-none"
             >
-              {sec.label}
-            </button>
-          );
-        })}
+              {current.title}
+            </h2>
+            <p className="m3-body-s m3-muted truncate">{current.description}</p>
+          </div>
+        </div>
+        <M3Chip
+          tone={currentStatus.tone}
+          size="sm"
+          label={currentStatus.label}
+          className={cx('num hidden max-w-[240px] truncate md:inline-flex', currentStatus.tone === 'plain' && '!text-[var(--md-sys-color-on-surface)]')}
+        />
+        <nav aria-label="Settings categories" className="flex items-center gap-1">
+          <M3Button
+            variant="outlined"
+            size="sm"
+            disabled={!prevCat}
+            aria-label={prevCat ? `Previous: ${prevCat.title}` : 'No previous category'}
+            icon={<ChevronLeft aria-hidden className="h-4 w-4" />}
+            onClick={() => prevCat && navigateTo(prevCat.id)}
+          >
+            Prev
+          </M3Button>
+          <M3Button
+            variant="outlined"
+            size="sm"
+            disabled={!nextCat}
+            aria-label={nextCat ? `Next: ${nextCat.title}` : 'No next category'}
+            trailingIcon={<ChevronRight aria-hidden className="h-4 w-4" />}
+            onClick={() => nextCat && navigateTo(nextCat.id)}
+          >
+            Next
+          </M3Button>
+        </nav>
       </div>
 
       {activeSection === 'account' && (
-        <div className="grid gap-4 md:grid-cols-2">
-          <GlassSurface className="space-y-3.5 p-5">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-              Riot Account &amp; Climb Target
-            </h2>
-          <p className="rounded-[8px] border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200/90">
-            <strong>Keyless LCU Mode active:</strong> Open League of Legends for automatic Champ
-            Select &amp; Live HUD coaching without an API key. Add a Riot API key below only for
-            Match-V5 timeline history sync.
-          </p>
+        <AccountSettingsSection
+          settings={settings}
+          draft={draft}
+          setDraft={setDraft}
+          patchVersion={patchVersion}
+          catalogCounts={catalogCounts}
+          apiKeyHealth={apiKeyHealth}
+          dirty={accountDirty}
+          notify={notify}
+          onSave={handleSaveSettings}
+          onDiscard={discardAccountDraft}
+          onSettingsChanged={onSettingsChanged}
+          onProfileLoaded={onProfileLoaded}
+          onPatchSynced={onPatchSynced}
+          onApiKeyHealthChanged={onApiKeyHealthChanged}
+        />
+      )}
 
-          <label className="block text-xs">
-            <span className="text-slate-300">Riot ID (Name#Tag)</span>
-            <input
-              type="text"
-              value={draft.riotId}
-              onChange={(e) => setDraft({ ...draft, riotId: e.target.value })}
-              placeholder="YourName#EUW"
-              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-            />
-          </label>
-
-          <div className="grid grid-cols-2 gap-2.5">
-            <label className="block text-xs">
-              <span className="text-slate-300">Platform Region</span>
-              <select
-                value={draft.region}
-                onChange={(e) => setDraft({ ...draft, region: e.target.value })}
-                className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
-              >
-                {REGIONS.map((r) => (
-                  <option key={r} value={r} className="bg-zinc-900">
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block text-xs">
-              <span className="text-slate-300">Target Division</span>
-              <select
-                value={draft.targetDivision}
-                onChange={(e) => setDraft({ ...draft, targetDivision: e.target.value })}
-                className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
-              >
-                {DIVISIONS.map((d) => (
-                  <option key={d} value={d} className="bg-zinc-900">
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <label className="block text-xs">
-            <span className="text-slate-300">League Install Folder</span>
-            <input
-              type="text"
-              value={draft.lolInstallPath}
-              onChange={(e) => setDraft({ ...draft, lolInstallPath: e.target.value })}
-              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-            />
-          </label>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              type="button"
-              onClick={handleSaveSettings}
-              className="lg-btn-primary px-4 py-2 text-xs font-bold"
-            >
-              Save Preferences
-            </button>
-            <button
-              type="button"
-              onClick={handleLookupProfile}
-              className="lg-btn-glass px-3.5 py-2 text-xs font-medium text-white"
-            >
-              Sync Riot Profile
-            </button>
-          </div>
-        </GlassSurface>
-
-        <GlassSurface className="space-y-3.5 p-5">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-              Riot API Key &amp; Data Dragon
-            </h2>
-            <span
-              className={`text-[11px] font-medium ${
-                apiKeyHealth?.status === 'expired'
-                  ? 'text-rose-300'
-                  : apiKeyHealth?.status === 'rate_limited'
-                    ? 'text-amber-300'
-                    : apiKeyHealth?.status === 'valid'
-                      ? 'text-emerald-300'
-                      : draft.hasApiKey || (draft.riotApiProxyUrl?.trim() && !proxyValidationError)
-                        ? 'text-slate-300'
-                        : 'text-amber-300'
-              }`}
-            >
-              {apiKeyHealth?.status === 'valid'
-                ? 'Verified Active'
-                : apiKeyHealth?.status === 'expired'
-                  ? 'Key Rejected (401/403)'
-                  : apiKeyHealth?.status === 'rate_limited'
-                    ? 'Rate Limited (429)'
-                    : draft.riotApiProxyUrl?.trim() && !proxyValidationError
-                      ? 'HTTPS Proxy Configured'
-                      : draft.hasApiKey
-                        ? 'Key Stored (Unverified)'
-                        : 'No Key Saved'}
-            </span>
-          </div>
-
-          {apiKeyHealth && apiKeyHealth.status === 'expired' && (
-            <p className="rounded-lg border border-rose-400/35 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
-              {apiKeyHealth.message}
-            </p>
-          )}
-
-          <label className="block text-xs">
-            <span className="text-slate-300">
-              Personal Riot API Key (Windows Credential Manager)
-            </span>
-            <div className="mt-1.5 flex gap-2">
-              <input
-                type="password"
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder="RGAPI-xxxxxxxx-xxxx-..."
-                className="lg-inset flex-1 px-3 py-2 text-xs text-slate-100 outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleSaveApiKey}
-                className="lg-btn-glass px-3 py-2 text-xs font-medium text-white"
-              >
-                Save Key
-              </button>
-            </div>
-          </label>
-
-          <label className="block text-xs">
-            <span className="text-slate-300">Riot API Proxy URL (HTTPS)</span>
-            <input
-              type="url"
-              aria-label="Riot API Proxy URL (HTTPS)"
-              value={draft.riotApiProxyUrl ?? ''}
-              onChange={(e) => setDraft({ ...draft, riotApiProxyUrl: e.target.value })}
-              placeholder="https://betterjungler-riot-proxy.your-subdomain.workers.dev"
-              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-            />
-            {proxyValidationError ? (
-              <span role="alert" className="mt-1 block text-[11px] text-rose-300">
-                {proxyValidationError}
-              </span>
-            ) : (
-              <span className="mt-1 block text-[11px] text-slate-400">
-                Optional zero-trust Cloudflare Worker relay. When set, Riot requests route over
-                HTTPS with <code className="font-mono text-slate-300">X-App-Client</code> instead
-                of a personal key.
-              </span>
-            )}
-          </label>
-
-          <div className="lg-inset flex items-center justify-between px-3 py-2.5 text-xs">
-            <div>
-              <div className="font-medium text-white">Data Dragon Patch &amp; Catalog</div>
-              <div className="text-[11px] text-slate-400">
-                Patch {patchVersion} · {catalogCounts.champions} champions / {catalogCounts.items}{' '}
-                items hydrated
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleSyncPatch}
-              className="lg-btn-glass px-3 py-1 text-xs font-medium text-white"
-            >
-              Sync Patch
-            </button>
-          </div>
-        </GlassSurface>
-      </div>
+      {activeSection === 'roles' && (
+        <RolesSettingsSection settings={settings} notify={notify} onSettingsChanged={onSettingsChanged} />
       )}
 
       {activeSection === 'overlay' && (
-        <GlassSurface className="space-y-4 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-              Transparent Overlay &amp; Compact HUD
-            </h2>
-            <span className="text-[11px] text-slate-400">
-              Changes apply immediately in-game
-            </span>
-          </div>
-
-          <div className="lg-inset p-3.5">
-            <div className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-              Overlay Ergonomics
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="block text-[11px]">
-                <span className="text-slate-400">Compact HUD Corner</span>
-                <select
-                  aria-label="Compact HUD Corner"
-                  value={draft.hudCorner}
-                  onChange={(e) =>
-                    handleImmediateOverlayPatch({
-                      hudCorner: e.target.value as HudCorner,
-                    })
-                  }
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
-                >
-                  {HUD_CORNERS.map((c) => (
-                    <option key={c.value} value={c.value} className="bg-zinc-900">
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block text-[11px]">
-                <span className="text-slate-400">Global Hotkey</span>
-                <select
-                  aria-label="Global Hotkey"
-                  value={draft.overlayHotkey}
-                  onChange={(e) =>
-                    handleImmediateOverlayPatch({ overlayHotkey: e.target.value })
-                  }
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
-                >
-                  {HOTKEY_PRESETS.map((k) => (
-                    <option key={k} value={k} className="bg-zinc-900">
-                      {k}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block text-[11px]">
-                <span className="text-slate-400">HUD Scale</span>
-                <select
-                  aria-label="HUD Scale"
-                  value={draft.hudScale ?? 100}
-                  onChange={(e) =>
-                    handleImmediateOverlayPatch({
-                      hudScale: Number(e.target.value) as HudScalePercent,
-                    })
-                  }
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
-                >
-                  <option value={100} className="bg-zinc-900">100% (Standard)</option>
-                  <option value={125} className="bg-zinc-900">125% (1440p Comfortable)</option>
-                  <option value={150} className="bg-zinc-900">150% (Large / High-DPI)</option>
-                </select>
-              </label>
-
-              <label className="block text-[11px]">
-                <span className="text-slate-400">In-Game Minimap Side</span>
-                <select
-                  aria-label="In-Game Minimap Side"
-                  value={draft.minimapSide ?? 'right'}
-                  onChange={(e) =>
-                    handleImmediateOverlayPatch({
-                      minimapSide: e.target.value as MinimapSide,
-                    })
-                  }
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
-                >
-                  <option value="right" className="bg-zinc-900">Right (Default LoL)</option>
-                  <option value="left" className="bg-zinc-900">Left (Flipped Minimap)</option>
-                </select>
-              </label>
-
-              <label className="block text-[11px]">
-                <span className="text-slate-400">HUD Monitor Target</span>
-                <select
-                  aria-label="HUD Monitor Target"
-                  value={draft.hudMonitor ?? 'primary'}
-                  onChange={(e) =>
-                    handleImmediateOverlayPatch({
-                      hudMonitor: e.target.value as HudMonitorTarget,
-                    })
-                  }
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/45 px-2 py-1 text-xs text-slate-100"
-                >
-                  <option value="primary" className="bg-zinc-900">Primary Display (League)</option>
-                  <option value="active" className="bg-zinc-900">Same Display as App</option>
-                </select>
-              </label>
-
-              <label className="block text-[11px]">
-                <span className="text-slate-400">HUD Opacity ({draft.hudOpacity}%)</span>
-                <input
-                  type="range"
-                  aria-label="HUD Opacity"
-                  min={70}
-                  max={100}
-                  value={Math.max(70, draft.hudOpacity)}
-                  onChange={(e) =>
-                    handleImmediateOverlayPatch(
-                      { hudOpacity: Number(e.target.value) },
-                      false
-                    )
-                  }
-                  onPointerUp={(e) =>
-                    handleImmediateOverlayPatch({
-                      hudOpacity: Number(e.currentTarget.value),
-                    })
-                  }
-                  onKeyUp={(e) =>
-                    handleImmediateOverlayPatch({
-                      hudOpacity: Number(e.currentTarget.value),
-                    })
-                  }
-                  className="mt-2 w-full accent-white"
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="border-t border-white/[0.07] pt-2.5 text-[11px] text-slate-400">
-            <span className="font-semibold text-emerald-300">Riot Policy Compliant:</span> Official
-            APIs + LCU Champ Select read/manual apply + Live Client Data (127.0.0.1:2999). No memory
-            reading, no enemy cooldown tracking, and Solo/Duo anonymity enforced.
-          </div>
-        </GlassSurface>
+        <OverlaySettingsSection
+          draft={draft}
+          isTauri={isTauri}
+          hudLocked={hudLocked}
+          customHudCoords={customHudCoords}
+          onOverlayPatch={handleImmediateOverlayPatch}
+          onToggleHudLock={handleToggleHudLock}
+          onResetHudPosition={handleResetHudPosition}
+        />
       )}
 
-      {/* Opt-In Gameplay Recording & Riot Replay API */}
       {activeSection === 'recording' && (
-        <GlassSurface className="space-y-3.5 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-            Opt-In Gameplay Recording &amp; Riot Replay API
-          </h3>
-          <span className="text-[11px] text-slate-400">
-            Off by default · OS H.264 encoder (GPU probe) · League HWND only
-          </span>
-        </div>
-
-        <div className="lg-inset flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 text-xs">
-          <div className="space-y-0.5">
-            <div className="font-medium text-white">
-              {hwStatus
-                ? hwStatus.hardwareAvailable
-                  ? `GPU Encoder Ready: ${hwStatus.encoderNames[0] ?? 'Hardware H.264'}`
-                  : 'Hardware GPU H.264 Encoder Not Detected'
-                : 'GPU Encoder Probe'}
-            </div>
-            <div className="text-[11px] text-slate-400">
-              {hwStatus?.message ?? 'Checks NVENC / AMF / QuickSync hardware capability.'}
-            </div>
-            {hwStatus?.leagueWindowMode === 'fullscreen' && (
-              <div className="text-[11px] text-amber-300">
-                League WindowMode=0 (Exclusive Fullscreen) detected. Switch to Borderless for
-                optimal WGC capture and overlay visibility.
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleReprobeHardware()}
-            className="lg-btn-glass shrink-0 px-3 py-1.5 text-xs font-medium text-white"
-          >
-            Re-check GPU
-          </button>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="lg-inset flex items-center justify-between gap-2 px-3 py-2.5 text-xs">
-            <span>
-              <span className="block font-medium text-white">Enable Recording</span>
-              <span className="text-[11px] text-slate-400">
-                Captures League window only
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              aria-label="Enable GPU Gameplay Recording"
-              checked={rec.enabled}
-              disabled={isTauri && hwStatus !== null && !hwStatus.hardwareAvailable && !rec.enabled}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  recording: { ...rec, enabled: e.target.checked },
-                })
-              }
-              className="h-4 w-4 accent-white"
-            />
-          </label>
-
-          <label className="block text-xs">
-            <span className="text-slate-300">Quality Preset</span>
-            <select
-              aria-label="Recording Quality Preset"
-              value={rec.preset}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  recording: { ...rec, preset: e.target.value as RecordingPreset },
-                })
-              }
-              className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
-            >
-              <option value="720p30" className="bg-zinc-900">
-                30fps · 3.5 Mbps (Native Window · Recommended)
-              </option>
-              <option value="1080p60" className="bg-zinc-900">
-                60fps · 8 Mbps (Native Window · dGPU)
-              </option>
-              <option value="clips_only" className="bg-zinc-900">
-                Clips Focus (30fps · Keep Last 3 Games)
-              </option>
-            </select>
-          </label>
-
-          <label className="block text-xs">
-            <span className="text-slate-300">Disk Quota (GB)</span>
-            <input
-              type="number"
-              aria-label="Recording Disk Quota GB"
-              min={1}
-              max={50}
-              value={rec.maxStorageGb}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  recording: {
-                    ...rec,
-                    maxStorageGb: Math.min(50, Math.max(1, Number(e.target.value) || 5)),
-                  },
-                })
-              }
-              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-            />
-          </label>
-
-          <label className="block text-xs">
-            <span className="text-slate-300">Keep Last N Games</span>
-            <input
-              type="number"
-              aria-label="Keep Last N Recordings"
-              min={1}
-              max={100}
-              value={rec.keepLastNGames}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  recording: {
-                    ...rec,
-                    keepLastNGames: Math.min(100, Math.max(1, Number(e.target.value) || 10)),
-                  },
-                })
-              }
-              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-            />
-          </label>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <label className="inline-flex items-center gap-2 text-slate-300">
-            <input
-              type="checkbox"
-              aria-label="Auto-record Ranked Solo/Duo only"
-              checked={rec.autoRecordRanked}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  recording: { ...rec, autoRecordRanked: e.target.checked },
-                })
-              }
-              className="h-3.5 w-3.5 accent-white"
-            />
-            <span>Record Ranked Solo/Duo matches automatically (skip non-ranked modes)</span>
-          </label>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-slate-400">
-              {storedRecordings.length} saved ({formatStorageBytes(totalUsedBytes)})
-            </span>
-            <button
-              type="button"
-              onClick={() => void openRecordingsFolder()}
-              className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white"
-            >
-              Open Recordings Folder
-            </button>
-          </div>
-        </div>
-
-        <div className="lg-inset flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 text-xs">
-          <div className="space-y-1">
-            <div className="font-medium text-white">
-              Zero-Overhead Riot Replay API (127.0.0.1:2999)
-            </div>
-            <div className="text-[11px] text-slate-400">
-              {replayCfg?.replayApiEnabled
-                ? 'Enabled in League game.cfg (EnableReplayApi=1). One-click Seek works for .rofl replays.'
-                : 'Disabled by default by Riot. Close League before toggling so game.cfg edits persist (.cfg.bak backup created).'}
-            </div>
-            {replayCfg?.previewDiff && (
-              <pre className="rounded bg-black/35 px-2 py-1 font-mono text-[10px] text-slate-300">
-                {replayCfg.previewDiff}
-              </pre>
-            )}
-          </div>
-          <button
-            type="button"
-            disabled={togglingReplay}
-            onClick={() => void handleToggleReplayApi()}
-            className="lg-btn-glass shrink-0 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-          >
-            {togglingReplay
-              ? 'Updating game.cfg...'
-              : replayCfg?.replayApiEnabled
-                ? 'Disable Replay API'
-                : 'Enable Replay API'}
-          </button>
-        </div>
-
-        <div className="flex justify-end border-t border-white/[0.07] pt-3">
-          <button
-            type="button"
-            onClick={handleSaveSettings}
-            className="lg-btn-primary px-4 py-2 text-xs font-bold"
-          >
-            Save Preferences
-          </button>
-        </div>
-      </GlassSurface>
+        <RecordingSettingsSection
+          settings={settings}
+          draft={draft}
+          setDraft={setDraft}
+          isTauri={isTauri}
+          hwStatus={hwStatus}
+          replayCfg={replayCfg}
+          storedRecordings={storedRecordings}
+          dirty={recordingDirty}
+          notify={notify}
+          onHwStatusChanged={setHwStatus}
+          onReplayCfgChanged={setReplayCfg}
+          onSettingsChanged={onSettingsChanged}
+          onSave={handleSaveSettings}
+          onDiscard={discardRecordingDraft}
+        />
       )}
 
-      {/* Optional BYOK AI Coach */}
-      {activeSection === 'ai' && (() => {
-        const aiProvider = draft.aiCoach.provider;
-        const presets = aiProvider === 'off' ? [] : AI_MODEL_PRESETS[aiProvider];
-        const activePreset = findModelPreset(aiProvider, draft.aiCoach.model);
-        const selectValue =
-          aiProvider === 'off'
-            ? ''
-            : customAiModelMode || !activePreset
-              ? '__custom__'
-              : activePreset.id;
-
-        return (
-          <GlassSurface className="space-y-3 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-                Optional BYOK AI Coach (Natural-Language Debriefs)
-              </h3>
-              <span className="text-[11px] text-slate-500">
-                Deterministic coaching always runs offline; AI is strictly optional.
-              </span>
-            </div>
-
-            <div className="grid gap-2.5 sm:grid-cols-3">
-              <label className="block text-xs">
-                <span className="text-slate-300">AI Provider</span>
-                <select
-                  aria-label="AI Provider"
-                  value={aiProvider}
-                  onChange={(e) => {
-                    const provider = e.target.value as AiProvider;
-                    const defaultModel = getDefaultModelForProvider(provider, draft.aiCoach.model);
-                    setCustomAiModelMode(false);
-                    setDraft({
-                      ...draft,
-                      aiCoach: { ...draft.aiCoach, provider, model: defaultModel },
-                    });
-                  }}
-                  className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
-                >
-                  <option value="off" className="bg-zinc-900">
-                    Off (Deterministic Only)
-                  </option>
-                  <option value="gemini" className="bg-zinc-900">
-                    Google Gemini (BYOK)
-                  </option>
-                  <option value="openai" className="bg-zinc-900">
-                    OpenAI (BYOK)
-                  </option>
-                  <option value="ollama" className="bg-zinc-900">
-                    Local Ollama (127.0.0.1)
-                  </option>
-                </select>
-              </label>
-
-              <label className="block text-xs">
-                <span className="text-slate-300">Model Preset</span>
-                {aiProvider === 'off' ? (
-                  <input
-                    type="text"
-                    disabled
-                    value="Deterministic only (no LLM)"
-                    className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-500 outline-none"
-                  />
-                ) : (
-                  <select
-                    aria-label="AI Model Preset"
-                    value={selectValue}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === '__custom__') {
-                        setCustomAiModelMode(true);
-                      } else {
-                        setCustomAiModelMode(false);
-                        setDraft({
-                          ...draft,
-                          aiCoach: { ...draft.aiCoach, model: val },
-                        });
-                      }
-                    }}
-                    className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
-                  >
-                    {presets.map((preset) => (
-                      <option key={preset.id} value={preset.id} className="bg-zinc-900">
-                        {preset.label}
-                      </option>
-                    ))}
-                    <option value="__custom__" className="bg-zinc-900">
-                      Custom model ID...
-                    </option>
-                  </select>
-                )}
-              </label>
-
-              {aiProvider === 'ollama' ? (
-                <label className="block text-xs">
-                  <span className="text-slate-300">Local Ollama URL</span>
-                  <input
-                    type="text"
-                    value={draft.aiCoach.endpoint}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        aiCoach: { ...draft.aiCoach, endpoint: e.target.value },
-                      })
-                    }
-                    className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-                  />
-                </label>
-              ) : (
-                <label className="block text-xs">
-                  <span className="text-slate-300">
-                    AI Key ({draft.aiCoach.hasApiKey ? 'Stored Securely' : 'Not Saved'})
-                  </span>
-                  <div className="mt-1.5 flex gap-1.5">
-                    <input
-                      type="password"
-                      value={aiKeyInput}
-                      onChange={(e) => setAiKeyInput(e.target.value)}
-                      placeholder="Paste Gemini / OpenAI key"
-                      className="lg-inset flex-1 px-2.5 py-2 text-xs text-slate-100 outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSaveAiKey}
-                      className="lg-btn-glass px-3 py-2 text-xs font-medium text-white"
-                    >
-                      Save
-                    </button>
-                  </div>
-                </label>
-              )}
-            </div>
-
-            {aiProvider !== 'off' && selectValue === '__custom__' && (
-              <label className="block text-xs">
-                <span className="text-slate-300">Custom AI Model ID</span>
-                <input
-                  type="text"
-                  aria-label="Custom AI Model"
-                  value={draft.aiCoach.model}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      aiCoach: { ...draft.aiCoach, model: e.target.value },
-                    })
-                  }
-                  placeholder="Enter exact provider model ID (e.g. gemini-3.8-flash)"
-                  className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-                />
-              </label>
-            )}
-
-            {activePreset && (
-              <div
-                className={`lg-inset flex flex-wrap items-center gap-2 px-3 py-2 text-[11px] ${
-                  activePreset.tier === 'paid'
-                    ? 'border border-amber-400/25 text-amber-200/90'
-                    : 'border border-emerald-400/20 text-emerald-200/90'
-                }`}
-              >
-                <span className="rounded-full border border-current/30 px-2 py-0.5 text-[10px] font-semibold">
-                  {activePreset.tierLabel}
-                </span>
-                <span className="text-slate-300">{activePreset.note}</span>
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] pt-3">
-              <button
-                type="button"
-                disabled={aiProvider === 'off' || testingAi}
-                onClick={() => void handleTestAiConnection()}
-                className="lg-btn-glass px-3.5 py-2 text-xs font-medium text-white disabled:opacity-50"
-              >
-                {testingAi ? 'Testing Connection...' : 'Test Connection'}
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveSettings}
-                className="lg-btn-primary px-4 py-2 text-xs font-bold"
-              >
-                Save Preferences
-              </button>
-            </div>
-          </GlassSurface>
-        );
-      })()}
+      {activeSection === 'ai' && (
+        <AiCoachSettingsSection
+          settings={settings}
+          draft={draft}
+          setDraft={setDraft}
+          dirty={aiDirty}
+          notify={notify}
+          onSettingsChanged={onSettingsChanged}
+          onSave={handleSaveSettings}
+          onDiscard={discardAiDraft}
+        />
+      )}
 
       {activeSection === 'updates' && (
         <AboutUpdatesSection
@@ -1325,16 +891,42 @@ export function SettingsView({
         />
       )}
 
-      {statusMessage && (
-        <div className="lg-inset px-3.5 py-2 text-xs text-emerald-300">
-          {statusMessage}
-        </div>
-      )}
-      {errorMessage && (
-        <div className="lg-inset px-3.5 py-2 text-xs text-rose-300">
-          {errorMessage}
-        </div>
-      )}
+      <div className="space-y-2" aria-live="polite">
+        {messages}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-1">
+        {prevCat ? (
+          <button
+            type="button"
+            onClick={() => navigateTo(prevCat.id)}
+            className="m3-state flex items-center gap-3 rounded-[20px] bg-[var(--md-sys-color-surface-container-low)] px-4 py-3.5 text-left hover:bg-[var(--md-sys-color-surface-container)]"
+          >
+            <ChevronLeft aria-hidden className="h-5 w-5 flex-none text-[var(--md-sys-color-on-surface)]" />
+            <span className="min-w-0">
+              <span className="m3-body-s m3-muted block">Previous</span>
+              <span className="m3-title-s block truncate text-[var(--md-sys-color-on-surface)]">{prevCat.title}</span>
+            </span>
+          </button>
+        ) : (
+          <span />
+        )}
+        {nextCat ? (
+          <button
+            type="button"
+            onClick={() => navigateTo(nextCat.id)}
+            className="m3-state flex items-center justify-end gap-3 rounded-[20px] bg-[var(--md-sys-color-surface-container-low)] px-4 py-3.5 text-right hover:bg-[var(--md-sys-color-surface-container)]"
+          >
+            <span className="min-w-0">
+              <span className="m3-body-s m3-muted block">Next</span>
+              <span className="m3-title-s block truncate text-[var(--md-sys-color-on-surface)]">{nextCat.title}</span>
+            </span>
+            <ChevronRight aria-hidden className="h-5 w-5 flex-none text-[var(--md-sys-color-on-surface)]" />
+          </button>
+        ) : (
+          <span />
+        )}
+      </div>
     </div>
   );
 }

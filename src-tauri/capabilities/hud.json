@@ -5,9 +5,12 @@
   "windows": ["hud"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "allow-get-app-state",
     "allow-get-settings",
     "allow-set-overlay-mode",
+    "allow-set-hud-locked",
+    "allow-save-hud-position",
     "allow-get-active-patch-pack",
     "allow-get-cached-matches",
     "allow-get-personal-learning-snapshot"

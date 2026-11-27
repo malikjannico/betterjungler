@@ -1,6 +1,6 @@
 fn main() {
-    let attributes =
-        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
+    let attributes = tauri_build::Attributes::new()
+        .app_manifest(tauri_build::AppManifest::new().commands(&[
             "get_app_state",
             "set_overlay_mode",
             "get_settings",
@@ -22,6 +22,9 @@ fn main() {
             "generate_ai_debrief",
             "test_ai_connection",
             "update_overlay_preferences",
+            "set_hud_locked",
+            "save_hud_position",
+            "reset_hud_position",
             "get_lp_history",
             "check_riot_api_key_health",
             "get_app_meta",
@@ -44,6 +47,9 @@ fn main() {
             "inspect_replay_config",
             "set_replay_api_enabled",
             "seek_riot_replay",
-        ]));
+        ]))
+        .windows_attributes(
+            tauri_build::WindowsAttributes::new().window_icon_path("icons/icon.ico"),
+        );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }

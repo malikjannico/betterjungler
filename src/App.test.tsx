@@ -16,6 +16,8 @@ vi.mock('./services/ddragonService', () => ({
     `https://ddragon.leagueoflegends.com/cdn/16.23.1/img/champion/${key}.png`,
   getItemIconUrl: (id: number) =>
     `https://ddragon.leagueoflegends.com/cdn/16.23.1/img/item/${id}.png`,
+  getProfileIconUrl: (id: number) =>
+    `https://ddragon.leagueoflegends.com/cdn/16.23.1/img/profileicon/${id}.png`,
   getOfficialMapUrl: () => '/map11.png',
 }));
 
@@ -67,7 +69,7 @@ describe('BetterJungler App Integration', () => {
     fireEvent.change(screen.getByLabelText('Simulation scenario'), {
       target: { value: 'loading' },
     });
-    expect(screen.getByText(/Enemy win condition to deny/i)).toBeInTheDocument();
+    expect(screen.getByText(/Deny:/i)).toBeInTheDocument();
     const clearButtons = screen
       .getByRole('group', { name: 'Clear sequence' })
       .querySelectorAll('button');
@@ -88,13 +90,15 @@ describe('BetterJungler App Integration', () => {
       target: { value: 'in_game_mid' },
     });
     expect(screen.getByText(/Elemental Dragon/i)).toBeInTheDocument();
-    expect(screen.getByText(/Adaptive Item Build/i)).toBeInTheDocument();
+    expect(screen.getByText(/Adaptive Jungle Build/i)).toBeInTheDocument();
 
-    // Post-Game Review + Per-Game Subpages + synchronized seconds cursor + JSON export
+    // Post-Game Review + Stacked Match Cards -> Detail Subpage + synchronized seconds cursor + JSON export
     fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
+    const matchCards = screen.getByRole('list', { name: 'Match history' }).querySelectorAll('button');
+    expect(matchCards.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(matchCards[0]!);
     expect(screen.getByText(/What You Did Good/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Map & Timeline' }));
     const ghostBtn = screen.getByRole('button', { name: /Enemy Jungler Ghost/i });
     fireEvent.click(ghostBtn);
     expect(ghostBtn).toHaveAttribute('aria-pressed', 'true');
@@ -134,7 +138,7 @@ describe('BetterJungler App Integration', () => {
     expect(localStorage.getItem('betterjungler_nav_collapsed')).toBe('false');
 
     fireEvent.click(screen.getByRole('button', { name: /Climb & Goals/i }));
-    expect(screen.getByText(/Division Climb Ladder/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Climb & Goals', level: 2 })).toBeInTheDocument();
     const pinButtons = screen.getAllByRole('button', { name: /Pin Goal/i });
     fireEvent.click(pinButtons[0]!);
     await act(async () => {
@@ -145,6 +149,10 @@ describe('BetterJungler App Integration', () => {
       await Promise.resolve();
     });
     fireEvent.click(screen.getByRole('button', { name: /Post-Game Review/i }));
+    const matchCardAfterFocus = screen
+      .getByRole('list', { name: 'Match history' })
+      .querySelector('button');
+    fireEvent.click(matchCardAfterFocus!);
     expect(screen.getByText(/Focus (PASS|MISS)/i)).toBeInTheDocument();
   });
 
@@ -211,6 +219,7 @@ describe('BetterJungler App Integration', () => {
       expect(localStorage.getItem('betterjungler_last_seen_version')).toBe(pkg.version);
 
       fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Account & Riot API/ }));
       expect(screen.getByText(/Keyless LCU Mode active/i)).toBeInTheDocument();
 
       const riotIdInput = screen.getByLabelText(/Riot ID/i) as HTMLInputElement;
@@ -222,11 +231,13 @@ describe('BetterJungler App Integration', () => {
       expect(screen.getByText(/Riot API Proxy URL must use HTTPS/i)).toBeInTheDocument();
       fireEvent.change(proxyInput, { target: { value: '' } });
 
-      fireEvent.click(screen.getByRole('tab', { name: 'Overlay & HUD' }));
-      fireEvent.change(screen.getByLabelText('HUD Scale'), { target: { value: '125' } });
+      fireEvent.click(screen.getByRole('button', { name: /^Back to Settings/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Overlay & HUD/ }));
+      fireEvent.click(screen.getByRole('button', { name: '125%' }));
       expect(screen.getByLabelText('In-Game Minimap Side')).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('tab', { name: 'Updates & About' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Back to Settings/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Updates & About/ }));
       expect(screen.getByText(/About & Automatic Updates/i)).toBeInTheDocument();
       expect(screen.getByText(`v${pkg.version}`)).toBeInTheDocument();
       expect(screen.getByLabelText('Update Mode')).toBeInTheDocument();

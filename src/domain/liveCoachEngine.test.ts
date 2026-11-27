@@ -10,6 +10,7 @@ import {
   computePersonalizedLiveGuardrails,
   computeSmiteProgression,
   formatClock,
+  isSelfJungleInLiveGame,
   resolveSelfPlayer,
 } from './liveCoachEngine';
 import {
@@ -20,12 +21,23 @@ import {
 import { generateWinConditionPlan } from './winConditionEngine';
 
 describe('liveCoachEngine', () => {
-  it('computes deterministic Scuttle, Dragon, and Voidgrubs/Baron timers', () => {
-    const earlyObjs = computeObjectiveWindows(185, []);
+  it('computes deterministic Season 2026 Scuttle, Dragon, Voidgrubs, Herald, and Baron timers without Atakhan', () => {
+    const earlyObjs = computeObjectiveWindows(150, []);
     const scuttle = earlyObjs.find((o) => o.id === 'scuttle');
     expect(scuttle).toBeDefined();
     expect(scuttle?.secondsRemaining).toBe(25);
+    expect(scuttle?.nextSpawnFormatted).toBe('2:55');
     expect(scuttle?.status).toBe('prep_vision');
+
+    const grubsBeforeSpawn = earlyObjs.find((o) => o.id === 'voidgrubs');
+    expect(grubsBeforeSpawn?.nextSpawnFormatted).toBe('8:00');
+    expect(earlyObjs.some((o) => o.id === 'atakhan')).toBe(false);
+
+    // At 15:10 (910s), Rift Herald (15:00 - 19:45) should be LIVE
+    const heraldLiveObjs = computeObjectiveWindows(910, []);
+    const herald = heraldLiveObjs.find((o) => o.id === 'herald');
+    expect(herald?.status).toBe('live');
+    expect(herald?.nextSpawnFormatted).toBe('15:00');
 
     // Mid game fixture is at 19:24 (1164s), last DragonKill at 912s -> respawns at 1212s (48s away)
     const midObjs = computeObjectiveWindows(
@@ -35,6 +47,7 @@ describe('liveCoachEngine', () => {
     const dragon = midObjs.find((o) => o.id === 'dragon');
     expect(dragon?.secondsRemaining).toBe(48);
     expect(dragon?.status).toBe('prep_vision');
+    expect(midObjs.some((o) => o.id === 'atakhan')).toBe(false);
     expect(formatClock(1164)).toBe('19:24');
   });
 
@@ -116,12 +129,12 @@ describe('liveCoachEngine', () => {
 
     // 2-2 Dragon split stays Elemental Dragon (not Elder Dragon)
     const splitObjs = computeObjectiveWindows(
-      1490, // After 24:45 Herald despawn -> Baron + Dragon + Atakhan
+      1190, // After 19:45 Herald despawn -> Baron (20:00) + Dragon, never Atakhan
       [
         { EventID: 1, EventName: 'DragonKill', EventTime: 340, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
         { EventID: 2, EventName: 'DragonKill', EventTime: 650, KillerName: DEMO_IN_GAME_MID.allPlayers[1]!.summonerName },
         { EventID: 3, EventName: 'DragonKill', EventTime: 960, KillerName: DEMO_IN_GAME_MID.allPlayers[5]!.summonerName },
-        { EventID: 4, EventName: 'DragonKill', EventTime: 1270, KillerName: DEMO_IN_GAME_MID.allPlayers[5]!.summonerName },
+        { EventID: 4, EventName: 'DragonKill', EventTime: 1120, KillerName: DEMO_IN_GAME_MID.allPlayers[5]!.summonerName },
       ],
       DEMO_IN_GAME_MID.allPlayers
     );
@@ -129,7 +142,8 @@ describe('liveCoachEngine', () => {
     expect(dragon?.name).toBe('Elemental Dragon');
     expect(splitObjs.some((o) => o.id === 'herald')).toBe(false);
     expect(splitObjs.some((o) => o.id === 'baron')).toBe(true);
-    expect(splitObjs.some((o) => o.id === 'atakhan')).toBe(true);
+    expect(splitObjs.find((o) => o.id === 'baron')?.nextSpawnFormatted).toBe('20:00');
+    expect(splitObjs.some((o) => o.id === 'atakhan')).toBe(false);
 
     // 4-0 sweep claims Soul -> next Dragon is Elder with a 6:00 (360s) respawn timer
     const soulSweep = computeObjectiveWindows(
@@ -147,7 +161,7 @@ describe('liveCoachEngine', () => {
     expect(elder?.secondsRemaining).toBe(210); // 1250 + 360 - 1400
   });
 
-  it('tracks Base (600), Unleashed (900), and Primal (1200) Smite progression', () => {
+  it('tracks Base (600), Unleashed (1000), and Primal (1400) Smite progression', () => {
     const early = computeSmiteProgression(DEMO_IN_GAME_EARLY);
     expect(early.tierName).toBe('Base');
     expect(early.damage).toBe(600);
@@ -155,12 +169,48 @@ describe('liveCoachEngine', () => {
 
     const mid = computeSmiteProgression(DEMO_IN_GAME_MID);
     expect(['Unleashed', 'Primal']).toContain(mid.tierName);
-    expect(mid.damage).toBeGreaterThanOrEqual(900);
+    expect(mid.damage).toBeGreaterThanOrEqual(1000);
 
     const full = computeSmiteProgression(DEMO_IN_GAME_FULL_BUILD);
     expect(full.tierName).toBe('Primal');
-    expect(full.damage).toBe(1200);
+    expect(full.damage).toBe(1400);
     expect(full.estimatedStacksRemaining).toBe(0);
+  });
+
+  it('detects off-role players vs active junglers accurately even after role swaps', () => {
+    const offRoleAdc = {
+      ...DEMO_IN_GAME_MID,
+      allPlayers: DEMO_IN_GAME_MID.allPlayers.map((p) =>
+        p.summonerName === DEMO_IN_GAME_MID.activePlayer.summonerName
+          ? {
+              ...p,
+              championName: 'Jinx',
+              position: 'BOTTOM',
+              summonerSpells: {
+                summonerSpellOne: { displayName: 'Heal' },
+                summonerSpellTwo: { displayName: 'Flash' },
+              },
+            }
+          : p
+      ),
+    };
+    expect(isSelfJungleInLiveGame(offRoleAdc)).toBe(false);
+
+    const swappedJungle = {
+      ...offRoleAdc,
+      allPlayers: offRoleAdc.allPlayers.map((p) =>
+        p.summonerName === DEMO_IN_GAME_MID.activePlayer.summonerName
+          ? {
+              ...p,
+              summonerSpells: {
+                summonerSpellOne: { displayName: 'Smite' },
+                summonerSpellTwo: { displayName: 'Flash' },
+              },
+            }
+          : p
+      ),
+    };
+    expect(isSelfJungleInLiveGame(swappedJungle)).toBe(true);
   });
 
   it('applies hot-swapped ObjectiveTimingsConfig cleanly without rebuild', () => {

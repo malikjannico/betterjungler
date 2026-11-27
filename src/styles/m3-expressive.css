@@ -1,0 +1,1041 @@
+/*
+ * BetterJungler · Material Design 3 Expressive foundation (dark scheme).
+ *
+ * Imported ONLY by the main desktop window (src/main.tsx). The HUD window
+ * (src/hudMain.tsx) never loads this file, so HUD styling stays isolated in
+ * globals.css.
+ *
+ * Layering: re-declare Tailwind v4's cascade layer order so this file is safe
+ * regardless of import order. Tokens are plain custom properties; every M3
+ * class lives in `@layer components`, which means Tailwind utilities
+ * (`@layer utilities`) can always override padding / radius / colors.
+ */
+@layer theme, base, components, utilities;
+
+/* ------------------------------------------------------------------ */
+/* Tokens                                                             */
+/* ------------------------------------------------------------------ */
+:root,
+.m3-shell {
+  /* Surface hierarchy */
+  --md-sys-color-surface: #111318;
+  --md-sys-color-surface-dim: #111318;
+  --md-sys-color-surface-container-lowest: #0c0e13;
+  --md-sys-color-surface-container-low: #191c20;
+  --md-sys-color-surface-container: #1d2026;
+  --md-sys-color-surface-container-high: #282a31;
+  --md-sys-color-surface-container-highest: #33353a;
+  --md-sys-color-surface-bright: #37393e;
+  --md-sys-color-on-surface: #e2e2e9;
+  --md-sys-color-on-surface-variant: #c4c6d0;
+  --md-sys-color-outline: #8e9099;
+  --md-sys-color-outline-variant: #44474e;
+  --md-sys-color-inverse-surface: #e2e2e9;
+  --md-sys-color-inverse-on-surface: #2e3036;
+  --md-sys-color-inverse-primary: #415f91;
+  --md-sys-color-scrim: #000000;
+
+  /* Primary / Secondary / Tertiary */
+  --md-sys-color-primary: #aac7ff;
+  --md-sys-color-on-primary: #0a305f;
+  --md-sys-color-primary-container: #284777;
+  --md-sys-color-on-primary-container: #d6e3ff;
+  --md-sys-color-secondary: #bec6dc;
+  --md-sys-color-on-secondary: #283141;
+  --md-sys-color-secondary-container: #3e4759;
+  --md-sys-color-on-secondary-container: #dae2f9;
+  --md-sys-color-tertiary: #ddbce0;
+  --md-sys-color-on-tertiary: #3f2844;
+  --md-sys-color-tertiary-container: #573e5c;
+  --md-sys-color-on-tertiary-container: #fad8fd;
+
+  /* Error */
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000a;
+  --md-sys-color-on-error-container: #ffdad6;
+
+  /* Custom harmonized semantic roles */
+  --md-ext-success: #8fd8a0;
+  --md-ext-on-success: #00391b;
+  --md-ext-success-container: #1e5130;
+  --md-ext-on-success-container: #abf5bc;
+  --md-ext-warning: #f3c06b;
+  --md-ext-on-warning: #432c00;
+  --md-ext-warning-container: #5c4200;
+  --md-ext-on-warning-container: #ffdea6;
+
+  /* Shape scale */
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-large-increased: 20px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 9999px;
+
+  /* Layout */
+  --topbar-h: 48px;
+  --topbar-action-h: 32px;
+  --m3-rail-collapsed: 76px;
+  --m3-rail-expanded: 224px;
+
+  /* State layers */
+  --md-sys-state-hover: 0.08;
+  --md-sys-state-focus: 0.1;
+  --md-sys-state-pressed: 0.12;
+
+  /* Motion (expressive springs approximated as cubic-béziers) */
+  --md-sys-motion-spring-spatial: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --md-sys-motion-spring-spatial-dur: 500ms;
+  --md-sys-motion-spring-fast-dur: 350ms;
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-sys-motion-effects-dur: 200ms;
+
+  /* Typography */
+  --md-ref-typeface-brand: 'Roboto Flex Variable', 'Inter Variable', system-ui, sans-serif;
+  --md-ref-typeface-plain: 'Roboto Flex Variable', 'Inter Variable', system-ui, sans-serif;
+}
+
+/* ------------------------------------------------------------------ */
+/* Components                                                         */
+/* ------------------------------------------------------------------ */
+@layer components {
+  /* Shell root: opt-in, so existing .mat-* views keep their look. */
+  .m3-shell {
+    background: var(--md-sys-color-surface);
+    color: var(--md-sys-color-on-surface);
+    font-family: var(--md-ref-typeface-plain);
+    letter-spacing: normal;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- Type scale ---------- */
+  .m3-display {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 45px;
+    line-height: 52px;
+    font-weight: 800;
+    letter-spacing: -0.25px;
+    font-variation-settings: 'opsz' 45;
+  }
+  .m3-headline-l {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 32px;
+    line-height: 40px;
+    font-weight: 700;
+    font-variation-settings: 'opsz' 32;
+  }
+  .m3-headline-s {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 24px;
+    line-height: 32px;
+    font-weight: 650;
+    font-variation-settings: 'opsz' 24;
+  }
+  .m3-title-l {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 650;
+    font-variation-settings: 'opsz' 20;
+  }
+  .m3-title-m {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    letter-spacing: 0.15px;
+  }
+  .m3-title-s {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+  }
+  .m3-label-l {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+  }
+  .m3-label-m {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+  .m3-body-m {
+    font-family: var(--md-ref-typeface-plain);
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .m3-body-s {
+    font-family: var(--md-ref-typeface-plain);
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.2px;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+  .m3-muted {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .m3-faint {
+    color: var(--md-sys-color-outline);
+  }
+
+  /* ---------- State layer ---------- */
+  .m3-state {
+    position: relative;
+    isolation: isolate;
+  }
+  .m3-state::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--md-sys-motion-effects-dur) var(--md-sys-motion-easing-standard);
+  }
+  .m3-state:hover::before {
+    opacity: var(--md-sys-state-hover);
+  }
+  .m3-state:focus-visible::before {
+    opacity: var(--md-sys-state-focus);
+  }
+  .m3-state:active::before {
+    opacity: var(--md-sys-state-pressed);
+  }
+  .m3-state:disabled::before,
+  .m3-state[aria-disabled='true']::before {
+    opacity: 0;
+  }
+
+  .m3-focus-ring:focus-visible,
+  .m3-state:focus-visible {
+    outline: 3px solid var(--md-sys-color-secondary);
+    outline-offset: 2px;
+  }
+
+  /* Expressive spring helpers */
+  .m3-spring {
+    transition:
+      border-radius var(--md-sys-motion-spring-fast-dur) var(--md-sys-motion-spring-spatial),
+      transform var(--md-sys-motion-spring-fast-dur) var(--md-sys-motion-spring-spatial),
+      background-color var(--md-sys-motion-effects-dur) var(--md-sys-motion-easing-standard),
+      color var(--md-sys-motion-effects-dur) var(--md-sys-motion-easing-standard),
+      box-shadow var(--md-sys-motion-effects-dur) var(--md-sys-motion-easing-standard);
+  }
+  .m3-view-enter {
+    animation: m3ViewIn 360ms var(--md-sys-motion-easing-emphasized-decelerate) both;
+  }
+
+  /* ---------- Cards ---------- */
+  .m3-card {
+    position: relative;
+    min-width: 0;
+    color: var(--md-sys-color-on-surface);
+  }
+  .m3-card--hero {
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    padding: 24px;
+  }
+  .m3-card--module {
+    background: var(--md-sys-color-surface-container-high);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: 16px;
+  }
+  .m3-card--tonal {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    padding: 24px;
+  }
+  .m3-card--outlined {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: 16px;
+  }
+  .m3-card--lowest {
+    background: var(--md-sys-color-surface-container-lowest);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: 16px;
+  }
+  .m3-card--interactive {
+    cursor: pointer;
+    transition:
+      transform 400ms var(--md-sys-motion-spring-spatial),
+      background-color var(--md-sys-motion-effects-dur) var(--md-sys-motion-easing-standard),
+      border-radius var(--md-sys-motion-spring-fast-dur) var(--md-sys-motion-spring-spatial);
+  }
+  .m3-card--interactive:hover {
+    transform: translateY(-2px);
+  }
+  .m3-card--interactive:active {
+    transform: scale(0.99);
+  }
+
+  /* ---------- Chips ---------- */
+  .m3-chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    white-space: nowrap;
+    border-radius: var(--md-sys-shape-corner-full);
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 13px;
+    line-height: 20px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    color: var(--md-sys-color-on-surface-variant);
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--md-sys-color-outline-variant);
+    transition:
+      background-color var(--md-sys-motion-effects-dur),
+      color var(--md-sys-motion-effects-dur),
+      box-shadow var(--md-sys-motion-effects-dur);
+  }
+  .m3-chip--sm {
+    height: 24px;
+    padding: 0 10px;
+    gap: 4px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .m3-chip > svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+  }
+  .m3-chip--sm > svg {
+    width: 14px;
+    height: 14px;
+  }
+  .m3-chip--plain {
+    background: var(--md-sys-color-surface-container-high);
+    box-shadow: none;
+  }
+  .m3-chip--primary {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    box-shadow: none;
+  }
+  .m3-chip--success {
+    background: var(--md-ext-success-container);
+    color: var(--md-ext-on-success-container);
+    box-shadow: none;
+  }
+  .m3-chip--warning {
+    background: var(--md-ext-warning-container);
+    color: var(--md-ext-on-warning-container);
+    box-shadow: none;
+  }
+  .m3-chip--error {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+    box-shadow: none;
+  }
+  .m3-chip--tertiary {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+    box-shadow: none;
+  }
+
+  /* ---------- Buttons ---------- */
+  .m3-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 24px;
+    white-space: nowrap;
+    border-radius: var(--md-sys-shape-corner-full);
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      border-radius var(--md-sys-motion-spring-fast-dur) var(--md-sys-motion-spring-spatial),
+      transform 300ms var(--md-sys-motion-spring-spatial),
+      background-color var(--md-sys-motion-effects-dur),
+      color var(--md-sys-motion-effects-dur);
+  }
+  .m3-btn > svg {
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+  .m3-btn:active:not(:disabled) {
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+  .m3-btn--sm {
+    height: 32px;
+    padding: 0 14px;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .m3-btn--sm > svg {
+    width: 16px;
+    height: 16px;
+  }
+  .m3-btn--filled {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+  }
+  .m3-btn--tonal {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  .m3-btn--outlined {
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    box-shadow: inset 0 0 0 1px var(--md-sys-color-outline-variant);
+  }
+  .m3-btn--text {
+    background: transparent;
+    color: var(--md-sys-color-primary);
+    padding: 0 12px;
+  }
+  .m3-btn--sm.m3-btn--text {
+    padding: 0 10px;
+  }
+  .m3-btn:disabled {
+    background: rgba(226, 226, 233, 0.12);
+    color: rgba(226, 226, 233, 0.38);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+  .m3-btn--text:disabled {
+    background: transparent;
+  }
+
+  /* Icon button (window controls, rail toggle) */
+  .m3-icon-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
+    transition: border-radius var(--md-sys-motion-spring-fast-dur) var(--md-sys-motion-spring-spatial),
+      color var(--md-sys-motion-effects-dur);
+  }
+  .m3-icon-btn > svg {
+    width: 16px;
+    height: 16px;
+  }
+  .m3-icon-btn:active {
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+  .m3-icon-btn:hover {
+    color: var(--md-sys-color-on-surface);
+  }
+  .m3-icon-btn--danger:hover {
+    color: var(--md-sys-color-error);
+  }
+
+  /* ---------- Connected segmented button group ---------- */
+  .m3-seg {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 2px;
+  }
+  .m3-seg__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 16px;
+    white-space: nowrap;
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface);
+    border-radius: var(--md-sys-shape-corner-small);
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      border-radius var(--md-sys-motion-spring-fast-dur) var(--md-sys-motion-spring-spatial),
+      background-color var(--md-sys-motion-effects-dur),
+      color var(--md-sys-motion-effects-dur);
+  }
+  .m3-seg__btn > svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+  }
+  .m3-seg__btn:first-child {
+    border-top-left-radius: var(--md-sys-shape-corner-full);
+    border-bottom-left-radius: var(--md-sys-shape-corner-full);
+  }
+  .m3-seg__btn:last-child {
+    border-top-right-radius: var(--md-sys-shape-corner-full);
+    border-bottom-right-radius: var(--md-sys-shape-corner-full);
+  }
+  .m3-seg__btn:active:not(:disabled) {
+    border-radius: var(--md-sys-shape-corner-extra-small);
+  }
+  .m3-seg__btn[aria-pressed='true'] {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+  .m3-seg__btn:disabled {
+    color: rgba(226, 226, 233, 0.38);
+    cursor: not-allowed;
+  }
+  .m3-seg--sm .m3-seg__btn {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+  .m3-seg--full {
+    display: flex;
+  }
+  .m3-seg--full .m3-seg__btn {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .m3-seg__badge {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .m3-seg__btn[aria-pressed='true'] .m3-seg__badge {
+    background: var(--md-sys-color-on-primary);
+    color: var(--md-sys-color-primary);
+  }
+
+  /* ---------- List item (stacked card / master-detail row) ---------- */
+  .m3-list-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    min-width: 0;
+    padding: 12px 16px 12px 12px;
+    text-align: left;
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container-low);
+    border-radius: var(--md-sys-shape-corner-large);
+    transition:
+      border-radius 400ms var(--md-sys-motion-spring-spatial),
+      background-color var(--md-sys-motion-effects-dur),
+      transform 400ms var(--md-sys-motion-spring-spatial);
+  }
+  .m3-list-item--interactive {
+    cursor: pointer;
+  }
+  .m3-list-item--interactive:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .m3-list-item--interactive:active {
+    transform: scale(0.985);
+  }
+  .m3-list-item--selected,
+  .m3-list-item--selected:hover {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    border-radius: var(--md-sys-shape-corner-extra-large);
+  }
+  .m3-list-item:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .m3-list-item__leading {
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .m3-list-item__body {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .m3-list-item__title {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .m3-list-item__desc {
+    color: var(--md-sys-color-on-surface-variant);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .m3-list-item--selected .m3-list-item__desc {
+    color: inherit;
+    opacity: 0.82;
+  }
+  .m3-list-item__meta {
+    flex: none;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .m3-list-item--selected .m3-list-item__meta {
+    color: inherit;
+  }
+  .m3-list-item__trailing {
+    display: flex;
+    align-items: center;
+    flex: none;
+  }
+
+  /* ---------- Unified 32px top-bar pill ---------- */
+  .m3-topbar-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: var(--topbar-action-h);
+    max-width: 100%;
+    padding: 0 12px;
+    flex: none;
+    white-space: nowrap;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface);
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    transition:
+      border-radius var(--md-sys-motion-spring-fast-dur) var(--md-sys-motion-spring-spatial),
+      background-color var(--md-sys-motion-effects-dur),
+      color var(--md-sys-motion-effects-dur);
+  }
+  .m3-topbar-pill--leading-media {
+    padding-left: 4px;
+  }
+  .m3-topbar-pill > svg {
+    width: 14px;
+    height: 14px;
+    flex: none;
+  }
+  button.m3-topbar-pill {
+    cursor: pointer;
+  }
+  button.m3-topbar-pill:active {
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+  .m3-topbar-pill--primary {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+  .m3-topbar-pill--success {
+    background: var(--md-ext-success-container);
+    color: var(--md-ext-on-success-container);
+  }
+  .m3-topbar-pill--warning {
+    background: var(--md-ext-warning-container);
+    color: var(--md-ext-on-warning-container);
+  }
+  .m3-topbar-pill--error {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+  .m3-topbar-pill--selected {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  .m3-topbar-pill__leading {
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .m3-topbar-pill__divider {
+    width: 1px;
+    height: 16px;
+    flex: none;
+    background: var(--md-sys-color-outline-variant);
+  }
+  .m3-topbar-pill kbd {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--md-sys-color-outline);
+  }
+  .m3-topbar-pill--selected kbd {
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .m3-avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+    font-family: var(--md-ref-typeface-brand);
+    font-weight: 800;
+    text-transform: uppercase;
+    object-fit: cover;
+  }
+
+  /* ---------- Status dots ---------- */
+  .m3-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--md-sys-color-outline-variant);
+  }
+  .m3-dot--on {
+    background: var(--md-ext-success);
+  }
+  .m3-dot--pulse {
+    animation: m3Pulse 2.4s infinite;
+  }
+  .m3-dot--rec {
+    background: var(--md-sys-color-error);
+    animation: m3Blink 1.2s steps(2, jump-none) infinite;
+  }
+  .m3-dot--warning {
+    background: var(--md-ext-warning);
+  }
+  .m3-dot--primary {
+    background: var(--md-sys-color-primary);
+  }
+
+  /* ---------- Navigation rail ---------- */
+  .m3-rail {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: var(--m3-rail-collapsed);
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    padding: 12px 0;
+    background: var(--md-sys-color-surface);
+    color: var(--md-sys-color-on-surface-variant);
+    transition: width var(--md-sys-motion-spring-spatial-dur) var(--md-sys-motion-spring-spatial);
+  }
+  .m3-rail[data-expanded='true'] {
+    width: var(--m3-rail-expanded);
+  }
+  .m3-rail__head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 0 10px;
+    margin-bottom: 20px;
+  }
+  .m3-rail[data-expanded='true'] .m3-rail__head {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px 0 16px;
+  }
+  .m3-rail__brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .m3-rail__section {
+    padding: 8px 24px 4px;
+    color: var(--md-sys-color-on-surface-variant);
+    white-space: nowrap;
+  }
+  .m3-rail__dests {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .m3-rail__dest {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+    height: 60px;
+    padding: 0 10px;
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
+    background: transparent;
+  }
+  .m3-rail__ind {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 56px;
+    height: 32px;
+    border-radius: var(--md-sys-shape-corner-full);
+    transition:
+      width var(--md-sys-motion-spring-spatial-dur) var(--md-sys-motion-spring-spatial),
+      height var(--md-sys-motion-spring-spatial-dur) var(--md-sys-motion-spring-spatial),
+      padding 300ms var(--md-sys-motion-easing-standard),
+      background-color var(--md-sys-motion-effects-dur) var(--md-sys-motion-easing-standard);
+  }
+  .m3-rail__ind::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity var(--md-sys-motion-effects-dur);
+  }
+  .m3-rail__dest:hover .m3-rail__ind::before {
+    opacity: var(--md-sys-state-hover);
+  }
+  .m3-rail__dest:focus-visible {
+    outline: none;
+  }
+  .m3-rail__dest:focus-visible .m3-rail__ind {
+    outline: 3px solid var(--md-sys-color-secondary);
+    outline-offset: 2px;
+  }
+  .m3-rail__dest:focus-visible .m3-rail__ind::before {
+    opacity: var(--md-sys-state-focus);
+  }
+  .m3-rail__dest:active .m3-rail__ind::before {
+    opacity: var(--md-sys-state-pressed);
+  }
+  .m3-rail__ind > svg {
+    width: 20px;
+    height: 20px;
+    flex: none;
+  }
+  .m3-rail__ind-label {
+    display: none;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .m3-rail__dest-label {
+    font-family: var(--md-ref-typeface-brand);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .m3-rail__live {
+    position: absolute;
+    top: 3px;
+    right: 9px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--md-ext-success);
+    box-shadow: 0 0 0 2px var(--md-sys-color-surface);
+  }
+  .m3-rail__dest[aria-current='page'] .m3-rail__ind {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  .m3-rail__dest[aria-current='page'] .m3-rail__ind > svg {
+    animation: m3IconPop 450ms var(--md-sys-motion-spring-spatial);
+  }
+  .m3-rail__dest[aria-current='page'] .m3-rail__dest-label {
+    color: var(--md-sys-color-secondary);
+    font-weight: 700;
+  }
+  .m3-rail[data-expanded='true'] .m3-rail__dest {
+    height: 48px;
+    padding: 0 12px;
+    align-items: stretch;
+  }
+  .m3-rail[data-expanded='true'] .m3-rail__ind {
+    width: 100%;
+    height: 48px;
+    justify-content: flex-start;
+    padding: 0 16px;
+  }
+  .m3-rail[data-expanded='true'] .m3-rail__ind-label {
+    display: block;
+    flex: 1 1 auto;
+    text-align: left;
+  }
+  .m3-rail[data-expanded='true'] .m3-rail__dest-label {
+    display: none;
+  }
+  .m3-rail[data-expanded='true'] .m3-rail__live {
+    position: static;
+    box-shadow: none;
+    flex: none;
+  }
+  .m3-rail__bottom {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .m3-rail__status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 10px 0;
+    padding: 12px 0 4px;
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .m3-rail[data-expanded='true'] .m3-rail__status {
+    align-items: stretch;
+    gap: 6px;
+    margin: 4px 12px 0;
+    padding: 12px 8px 4px;
+  }
+  .m3-rail__status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  /* ---------- Top app bar ---------- */
+  .m3-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: var(--topbar-h);
+    min-width: 0;
+    flex: none;
+    padding: 0 8px 0 20px;
+    background: var(--md-sys-color-surface);
+    color: var(--md-sys-color-on-surface);
+    user-select: none;
+  }
+  .m3-topbar__title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+    pointer-events: none;
+  }
+  .m3-topbar__actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+  }
+  .m3-topbar__window {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 4px;
+    padding-left: 6px;
+    border-left: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  /* Subtle M3 skin for the legacy GlassSurface plain plate */
+  .m3-surface-low {
+    background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 82%, transparent);
+    border-radius: var(--md-sys-shape-corner-large);
+    border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+  }
+}
+
+@keyframes m3ViewIn {
+  from {
+    opacity: 0.35;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes m3IconPop {
+  0% {
+    transform: scale(0.7);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes m3Pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(143, 216, 160, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(143, 216, 160, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(143, 216, 160, 0);
+  }
+}
+
+@keyframes m3Blink {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m3-state::before,
+  .m3-spring,
+  .m3-card--interactive,
+  .m3-btn,
+  .m3-icon-btn,
+  .m3-seg__btn,
+  .m3-list-item,
+  .m3-topbar-pill,
+  .m3-rail,
+  .m3-rail__ind,
+  .m3-rail__ind::before {
+    transition: none;
+  }
+  .m3-view-enter,
+  .m3-dot--pulse,
+  .m3-dot--rec,
+  .m3-rail__dest[aria-current='page'] .m3-rail__ind > svg {
+    animation: none;
+  }
+  .m3-card--interactive:hover,
+  .m3-card--interactive:active,
+  .m3-list-item--interactive:active {
+    transform: none;
+  }
+}

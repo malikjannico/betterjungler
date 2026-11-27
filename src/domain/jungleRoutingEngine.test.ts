@@ -53,10 +53,10 @@ describe('jungleRoutingEngine', () => {
     ]);
     expect(threeCampRoutes[1]?.id).toContain('cleanup');
 
-    // Early game (< 3:55) -> Clear 1
+    // Early game (< 3:20) -> Clear 1
     expect(selectLiveActiveRoute(120, [], fullClearRoutes).stage).toBe('clear_1');
-    // Second clear window (4:15 = 255s) -> Clear 2
-    expect(selectLiveActiveRoute(255, [], fullClearRoutes).stage).toBe('clear_2');
+    // Second clear window (4:05 = 245s) -> Clear 2
+    expect(selectLiveActiveRoute(245, [], fullClearRoutes).stage).toBe('clear_2');
     // Mid-early (8:00 = 480s) with Dragon next -> Dragon Objective Sync
     const objs = computeObjectiveWindows(480, []);
     const c3 = selectLiveActiveRoute(480, objs, fullClearRoutes);

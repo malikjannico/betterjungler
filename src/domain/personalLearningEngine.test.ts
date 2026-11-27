@@ -137,7 +137,7 @@ describe('personalLearningEngine', () => {
       playedAt: new Date(Date.UTC(2026, 10, 27, idx, 0, 0)).toISOString(),
       events: [
         { type: 'CHAMPION_KILL' as const, timestampSec: 210, victimId: 2, position: { x: 4000, y: 4000 } },
-        { type: 'CHAMPION_KILL' as const, timestampSec: 460, victimId: 2, position: { x: 5000, y: 5000 } },
+        { type: 'CHAMPION_KILL' as const, timestampSec: 390, victimId: 2, position: { x: 5000, y: 5000 } },
       ],
     }));
     const earlySnapshot = computePersonalLearningSnapshot(

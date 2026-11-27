@@ -11,7 +11,7 @@ import type {
 import type { MatchSummaryRecord, MatchV5Detail } from '../types/riot';
 
 const RIOT_MAP_MAX = 14870;
-const KEY_SPAWN_SECONDS = [300, 360, 840, 1500];
+const KEY_SPAWN_SECONDS = [175, 300, 480, 900, 1200];
 
 export function isJungleMatch(match: { role?: string | null }): boolean {
   const normalized = (match.role ?? '').trim().toUpperCase();
@@ -432,7 +432,7 @@ export function analyzePostGameMatch(
       severity: 'action',
       title: 'Check Lane Priority Before River Contests',
       detail:
-        'Never contest 3:30 Scuttle or early invades if both adjacent lanes are pushed under their own turrets.',
+        'Never contest 2:55 Scuttle or early invades if both adjacent lanes are pushed under their own turrets.',
     });
   }
 

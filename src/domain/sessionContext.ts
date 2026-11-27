@@ -1,3 +1,12 @@
+import {
+  findAdcChampionById,
+  findAdcChampionByName,
+} from '../data/adcKnowledgePack';
+import { generateAdcGamePlan } from './adc/adcGamePlanEngine';
+import { isAdcMatch } from './adc/adcKpis';
+import { computeAdcAdaptiveBuild, computeAdcMacroGuidance } from './adc/adcLiveEngine';
+import type { AdcPersonalLearningSnapshot } from './adc/adcReviewTypes';
+import type { AdcWinConditionPlan } from './adc/types';
 import { formatChampionName } from './championNames';
 import {
   findChampionIdByName,
@@ -8,6 +17,7 @@ import {
   computeAdaptiveBuild,
   computeMacroGuidance,
   computeObjectiveWindows,
+  isSelfJungleInLiveGame,
   resolveSelfPlayer,
 } from './liveCoachEngine';
 import {
@@ -21,6 +31,7 @@ import {
   isJungleMatch,
   toMatchSummaryRecord,
 } from './postGameReviewEngine';
+import { normalizePlayedRole, type CoachedRole } from './roles/types';
 import { getDemoRuntimeState } from './simulationFixtures';
 import { generateWinConditionPlan } from './winConditionEngine';
 import type {
@@ -67,18 +78,26 @@ export type Gate<T> =
       progress?: { locked: number; total: number };
     };
 
+export type LivePlayedRole = 'jungle' | 'bottom' | 'off_role';
+export type RoleResolutionSource = 'manual' | 'lcu' | 'spell_heuristic' | 'settings' | 'default';
+
 export interface WinPlanPayload {
+  role?: CoachedRole;
   plan: WinConditionPlan;
+  adcPlan?: AdcWinConditionPlan | null;
   mapSide: MapSide;
   championName: string;
 }
 
 export interface LiveCoachPayload {
   liveData: LiveGameData;
+  playedRole: LivePlayedRole;
+  isJungleRole: boolean;
   objectives: ObjectiveWindow[];
   buildPlan: AdaptiveBuildPlan | null;
   macroCues: MacroCue[];
   winPlan: WinConditionPlan | null;
+  adcWinPlan?: AdcWinConditionPlan | null;
   mapSide: MapSide;
 }
 
@@ -94,7 +113,9 @@ export interface ClimbStatus {
   profile: SummonerProfileSummary | null;
   matches: MatchV5Detail[];
   jungleMatches: MatchV5Detail[];
+  adcMatches: MatchV5Detail[];
   offRoleExcludedCount: number;
+  adcOffRoleExcludedCount: number;
   summaries: MatchSummaryRecord[];
   lpHistory: LpHistoryPoint[];
   highEloMeta: HighEloMetaSnapshot | null;
@@ -103,6 +124,9 @@ export interface ClimbStatus {
 export interface SessionContext {
   source: DataSourceKind;
   simulationLabel: string | null;
+  activeRole: CoachedRole;
+  roleSource: RoleResolutionSource;
+  livePlayedRole: LivePlayedRole;
   runtimeState: AppRuntimeState;
   resolvedMapSide: MapSide | null;
   playerChampionName: string | null;
@@ -116,7 +140,9 @@ export interface SessionContext {
 export interface DeriveSessionContextInput {
   demoScenario: DemoScenarioId;
   liveState: AppRuntimeState | null;
-  settings: Pick<UserSettings, 'hasApiKey' | 'riotApiProxyUrl' | 'riotId' | 'targetDivision'>;
+  manualRole?: CoachedRole | null;
+  settings: Pick<UserSettings, 'hasApiKey' | 'riotApiProxyUrl' | 'riotId' | 'targetDivision'> &
+    Partial<Pick<UserSettings, 'primaryRole' | 'secondaryRole' | 'autoDetectRole'>>;
   summonerProfile: SummonerProfileSummary | null;
   matches: MatchV5Detail[];
   lpHistory: LpHistoryPoint[];
@@ -124,6 +150,51 @@ export interface DeriveSessionContextInput {
   interpolatedGameTime?: number;
   objectiveTimings?: ObjectiveTimingsConfig;
   personalLearning?: PersonalLearningSnapshot | null;
+  adcPersonalLearning?: AdcPersonalLearningSnapshot | null;
+}
+
+const ADC_LIVE_SPELL_RE = /heal|barrier|cleanse|boost/i;
+const ADC_LCU_SPELL_IDS = new Set([1, 7, 21]);
+
+function hasAdcSpellInLivePlayer(player: NonNullable<ReturnType<typeof resolveSelfPlayer>>): boolean {
+  const s1 = `${player.summonerSpells?.summonerSpellOne?.displayName ?? ''} ${player.summonerSpells?.summonerSpellOne?.rawDisplayName ?? ''}`;
+  const s2 = `${player.summonerSpells?.summonerSpellTwo?.displayName ?? ''} ${player.summonerSpells?.summonerSpellTwo?.rawDisplayName ?? ''}`;
+  return ADC_LIVE_SPELL_RE.test(s1) || ADC_LIVE_SPELL_RE.test(s2);
+}
+
+/**
+ * Classifies the local player's active in-game role without bleeding Jungle items/cues into ADC
+ * or ADC items/cues into Top/Mid/Support.
+ */
+export function detectLivePlayedRole(
+  liveGame: LiveGameData,
+  champSelect?: LcuChampSelectSession | null
+): LivePlayedRole {
+  if (isSelfJungleInLiveGame(liveGame, champSelect)) {
+    return 'jungle';
+  }
+  const self = resolveSelfPlayer(liveGame);
+  const localSlot = champSelect?.myTeam.find((s) => s.isLocalPlayer);
+  const normalizedPos = normalizePlayedRole(self?.position);
+  if (normalizedPos === 'bottom') {
+    return 'bottom';
+  }
+  if (normalizedPos === 'top' || normalizedPos === 'middle' || normalizedPos === 'utility') {
+    return 'off_role';
+  }
+  if (localSlot && localSlot.assignedPosition !== 'unknown') {
+    return localSlot.assignedPosition === 'bottom' ? 'bottom' : 'off_role';
+  }
+  const hasAdcSpell =
+    (self ? hasAdcSpellInLivePlayer(self) : false) ||
+    (localSlot
+      ? ADC_LCU_SPELL_IDS.has(localSlot.spell1Id) || ADC_LCU_SPELL_IDS.has(localSlot.spell2Id)
+      : false);
+  const isKnownAdcChamp = Boolean(self && findAdcChampionByName(self.championName));
+  if (hasAdcSpell && isKnownAdcChamp) {
+    return 'bottom';
+  }
+  return 'off_role';
 }
 
 const SIMULATION_LABELS: Record<Exclude<DemoScenarioId, 'idle'>, string> = {
@@ -261,10 +332,46 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
     resolvedMapSide = liveSelf.team === 'CHAOS' ? 'red' : 'blue';
   }
 
+  const localCsSlot = cs?.myTeam.find((s) => s.isLocalPlayer);
+  const autoDetectRole = input.settings.autoDetectRole !== false;
+  const detectedLiveRole: LivePlayedRole | null = liveGame
+    ? detectLivePlayedRole(liveGame, cs)
+    : null;
+
+  let activeRole: CoachedRole = input.settings.primaryRole ?? 'jungle';
+  let roleSource: RoleResolutionSource = input.settings.primaryRole ? 'settings' : 'default';
+
+  if (input.manualRole) {
+    activeRole = input.manualRole;
+    roleSource = 'manual';
+  } else if (autoDetectRole) {
+    if (localCsSlot?.assignedPosition === 'jungle' || localCsSlot?.assignedPosition === 'bottom') {
+      activeRole = localCsSlot.assignedPosition;
+      roleSource = 'lcu';
+    } else if (localCsSlot && (localCsSlot.spell1Id === 11 || localCsSlot.spell2Id === 11)) {
+      activeRole = 'jungle';
+      roleSource = 'spell_heuristic';
+    } else if (
+      localCsSlot &&
+      localCsSlot.championId > 0 &&
+      (ADC_LCU_SPELL_IDS.has(localCsSlot.spell1Id) || ADC_LCU_SPELL_IDS.has(localCsSlot.spell2Id)) &&
+      Boolean(findAdcChampionById(localCsSlot.championId))
+    ) {
+      activeRole = 'bottom';
+      roleSource = 'spell_heuristic';
+    } else if (detectedLiveRole === 'jungle' || detectedLiveRole === 'bottom') {
+      activeRole = detectedLiveRole;
+      roleSource = normalizePlayedRole(liveSelf?.position) ? 'lcu' : 'spell_heuristic';
+    }
+  }
+
   let playerChampionName: string | null = null;
   let playerChampionId: number | null = null;
   if (liveSelf) {
-    playerChampionId = findChampionIdByName(liveSelf.championName) ?? null;
+    playerChampionId =
+      findChampionIdByName(liveSelf.championName) ??
+      findAdcChampionByName(liveSelf.championName)?.championId ??
+      null;
     playerChampionName = formatChampionName(liveSelf.championName, playerChampionId ?? undefined);
   }
   if (cs) {
@@ -272,10 +379,11 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
     if (slot && slot.championId > 0) {
       if (!playerChampionId) playerChampionId = slot.championId;
       if (!playerChampionName) {
-        playerChampionName = formatChampionName(
-          findJungleChampionById(slot.championId)?.name ?? 'Jungler',
-          slot.championId
-        );
+        const fallbackName =
+          findJungleChampionById(slot.championId)?.name ??
+          findAdcChampionById(slot.championId)?.name ??
+          (activeRole === 'bottom' ? 'ADC' : 'Jungler');
+        playerChampionName = formatChampionName(fallbackName, slot.championId);
       }
     }
   }
@@ -310,13 +418,24 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
       playerChampionId,
       mapSide: resolvedMapSide,
     });
+    const adcPlan =
+      activeRole === 'bottom' || detectedLiveRole === 'bottom'
+        ? generateAdcGamePlan({
+            allyRoles: effectiveAllyRoles,
+            enemyRoles: effectiveEnemyRoles,
+            playerChampionId,
+            mapSide: resolvedMapSide,
+          })
+        : null;
     winPlanGate = {
       status: 'ready',
       source,
       data: {
+        role: activeRole,
         plan,
+        adcPlan,
         mapSide: resolvedMapSide,
-        championName: playerChampionName ?? 'Jungler',
+        championName: playerChampionName ?? (activeRole === 'bottom' ? 'ADC' : 'Jungler'),
       },
     };
   } else if (
@@ -325,17 +444,30 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
     playerChampionName &&
     hasRealRoleData
   ) {
+    const resolvedId =
+      playerChampionId ?? findAdcChampionByName(playerChampionName)?.championId ?? 0;
     const plan = generateWinConditionPlan({
       allyRoles: effectiveAllyRoles,
       enemyRoles: effectiveEnemyRoles,
-      playerChampionId: playerChampionId ?? 0,
+      playerChampionId: resolvedId,
       mapSide: resolvedMapSide,
     });
+    const adcPlan =
+      (activeRole === 'bottom' || detectedLiveRole === 'bottom') && resolvedId > 0
+        ? generateAdcGamePlan({
+            allyRoles: effectiveAllyRoles,
+            enemyRoles: effectiveEnemyRoles,
+            playerChampionId: resolvedId,
+            mapSide: resolvedMapSide,
+          })
+        : null;
     winPlanGate = {
       status: 'ready',
       source,
       data: {
+        role: activeRole,
         plan,
+        adcPlan,
         mapSide: resolvedMapSide,
         championName: playerChampionName,
       },
@@ -355,30 +487,50 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
 
   // 3. Live Coach Gate
   let liveCoachGate: Gate<LiveCoachPayload>;
+  const livePlayedRole: LivePlayedRole = detectedLiveRole ?? activeRole;
   if (runtimeState.phase === 'in_game' && liveGame && resolvedMapSide) {
+    const isJungleRole = livePlayedRole === 'jungle';
+    const isAdcRole = livePlayedRole === 'bottom';
     const objectives = computeObjectiveWindows(
       liveGame.gameData.gameTime,
       liveGame.events.Events,
       liveGame.allPlayers,
       input.objectiveTimings
     );
-    const activeWinPlan = winPlanGate.status === 'ready' ? winPlanGate.data.plan : null;
-    const champProfile = playerChampionName
-      ? findJungleChampionByName(playerChampionName)
-      : undefined;
-    const buildPlan = computeAdaptiveBuild(liveGame, champProfile);
-    const macroCues = activeWinPlan
+    const activeWinPlan =
+      isJungleRole && winPlanGate.status === 'ready' ? winPlanGate.data.plan : null;
+    const activeAdcWinPlan =
+      isAdcRole && winPlanGate.status === 'ready' ? (winPlanGate.data.adcPlan ?? null) : null;
+    const champProfile =
+      isJungleRole && playerChampionName
+        ? findJungleChampionByName(playerChampionName)
+        : undefined;
+    const adcProfile =
+      isAdcRole && playerChampionName
+        ? findAdcChampionByName(playerChampionName)
+        : undefined;
+    const buildPlan = isJungleRole
+      ? computeAdaptiveBuild(liveGame, champProfile)
+      : isAdcRole
+        ? computeAdcAdaptiveBuild(liveGame, adcProfile)
+        : null;
+    const macroCues = isJungleRole && activeWinPlan
       ? computeMacroGuidance(liveGame, activeWinPlan, objectives, input.personalLearning)
-      : [];
+      : isAdcRole
+        ? computeAdcMacroGuidance(liveGame, activeAdcWinPlan, objectives, input.adcPersonalLearning)
+        : [];
     liveCoachGate = {
       status: 'ready',
       source,
       data: {
         liveData: liveGame,
+        playedRole: livePlayedRole,
+        isJungleRole,
         objectives,
         buildPlan,
         macroCues,
         winPlan: activeWinPlan,
+        adcWinPlan: activeAdcWinPlan,
         mapSide: resolvedMapSide,
       },
     };
@@ -388,17 +540,20 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
     liveCoachGate = { status: 'empty', reason: 'no_live_match' };
   }
 
-  // 4. Post-Game & Climb Gate (Climb benchmarks evaluate Jungle games only)
+  // 4. Post-Game & Climb Gate (benchmarks strictly isolated per role)
   const jungleMatches = matches.filter(isJungleMatch);
+  const adcMatches = matches.filter(isAdcMatch);
   const offRoleExcludedCount = matches.length - jungleMatches.length;
+  const adcOffRoleExcludedCount = matches.length - adcMatches.length;
   const summaries = isSimulated
     ? DEMO_ROLLING_SUMMARIES
     : jungleMatches.map((m) =>
         toMatchSummaryRecord(m, analyzePostGameMatch(m, input.settings.targetDivision))
       );
 
+  const activeRoleMatches = activeRole === 'bottom' ? adcMatches : jungleMatches;
   let emptyAccountReason: EmptyReason | null = null;
-  if (jungleMatches.length === 0) {
+  if (activeRoleMatches.length === 0) {
     if (matches.length > 0) emptyAccountReason = 'only_off_role_matches';
     else if (!profile && !hasApiCreds) emptyAccountReason = 'no_account';
     else if (!hasApiCreds) emptyAccountReason = 'needs_api_key';
@@ -413,13 +568,15 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
   const accountReady = Boolean(profile) || hasApiCreds || isSimulated;
   const climb: ClimbStatus = {
     accountReady,
-    matchesReady: jungleMatches.length > 0,
+    matchesReady: activeRoleMatches.length > 0,
     emptyReason: emptyAccountReason,
     source,
     profile,
     matches,
     jungleMatches,
+    adcMatches,
     offRoleExcludedCount,
+    adcOffRoleExcludedCount,
     summaries,
     lpHistory,
     highEloMeta,
@@ -428,6 +585,9 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
   return {
     source,
     simulationLabel,
+    activeRole,
+    roleSource,
+    livePlayedRole,
     runtimeState,
     resolvedMapSide,
     playerChampionName,

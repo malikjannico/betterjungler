@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { CompactHudBar } from './components/CompactHudBar';
 import { findChampionIdByName, findJungleChampionByName } from './data/jungleKnowledgePack';
+import { findAdcChampionByName } from './data/adcKnowledgePack';
+import { computeAdcAdaptiveBuild, computeAdcMacroGuidance } from './domain/adc/adcLiveEngine';
+import { generateAdcGamePlan } from './domain/adc/adcGamePlanEngine';
+import { detectLivePlayedRole } from './domain/sessionContext';
 import {
   computeAdaptiveBuild,
   computeMacroGuidance,
@@ -17,6 +21,8 @@ import {
   getCachedMatches,
   getPersonalLearningSnapshot,
   loadSettings,
+  saveHudPosition,
+  setHudLocked,
   setOverlayMode,
   subscribeGameState,
   subscribeHudPreferences,
@@ -87,6 +93,7 @@ export function HudApp() {
   const [opacity, setOpacity] = useState(80);
   const [scalePercent, setScalePercent] = useState<HudScalePercent>(100);
   const [hotkey, setHotkey] = useState('Alt+J');
+  const [hudLocked, setHudLockedState] = useState(true);
   const [targetDivision, setTargetDivision] = useState('PLATINUM IV');
   const [patchPackStatus, setPatchPackStatus] = useState<ActivePatchPackStatus | null>(null);
   const [cachedMatches, setCachedMatches] = useState<MatchV5Detail[]>([]);
@@ -161,6 +168,9 @@ export function HudApp() {
       setOpacity(prefs.hudOpacity);
       setScalePercent((prefs.hudScale ?? 100) as HudScalePercent);
       setHotkey(prefs.overlayHotkey);
+      if (typeof prefs.hudLocked === 'boolean') {
+        setHudLockedState(prefs.hudLocked);
+      }
     });
     const unsubPatchPack = subscribePatchPackUpdated((pack) => {
       if (active) setPatchPackStatus(pack);
@@ -249,21 +259,88 @@ export function HudApp() {
     });
   }, [runtimeState.champSelect, runtimeState.liveGame, runtimeState.phase]);
 
+  const livePlayedRole = useMemo(() => {
+    if (runtimeState.liveGame) {
+      return detectLivePlayedRole(runtimeState.liveGame, runtimeState.champSelect);
+    }
+    const localCs = runtimeState.champSelect?.myTeam.find((s) => s.isLocalPlayer);
+    if (localCs) {
+      if (localCs.spell1Id === 11 || localCs.spell2Id === 11 || localCs.assignedPosition === 'jungle') {
+        return 'jungle' as const;
+      }
+      if (localCs.assignedPosition === 'bottom') {
+        return 'bottom' as const;
+      }
+      if (localCs.assignedPosition !== 'unknown') {
+        return 'off_role' as const;
+      }
+    }
+    return 'jungle' as const;
+  }, [runtimeState.liveGame, runtimeState.champSelect]);
+
+  const adcWinPlan = useMemo(() => {
+    if (livePlayedRole !== 'bottom') return null;
+    if (runtimeState.phase !== 'loading' && runtimeState.phase !== 'in_game') return null;
+    const cs = runtimeState.champSelect;
+    const selfLive = runtimeState.liveGame ? resolveSelfPlayer(runtimeState.liveGame) : null;
+    const liveRoles =
+      runtimeState.liveGame && selfLive
+        ? extractLiveRoles(runtimeState.liveGame, selfLive.team)
+        : null;
+    const csAllyRoles = cs ? extractRoleMap(cs.myTeam) : {};
+    const csEnemyRoles = cs ? extractRoleMap(cs.theirTeam) : {};
+    const allyRoles = Object.keys(csAllyRoles).length > 0 ? csAllyRoles : (liveRoles?.allyRoles ?? {});
+    const enemyRoles = Object.keys(csEnemyRoles).length > 0 ? csEnemyRoles : (liveRoles?.enemyRoles ?? {});
+    const selfCs = cs?.myTeam.find((s) => s.isLocalPlayer);
+    const adcId =
+      (selfCs?.championId && selfCs.championId > 0 ? selfCs.championId : undefined) ??
+      (selfLive ? findAdcChampionByName(selfLive.championName)?.championId : undefined) ??
+      0;
+    if (!adcId) return null;
+    const mapSide = cs?.mapSide ?? (selfLive?.team === 'CHAOS' ? 'red' : 'blue');
+    return generateAdcGamePlan({ allyRoles, enemyRoles, playerChampionId: adcId, mapSide });
+  }, [livePlayedRole, runtimeState.champSelect, runtimeState.liveGame, runtimeState.phase]);
+
+  const isJungleLive = livePlayedRole === 'jungle';
+
   const buildPlan = useMemo(() => {
     if (!runtimeState.liveGame) return null;
     const selfLive = resolveSelfPlayer(runtimeState.liveGame);
-    const profile = selfLive ? findJungleChampionByName(selfLive.championName) : undefined;
-    return computeAdaptiveBuild(runtimeState.liveGame, profile);
-  }, [runtimeState.liveGame]);
+    if (livePlayedRole === 'jungle') {
+      const profile = selfLive ? findJungleChampionByName(selfLive.championName) : undefined;
+      return computeAdaptiveBuild(runtimeState.liveGame, profile);
+    }
+    if (livePlayedRole === 'bottom') {
+      const profile = selfLive ? findAdcChampionByName(selfLive.championName) : undefined;
+      return computeAdcAdaptiveBuild(runtimeState.liveGame, profile);
+    }
+    return null;
+  }, [runtimeState.liveGame, livePlayedRole]);
 
   const macroCues = useMemo(() => {
     if (!liveGameSynced) return [];
-    return computeMacroGuidance(liveGameSynced, winPlan, objectives, personalLearning);
-  }, [liveGameSynced, winPlan, objectives, personalLearning]);
+    if (livePlayedRole === 'jungle') {
+      return computeMacroGuidance(liveGameSynced, winPlan, objectives, personalLearning);
+    }
+    if (livePlayedRole === 'bottom') {
+      return computeAdcMacroGuidance(liveGameSynced, adcWinPlan, objectives, null);
+    }
+    return [];
+  }, [liveGameSynced, winPlan, adcWinPlan, objectives, personalLearning, livePlayedRole]);
 
   const hudStyle = {
     '--hud-alpha': String(Math.max(0.7, Math.min(1, opacity / 100))),
   } as CSSProperties;
+
+  async function handleStartDragHud() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().startDragging();
+      await saveHudPosition();
+    } catch {
+      // Non-Tauri environment or interrupted drag
+    }
+  }
 
   return (
     <div style={hudStyle} className="h-screen w-screen bg-transparent p-0">
@@ -273,11 +350,19 @@ export function HudApp() {
         objectives={objectives}
         buildPlan={buildPlan}
         topCue={macroCues[0] ?? null}
-        openingRoute={winPlan?.routes[0] ?? null}
+        openingRoute={isJungleLive ? (winPlan?.routes[0] ?? null) : null}
         patchVersion={runtimeState.patchVersion}
         hotkey={hotkey}
         scalePercent={scalePercent}
-        clickThrough
+        clickThrough={hudLocked}
+        hudLocked={hudLocked}
+        activeRole={livePlayedRole}
+        isOffRole={livePlayedRole === 'off_role'}
+        onStartDrag={() => void handleStartDragHud()}
+        onLockHud={() => {
+          setHudLockedState(true);
+          void setHudLocked(true);
+        }}
         onExpand={() => void setOverlayMode('expanded')}
       />
     </div>

@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEMO_POST_GAME_MATCHES } from './domain/postGameFixtures';
 import { DEMO_IN_GAME_MID } from './domain/simulationFixtures';
@@ -23,6 +23,7 @@ vi.mock('./services/ddragonService', () => ({
   }),
   getChampionIconUrl: (key: string) => `https://example.invalid/${key}.png`,
   getItemIconUrl: (id: number) => `https://example.invalid/item-${id}.png`,
+  getProfileIconUrl: (id: number) => `https://example.invalid/profile-${id}.png`,
   getOfficialMapUrl: () => '/map11.png',
 }));
 
@@ -209,9 +210,9 @@ describe('Automated Post-Game Sync Loop', () => {
     });
     expect(mockSyncRecentMatches).toHaveBeenCalledTimes(1);
     expect(mockFetchSummonerProfile).not.toHaveBeenCalled();
-    expect(screen.queryByText('Auto-Synced')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 new')).not.toBeInTheDocument();
 
-    // At 20s: Match-V5 returns newMatch -> switches view to newMatch, shows Auto-Synced, and updates LP with true win
+    // At 20s: Match-V5 returns newMatch -> highlights New card in list and updates LP with true win
     await act(async () => {
       vi.advanceTimersByTime(12000);
       await Promise.resolve();
@@ -225,9 +226,12 @@ describe('Automated Post-Game Sync Loop', () => {
       true,
       'EUW1_NEW_POST_GAME_999'
     );
-    expect(screen.getByText('Auto-Synced')).toBeInTheDocument();
+    expect(screen.getByText('1 new')).toBeInTheDocument();
+    const newCard = screen.getByRole('button', { name: /Open Viego/i });
+    expect(newCard).toBeInTheDocument();
+    fireEvent.click(newCard);
     expect(
-      screen.getByText(new RegExp(`Viego vs ${newMatch.enemyJunglerName}`, 'i'))
+      screen.getByRole('heading', { name: new RegExp(`Viego vs ${newMatch.enemyJunglerName}`, 'i') })
     ).toBeInTheDocument();
   });
 });

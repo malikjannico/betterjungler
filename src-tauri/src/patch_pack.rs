@@ -15,6 +15,10 @@ const ACTIVE_KNOWLEDGE_FILENAME: &str = "knowledge-active.json";
 const EMBEDDED_KNOWLEDGE_PACK: &str = include_str!("../../knowledge/16.23.1.json");
 const EMBEDDED_META_PACK: &str = include_str!("../../knowledge/meta-16.23.1.json");
 
+fn default_voidgrubs_despawn_sec() -> i64 {
+    885
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectiveTimingsConfig {
@@ -23,9 +27,12 @@ pub struct ObjectiveTimingsConfig {
     pub dragon_respawn_sec: i64,
     pub elder_respawn_sec: i64,
     pub voidgrubs_spawn_sec: i64,
+    #[serde(default = "default_voidgrubs_despawn_sec")]
+    pub voidgrubs_despawn_sec: i64,
     pub herald_spawn_sec: i64,
     pub herald_despawn_sec: i64,
-    pub atakhan_spawn_sec: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atakhan_spawn_sec: Option<i64>,
     pub baron_spawn_sec: i64,
     pub baron_respawn_sec: i64,
 }
@@ -55,6 +62,8 @@ pub struct KnowledgePackPayload {
     pub objective_timings: ObjectiveTimingsConfig,
     pub smite_thresholds: SmiteThresholdsConfig,
     pub meta_tier_overrides: Vec<ChampionTierOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_benchmarks: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -129,9 +138,9 @@ fn validate_knowledge_payload(payload: &KnowledgePackPayload) -> AppResult<()> {
         t.dragon_respawn_sec,
         t.elder_respawn_sec,
         t.voidgrubs_spawn_sec,
+        t.voidgrubs_despawn_sec,
         t.herald_spawn_sec,
         t.herald_despawn_sec,
-        t.atakhan_spawn_sec,
         t.baron_spawn_sec,
         t.baron_respawn_sec,
     ]
@@ -140,6 +149,11 @@ fn validate_knowledge_payload(payload: &KnowledgePackPayload) -> AppResult<()> {
     {
         return Err(AppError::SecurityPolicy(
             "Knowledge pack objective timings out of valid bounds (1..7200s)".to_string(),
+        ));
+    }
+    if t.voidgrubs_despawn_sec <= t.voidgrubs_spawn_sec {
+        return Err(AppError::SecurityPolicy(
+            "Knowledge pack voidgrubsDespawnSec must exceed voidgrubsSpawnSec".to_string(),
         ));
     }
     if t.herald_despawn_sec <= t.herald_spawn_sec {
@@ -409,23 +423,23 @@ mod tests {
     ) -> String {
         let payload = serde_json::json!({
             "objectiveTimings": {
-                "scuttleInitialSec": 210,
+                "scuttleInitialSec": 175,
                 "dragonFirstSpawnSec": dragon_spawn,
                 "dragonRespawnSec": 300,
                 "elderRespawnSec": 360,
-                "voidgrubsSpawnSec": 360,
-                "heraldSpawnSec": 840,
-                "heraldDespawnSec": 1485,
-                "atakhanSpawnSec": 1200,
-                "baronSpawnSec": 1500,
+                "voidgrubsSpawnSec": 480,
+                "voidgrubsDespawnSec": 885,
+                "heraldSpawnSec": 900,
+                "heraldDespawnSec": 1185,
+                "baronSpawnSec": 1200,
                 "baronRespawnSec": 360
             },
             "smiteThresholds": {
                 "baseDamage": 600,
-                "unleashedDamage": 900,
-                "primalDamage": 1200,
+                "unleashedDamage": 1000,
+                "primalDamage": 1400,
                 "unleashedStacks": 20,
-                "primalStacks": 40
+                "primalStacks": 35
             },
             "metaTierOverrides": []
         });
@@ -448,10 +462,43 @@ mod tests {
         let (k_env, k_payload) = load_embedded_knowledge_pack().expect("embedded knowledge valid");
         assert_eq!(k_env.patch, "16.23.1");
         assert_eq!(k_payload.objective_timings.dragon_first_spawn_sec, 300);
+        assert_eq!(k_payload.objective_timings.herald_spawn_sec, 900);
+        assert_eq!(k_payload.objective_timings.baron_spawn_sec, 1200);
+        assert_eq!(k_payload.smite_thresholds.primal_damage, 1400);
 
         let m_env = verify_embedded_meta_pack().expect("embedded meta valid");
         assert_eq!(m_env.patch, "16.23.1");
         assert_eq!(m_env.kind, "meta");
+    }
+
+    #[test]
+    fn legacy_pack_payload_with_atakhan_still_deserializes() {
+        let legacy_json = serde_json::json!({
+            "objectiveTimings": {
+                "scuttleInitialSec": 210,
+                "dragonFirstSpawnSec": 300,
+                "dragonRespawnSec": 300,
+                "elderRespawnSec": 360,
+                "voidgrubsSpawnSec": 360,
+                "heraldSpawnSec": 840,
+                "heraldDespawnSec": 1485,
+                "atakhanSpawnSec": 1200,
+                "baronSpawnSec": 1500,
+                "baronRespawnSec": 360
+            },
+            "smiteThresholds": {
+                "baseDamage": 600,
+                "unleashedDamage": 900,
+                "primalDamage": 1200,
+                "unleashedStacks": 20,
+                "primalStacks": 40
+            },
+            "metaTierOverrides": []
+        });
+        let parsed: KnowledgePackPayload =
+            serde_json::from_value(legacy_json).expect("legacy payload should deserialize cleanly");
+        assert_eq!(parsed.objective_timings.voidgrubs_despawn_sec, 885);
+        validate_knowledge_payload(&parsed).expect("legacy payload should validate");
     }
 
     #[test]

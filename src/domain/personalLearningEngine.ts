@@ -43,7 +43,7 @@ export const DETECTOR_CATALOG: Record<MistakeDetectorId, DetectorMeta> = {
     category: 'fighting',
     metric: 'earlyDeaths',
     baseRate: NULL_BASE_RATE,
-    drill: 'Verify adjacent lane priority before contesting 3:30 Scuttle or level-4 invades.',
+    drill: 'Verify adjacent lane priority before contesting 2:55 Scuttle or level-4 invades.',
   },
   midgame_farm_drop: {
     label: 'Mid-Game Farm Drop (<5.7 CS/min)',
@@ -204,7 +204,7 @@ export function detectMatchMistakeSignatures(
     .filter((e) => e.type === 'CHAMPION_KILL' && e.victimId === match.playerParticipantId)
     .map((e) => e.timestampSec)
     .sort((a, b) => a - b);
-  const spawnWindows = [300, 360, 840, 1500];
+  const spawnWindows = [175, 300, 480, 900, 1200];
   const preObjDeathTs = playerDeathTs.filter(
     (dTs) =>
       enemyMonsterTs.some((oTs) => dTs <= oTs && oTs - dTs <= 55) ||

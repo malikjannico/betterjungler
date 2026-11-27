@@ -59,23 +59,23 @@ export function signPackPayload({ kind, patch, issuedAt, payload, privateKey }) 
 
 const DEFAULT_KNOWLEDGE_PAYLOAD = {
   objectiveTimings: {
-    scuttleInitialSec: 210,
+    scuttleInitialSec: 175,
     dragonFirstSpawnSec: 300,
     dragonRespawnSec: 300,
     elderRespawnSec: 360,
-    voidgrubsSpawnSec: 360,
-    heraldSpawnSec: 840,
-    heraldDespawnSec: 1485,
-    atakhanSpawnSec: 1200,
-    baronSpawnSec: 1500,
+    voidgrubsSpawnSec: 480,
+    voidgrubsDespawnSec: 885,
+    heraldSpawnSec: 900,
+    heraldDespawnSec: 1185,
+    baronSpawnSec: 1200,
     baronRespawnSec: 360,
   },
   smiteThresholds: {
     baseDamage: 600,
-    unleashedDamage: 900,
-    primalDamage: 1200,
+    unleashedDamage: 1000,
+    primalDamage: 1400,
     unleashedStacks: 20,
-    primalStacks: 40,
+    primalStacks: 35,
   },
   metaTierOverrides: [
     { championId: 234, championName: 'Viego', metaTier: 'S+', metaScore: 95.4 },
@@ -83,6 +83,18 @@ const DEFAULT_KNOWLEDGE_PAYLOAD = {
     { championId: 121, championName: "Kha'Zix", metaTier: 'S', metaScore: 91.5 },
     { championId: 62, championName: 'Wukong', metaTier: 'S', metaScore: 90.9 },
   ],
+  roleBenchmarks: {
+    bottom: {
+      IRON: { csAt10: 52, csPerMin: 5.4, goldDiffAt15: -420, damageSharePct: 21, deathsPre14: 2.4, turretPlates: 0.6, killParticipationPct: 50 },
+      BRONZE: { csAt10: 57, csPerMin: 5.9, goldDiffAt15: -320, damageSharePct: 22, deathsPre14: 2.1, turretPlates: 0.8, killParticipationPct: 52 },
+      SILVER: { csAt10: 62, csPerMin: 6.3, goldDiffAt15: -220, damageSharePct: 23, deathsPre14: 1.9, turretPlates: 1.0, killParticipationPct: 54 },
+      GOLD: { csAt10: 66, csPerMin: 6.8, goldDiffAt15: -90, damageSharePct: 24.5, deathsPre14: 1.7, turretPlates: 1.3, killParticipationPct: 57 },
+      PLATINUM: { csAt10: 70, csPerMin: 7.2, goldDiffAt15: 30, damageSharePct: 26, deathsPre14: 1.5, turretPlates: 1.6, killParticipationPct: 60 },
+      EMERALD: { csAt10: 74, csPerMin: 7.7, goldDiffAt15: 160, damageSharePct: 27, deathsPre14: 1.3, turretPlates: 1.9, killParticipationPct: 62 },
+      DIAMOND: { csAt10: 78, csPerMin: 8.1, goldDiffAt15: 290, damageSharePct: 28.5, deathsPre14: 1.1, turretPlates: 2.1, killParticipationPct: 65 },
+      MASTER: { csAt10: 82, csPerMin: 8.6, goldDiffAt15: 420, damageSharePct: 30, deathsPre14: 0.9, turretPlates: 2.4, killParticipationPct: 68 },
+    },
+  },
 };
 
 const DEFAULT_META_PAYLOAD = {
@@ -146,7 +158,7 @@ function main() {
   }
 
   const patch = '16.23.1';
-  const issuedAt = '2026-11-27T00:00:00Z';
+  const issuedAt = '2026-11-27T20:30:00Z';
   const publicKeyB64 = extractRawEd25519PublicKeyB64(publicKey);
 
   const knowledgeEnv = signPackPayload({

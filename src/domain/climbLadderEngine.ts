@@ -311,15 +311,19 @@ export function evaluateFocusGoalAgainstMatch(
   goal: ClimbGoal,
   kpis: {
     csPerMin: number;
+    csAt10?: number;
     goldDiffAt15: number;
-    objectiveSharePct: number;
-    preObjectiveDeaths: number;
+    objectiveSharePct?: number;
+    preObjectiveDeaths?: number;
     earlyDeaths?: number;
-    visionPerMin: number;
+    visionPerMin?: number;
+    damageSharePct?: number;
+    deathsPre14?: number;
+    turretPlates?: number;
     killParticipationPct: number;
   }
 ): FocusGoalMatchEvaluation {
-  const raw = kpis[goal.metric];
+  const raw = (kpis as Record<string, number | undefined>)[goal.metric];
   if (typeof raw !== 'number' || !Number.isFinite(raw)) {
     return {
       passed: false,

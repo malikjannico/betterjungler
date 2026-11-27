@@ -5,7 +5,7 @@ import { RiftMap } from './RiftMap';
 interface SummonersRiftMapProps {
   mapSide: MapSide;
   patchVersion: string;
-  route: JungleRoute;
+  route?: JungleRoute | null;
   wardSpots: WardSpot[];
   compact?: boolean;
 }

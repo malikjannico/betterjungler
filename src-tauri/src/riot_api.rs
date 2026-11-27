@@ -259,6 +259,8 @@ pub struct SummonerProfileSummary {
     pub puuid: String,
     pub region: String,
     pub summoner_level: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_icon_id: Option<i64>,
     pub tier: String,
     pub rank: String,
     pub league_points: i32,
@@ -597,6 +599,8 @@ struct AccountDto {
 struct SummonerDto {
     #[serde(rename = "summonerLevel")]
     summoner_level: u64,
+    #[serde(rename = "profileIconId", default)]
+    profile_icon_id: Option<i64>,
 }
 
 #[derive(Default, Deserialize)]
@@ -713,6 +717,7 @@ pub async fn fetch_summoner_profile(
         puuid: account.puuid,
         region: platform.as_code().to_string(),
         summoner_level: summoner.summoner_level,
+        profile_icon_id: summoner.profile_icon_id.filter(|&id| id > 0),
         tier: solo
             .as_ref()
             .map(|s| s.tier.clone())
@@ -829,17 +834,50 @@ pub fn normalize_match_v5_detail(
 
     let player_pid = player["participantId"].as_i64().unwrap_or(1);
     let my_team_id = player["teamId"].as_i64().unwrap_or(100);
+    let raw_role = player["teamPosition"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            player["individualPosition"]
+                .as_str()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .unwrap_or("");
+    let role = normalize_participant_role(raw_role);
 
     let enemy_jg = participants.iter().find(|p| {
         p["teamId"].as_i64() != Some(my_team_id) && p["teamPosition"].as_str() == Some("JUNGLE")
     });
     let enemy_jg_pid: Option<i64> = enemy_jg.and_then(|p| p["participantId"].as_i64());
 
+    let lane_opponent = participants.iter().find(|p| {
+        if p["teamId"].as_i64() == Some(my_team_id) {
+            return false;
+        }
+        let opp_raw = p["teamPosition"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                p["individualPosition"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+            })
+            .unwrap_or("");
+        role != "UNKNOWN" && normalize_participant_role(opp_raw) == role
+    });
+    let lane_opp_pid: Option<i64> = lane_opponent.and_then(|p| p["participantId"].as_i64());
+
     let team_kills: i64 = participants
         .iter()
         .filter(|p| p["teamId"].as_i64() == Some(my_team_id))
         .map(|p| p["kills"].as_i64().unwrap_or(0))
         .sum();
+    let team_total_damage: i64 = participants
+        .iter()
+        .filter(|p| p["teamId"].as_i64() == Some(my_team_id))
+        .map(|p| p["totalDamageDealtToChampions"].as_i64().unwrap_or(0))
+        .sum();
+    let damage_dealt = player["totalDamageDealtToChampions"].as_i64().unwrap_or(0);
 
     let count_team_objectives = |team_id: i64| -> i64 {
         let teams = info["teams"].as_array().unwrap_or(&empty_vec);
@@ -850,7 +888,6 @@ pub fn normalize_match_v5_detail(
             objs["dragon"]["kills"].as_i64().unwrap_or(0)
                 + objs["baron"]["kills"].as_i64().unwrap_or(0)
                 + objs["riftHerald"]["kills"].as_i64().unwrap_or(0)
-                + objs["atakhan"]["kills"].as_i64().unwrap_or(0)
                 + voidgrub_cluster
         } else {
             0
@@ -859,6 +896,8 @@ pub fn normalize_match_v5_detail(
 
     let mut frames_out = Vec::new();
     let mut events_out = Vec::new();
+    let mut turret_plates_event_count: i64 = 0;
+    let mut level2_time_sec: Option<i64> = None;
 
     if let Some(frames) = timeline_json["info"]["frames"].as_array() {
         for (idx, frame) in frames.iter().enumerate() {
@@ -870,6 +909,7 @@ pub fn normalize_match_v5_detail(
             let p_key = player_pid.to_string();
             let p_frame = &pf[&p_key];
             let e_frame = enemy_jg_pid.map(|eid| &pf[&eid.to_string()]);
+            let lo_frame = lane_opp_pid.map(|lid| &pf[&lid.to_string()]);
 
             if p_frame.is_object() {
                 let p_gold = p_frame["totalGold"].as_i64().unwrap_or(0);
@@ -877,24 +917,29 @@ pub fn normalize_match_v5_detail(
                 let cs = p_frame["minionsKilled"].as_i64().unwrap_or(0)
                     + p_frame["jungleMinionsKilled"].as_i64().unwrap_or(0);
 
-                let (e_gold, e_xp, e_cs, enemy_jg_pos) = match e_frame.filter(|ef| ef.is_object()) {
-                    Some(ef) => {
-                        let eg = ef["totalGold"].as_i64().unwrap_or(p_gold);
-                        let ex = ef["xp"].as_i64().unwrap_or(p_xp);
-                        let ec = ef["minionsKilled"].as_i64().unwrap_or(0)
-                            + ef["jungleMinionsKilled"].as_i64().unwrap_or(0);
-                        let pos = if ef["position"].is_object() {
-                            json!({
-                                "x": ef["position"]["x"].as_i64().unwrap_or(7435),
-                                "y": ef["position"]["y"].as_i64().unwrap_or(7435)
-                            })
-                        } else {
-                            Value::Null
-                        };
-                        (eg, ex, ec, pos)
+                let extract_opp = |opt_frame: Option<&Value>| -> (i64, i64, i64, Value) {
+                    match opt_frame.filter(|ef| ef.is_object()) {
+                        Some(ef) => {
+                            let eg = ef["totalGold"].as_i64().unwrap_or(p_gold);
+                            let ex = ef["xp"].as_i64().unwrap_or(p_xp);
+                            let ec = ef["minionsKilled"].as_i64().unwrap_or(0)
+                                + ef["jungleMinionsKilled"].as_i64().unwrap_or(0);
+                            let pos = if ef["position"].is_object() {
+                                json!({
+                                    "x": ef["position"]["x"].as_i64().unwrap_or(7435),
+                                    "y": ef["position"]["y"].as_i64().unwrap_or(7435)
+                                })
+                            } else {
+                                Value::Null
+                            };
+                            (eg, ex, ec, pos)
+                        }
+                        None => (p_gold, p_xp, cs, Value::Null),
                     }
-                    None => (p_gold, p_xp, cs, Value::Null),
                 };
+
+                let (e_gold, e_xp, e_cs, enemy_jg_pos) = extract_opp(e_frame);
+                let (lo_gold, lo_xp, lo_cs, lane_opp_pos) = extract_opp(lo_frame);
 
                 frames_out.push(json!({
                     "minute": minute,
@@ -903,18 +948,35 @@ pub fn normalize_match_v5_detail(
                         "y": p_frame["position"]["y"].as_i64().unwrap_or(7435)
                     },
                     "enemyJunglerPosition": enemy_jg_pos,
+                    "laneOpponentPosition": lane_opp_pos,
                     "totalGold": p_gold,
                     "xp": p_xp,
                     "cs": cs,
                     "enemyJunglerGold": e_gold,
                     "enemyJunglerXp": e_xp,
-                    "enemyJunglerCs": e_cs
+                    "enemyJunglerCs": e_cs,
+                    "laneOpponentGold": lo_gold,
+                    "laneOpponentXp": lo_xp,
+                    "laneOpponentCs": lo_cs
                 }));
             }
 
             if let Some(ev_arr) = frame["events"].as_array() {
                 for ev in ev_arr {
                     let ev_type = ev["type"].as_str().unwrap_or("");
+                    let ts_sec = ev["timestamp"].as_i64().unwrap_or(0) / 1000;
+                    if ev_type == "TURRET_PLATE_DESTROYED"
+                        && ev["killerId"].as_i64() == Some(player_pid)
+                    {
+                        turret_plates_event_count += 1;
+                    }
+                    if ev_type == "LEVEL_UP"
+                        && ev["participantId"].as_i64() == Some(player_pid)
+                        && ev["level"].as_i64() == Some(2)
+                        && level2_time_sec.is_none()
+                    {
+                        level2_time_sec = Some(ts_sec);
+                    }
                     if matches!(
                         ev_type,
                         "CHAMPION_KILL"
@@ -922,20 +984,26 @@ pub fn normalize_match_v5_detail(
                             | "WARD_KILL"
                             | "ELITE_MONSTER_KILL"
                             | "ITEM_PURCHASED"
+                            | "TURRET_PLATE_DESTROYED"
+                            | "LEVEL_UP"
                     ) {
-                        let ts_sec = ev["timestamp"].as_i64().unwrap_or(0) / 1000;
+                        let mapped_killer = ev
+                            .get("killerId")
+                            .and_then(|v| v.as_i64())
+                            .or_else(|| ev.get("participantId").and_then(|v| v.as_i64()));
                         events_out.push(json!({
                             "type": ev_type,
                             "timestampSec": ts_sec,
                             "position": ev.get("position").cloned(),
-                            "killerId": ev.get("killerId").and_then(|v| v.as_i64()),
+                            "killerId": mapped_killer,
                             "victimId": ev.get("victimId").and_then(|v| v.as_i64()),
                             "assistingParticipantIds": ev.get("assistingParticipantIds").cloned(),
                             "creatorId": ev.get("creatorId").and_then(|v| v.as_i64()),
                             "wardType": ev.get("wardType").and_then(|v| v.as_str()),
                             "monsterType": ev.get("monsterType").and_then(|v| v.as_str()),
                             "killerTeamId": ev.get("killerTeamId").and_then(|v| v.as_i64()),
-                            "itemId": ev.get("itemId").and_then(|v| v.as_i64())
+                            "itemId": ev.get("itemId").and_then(|v| v.as_i64()),
+                            "level": ev.get("level").and_then(|v| v.as_i64())
                         }));
                     }
                 }
@@ -955,16 +1023,9 @@ pub fn normalize_match_v5_detail(
 
     let cs_total = player["totalMinionsKilled"].as_i64().unwrap_or(0)
         + player["neutralMinionsKilled"].as_i64().unwrap_or(0);
-    let raw_role = player["teamPosition"]
-        .as_str()
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            player["individualPosition"]
-                .as_str()
-                .filter(|s| !s.trim().is_empty())
-        })
-        .unwrap_or("");
-    let role = normalize_participant_role(raw_role);
+    let turret_plates = player["challenges"]["turretPlatesTaken"]
+        .as_i64()
+        .unwrap_or(turret_plates_event_count);
 
     Ok(json!({
         "matchId": match_id,
@@ -980,12 +1041,18 @@ pub fn normalize_match_v5_detail(
         "championName": player["championName"].as_str().unwrap_or("Jungler"),
         "enemyJunglerChampionId": enemy_jg.and_then(|p| p["championId"].as_i64()).unwrap_or(0),
         "enemyJunglerName": enemy_jg.and_then(|p| p["championName"].as_str()).unwrap_or("Unknown"),
+        "laneOpponentChampionId": lane_opponent.and_then(|p| p["championId"].as_i64()).unwrap_or(0),
+        "laneOpponentName": lane_opponent.and_then(|p| p["championName"].as_str()).unwrap_or("Unknown"),
         "kills": player["kills"].as_i64().unwrap_or(0),
         "deaths": player["deaths"].as_i64().unwrap_or(0),
         "assists": player["assists"].as_i64().unwrap_or(0),
         "cs": cs_total,
         "visionScore": player["visionScore"].as_i64().unwrap_or(0),
         "controlWardsBought": player["visionWardsBoughtInGame"].as_i64().unwrap_or(0),
+        "damageDealtToChampions": damage_dealt,
+        "teamTotalDamage": team_total_damage,
+        "turretPlatesTaken": turret_plates,
+        "level2TimeSec": level2_time_sec,
         "teamKills": team_kills,
         "teamObjectives": count_team_objectives(my_team_id),
         "enemyObjectives": count_team_objectives(if my_team_id == 100 { 200 } else { 100 }),
@@ -1034,7 +1101,7 @@ mod tests {
                 "queueId": 420,
                 "teams": [
                     { "teamId": 100, "objectives": { "dragon": { "kills": 2 }, "horde": { "kills": 3 }, "baron": { "kills": 1 } } },
-                    { "teamId": 200, "objectives": { "dragon": { "kills": 1 }, "atakhan": { "kills": 1 } } }
+                    { "teamId": 200, "objectives": { "dragon": { "kills": 1 }, "riftHerald": { "kills": 1 } } }
                 ],
                 "participants": [
                     { "participantId": 2, "puuid": "p-ally", "teamId": 100, "teamPosition": "JUNGLE", "championId": 234, "championName": "Viego", "win": true, "kills": 7, "deaths": 2, "assists": 8 },
@@ -1062,7 +1129,7 @@ mod tests {
         assert_eq!(out["frames"][0]["minute"], 10);
         assert_eq!(out["frames"][0]["enemyJunglerPosition"]["x"], 10000);
         assert_eq!(out["teamObjectives"], 4); // 2 dragons + 1 baron + 1 voidgrub cluster
-        assert_eq!(out["enemyObjectives"], 2); // 1 dragon + 1 atakhan
+        assert_eq!(out["enemyObjectives"], 2); // 1 dragon + 1 herald
     }
 
     #[test]

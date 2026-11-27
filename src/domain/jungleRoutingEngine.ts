@@ -92,7 +92,7 @@ export function pickFirstClear(input: PickFirstClearInput): FirstClearDecision {
   return {
     style: 'full_clear',
     reason:
-      'Unlocks Level 4 + 1st item component on recall. Path toward your strong side to reach 3:30 Scuttle with priority.',
+      'Unlocks Level 4 + 1st item component on recall. Path toward your strong side to reach 2:55 Scuttle with priority.',
   };
 }
 
@@ -114,7 +114,7 @@ export function buildObjectiveSyncRoute(
       stage: 'objective_sync',
       stageLabel: 'Clear 3 · Dragon',
       objectiveFocus: 'dragon',
-      timeWindow: '6:00 – 14:00',
+      timeWindow: '8:00 – 19:45',
       whyThisClear:
         'Start Top camps ~65s before Dragon so your clear ends Bot-side with full HP and spent gold right on spawn.',
       style: 'full_clear',
@@ -140,7 +140,7 @@ export function buildObjectiveSyncRoute(
     stage: 'objective_sync',
     stageLabel: 'Clear 3 · Top Obj',
     objectiveFocus: 'grubs',
-    timeWindow: '6:00 – 14:00',
+    timeWindow: '8:00 – 19:45',
     whyThisClear:
       'Flip Bot → Top before Voidgrubs or Rift Herald so you finish camps next to Top River with lane priority.',
     style: 'full_clear',
@@ -174,42 +174,42 @@ export function buildMultiClearRoutes(
 
   const botToTopFullSteps: JungleRouteStep[] = isBlue
     ? [
-        makeStep(1, 'b-red', 'Red Buff', own.red, '1:30', 'Kite toward Krugs on final autos'),
-        makeStep(2, 'b-krugs', 'Krugs', own.krugs, '1:54', 'Clear large + medium Krug first'),
-        makeStep(3, 'b-raptors', 'Raptors', own.raptors, '2:16', 'AoE small raptors while glancing Mid'),
-        makeStep(4, 'b-wolves', 'Wolves', own.wolves, '2:40', 'Hit Level 3; check Top/Mid wave'),
-        makeStep(5, 'b-blue', 'Blue Buff', own.blue, '3:02', 'Pull Blue toward Gromp'),
-        makeStep(6, 'b-gromp', 'Gromp', own.gromp, '3:22', 'Save 1 Smite charge for 3:30 Scuttle'),
-        makeStep(7, 't-crab', 'Top Scuttle', RIFT_NODES.river.topScuttle, '3:30', 'Secure Crab -> gank Top/Mid or recall'),
+        makeStep(1, 'b-red', 'Red Buff', own.red, '0:55', 'Kite toward Krugs on final autos'),
+        makeStep(2, 'b-krugs', 'Krugs', own.krugs, '1:19', 'Clear large + medium Krug first'),
+        makeStep(3, 'b-raptors', 'Raptors', own.raptors, '1:41', 'AoE small raptors while glancing Mid'),
+        makeStep(4, 'b-wolves', 'Wolves', own.wolves, '2:05', 'Hit Level 3; check Top/Mid wave'),
+        makeStep(5, 'b-blue', 'Blue Buff', own.blue, '2:27', 'Pull Blue toward Gromp'),
+        makeStep(6, 'b-gromp', 'Gromp', own.gromp, '2:47', 'Save 1 Smite charge for 2:55 Scuttle'),
+        makeStep(7, 't-crab', 'Top Scuttle', RIFT_NODES.river.topScuttle, '2:55', 'Secure Crab -> gank Top/Mid or recall'),
       ]
     : [
-        makeStep(1, 'r-blue', 'Blue Buff', own.blue, '1:30', 'Kite Blue toward Gromp'),
-        makeStep(2, 'r-gromp', 'Gromp', own.gromp, '1:54', 'Finish Gromp cleanly'),
-        makeStep(3, 'r-wolves', 'Wolves', own.wolves, '2:18', 'Transition across Mid safely'),
-        makeStep(4, 'r-raptors', 'Raptors', own.raptors, '2:40', 'Scan Top wave state while clearing'),
-        makeStep(5, 'r-red', 'Red Buff', own.red, '3:02', 'Keep Smite ready for Scuttle'),
-        makeStep(6, 'r-krugs', 'Krugs', own.krugs, '3:22', 'Hit Level 4'),
-        makeStep(7, 't-crab', 'Top Scuttle', RIFT_NODES.river.topScuttle, '3:30', 'Take Crab -> Top/Mid play or reset'),
+        makeStep(1, 'r-blue', 'Blue Buff', own.blue, '0:55', 'Kite Blue toward Gromp'),
+        makeStep(2, 'r-gromp', 'Gromp', own.gromp, '1:19', 'Finish Gromp cleanly'),
+        makeStep(3, 'r-wolves', 'Wolves', own.wolves, '1:43', 'Transition across Mid safely'),
+        makeStep(4, 'r-raptors', 'Raptors', own.raptors, '2:05', 'Scan Top wave state while clearing'),
+        makeStep(5, 'r-red', 'Red Buff', own.red, '2:27', 'Keep Smite ready for Scuttle'),
+        makeStep(6, 'r-krugs', 'Krugs', own.krugs, '2:47', 'Hit Level 4'),
+        makeStep(7, 't-crab', 'Top Scuttle', RIFT_NODES.river.topScuttle, '2:55', 'Take Crab -> Top/Mid play or reset'),
       ];
 
   const topToBotFullSteps: JungleRouteStep[] = isBlue
     ? [
-        makeStep(1, 'b-blue', 'Blue Buff', own.blue, '1:30', 'Start Blue, pull toward Gromp'),
-        makeStep(2, 'b-gromp', 'Gromp', own.gromp, '1:54', 'Use 1st Smite or save for Bot Crab'),
-        makeStep(3, 'b-wolves', 'Wolves', own.wolves, '2:18', 'Cross Mid into Red quadrant'),
-        makeStep(4, 'b-raptors', 'Raptors', own.raptors, '2:40', 'Check Bot lane wave position'),
-        makeStep(5, 'b-red', 'Red Buff', own.red, '3:02', 'Pull Red toward Krugs'),
-        makeStep(6, 'b-krugs', 'Krugs', own.krugs, '3:22', 'Hit Level 4 & kite toward river'),
-        makeStep(7, 'b-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '3:30', 'Secure Bot Crab & pressure Bot lane'),
+        makeStep(1, 'b-blue', 'Blue Buff', own.blue, '0:55', 'Start Blue, pull toward Gromp'),
+        makeStep(2, 'b-gromp', 'Gromp', own.gromp, '1:19', 'Use 1st Smite or save for Bot Crab'),
+        makeStep(3, 'b-wolves', 'Wolves', own.wolves, '1:43', 'Cross Mid into Red quadrant'),
+        makeStep(4, 'b-raptors', 'Raptors', own.raptors, '2:05', 'Check Bot lane wave position'),
+        makeStep(5, 'b-red', 'Red Buff', own.red, '2:27', 'Pull Red toward Krugs'),
+        makeStep(6, 'b-krugs', 'Krugs', own.krugs, '2:47', 'Hit Level 4 & kite toward river'),
+        makeStep(7, 'b-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '2:55', 'Secure Bot Crab & pressure Bot lane'),
       ]
     : [
-        makeStep(1, 'r-red', 'Red Buff', own.red, '1:30', 'Start Red, drag toward Krugs'),
-        makeStep(2, 'r-krugs', 'Krugs', own.krugs, '1:54', 'Clear Krugs fast'),
-        makeStep(3, 'r-raptors', 'Raptors', own.raptors, '2:18', 'Watch Mid prio before crossing'),
-        makeStep(4, 'r-wolves', 'Wolves', own.wolves, '2:42', 'Enter Bot quadrant'),
-        makeStep(5, 'r-blue', 'Blue Buff', own.blue, '3:04', 'Kite Blue toward Gromp'),
-        makeStep(6, 'r-gromp', 'Gromp', own.gromp, '3:22', 'Hit Level 4 with Smite ready'),
-        makeStep(7, 'b-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '3:30', 'Take Bot Crab -> gank Bot or recall'),
+        makeStep(1, 'r-red', 'Red Buff', own.red, '0:55', 'Start Red, drag toward Krugs'),
+        makeStep(2, 'r-krugs', 'Krugs', own.krugs, '1:19', 'Clear Krugs fast'),
+        makeStep(3, 'r-raptors', 'Raptors', own.raptors, '1:43', 'Watch Mid prio before crossing'),
+        makeStep(4, 'r-wolves', 'Wolves', own.wolves, '2:07', 'Enter Bot quadrant'),
+        makeStep(5, 'r-blue', 'Blue Buff', own.blue, '2:29', 'Kite Blue toward Gromp'),
+        makeStep(6, 'r-gromp', 'Gromp', own.gromp, '2:47', 'Hit Level 4 with Smite ready'),
+        makeStep(7, 'b-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '2:55', 'Take Bot Crab -> gank Bot or recall'),
       ];
 
   const dirLabel =
@@ -224,15 +224,15 @@ export function buildMultiClearRoutes(
     side,
     stage: 'clear_1',
     stageLabel: 'Clear 1 · Opening',
-    timeWindow: '1:30 – 3:30',
+    timeWindow: '0:55 – 2:55',
     whyThisClear:
       customFirstReason ??
-      'Unlocks Level 4 + 1st item component on recall. Path toward your strong side so you arrive at 3:30 Scuttle with winning lane priority.',
+      'Unlocks Level 4 + 1st item component on recall. Path toward your strong side so you arrive at 2:55 Scuttle with winning lane priority.',
     style: 'full_clear',
     summary:
       strongSide === 'bot'
-        ? 'Path Top → Bot across all 6 camps to arrive Level 4 near Dragon & Bot lane at 3:30.'
-        : 'Path Bot → Top across all 6 camps to arrive Level 4 near Voidgrubs & Top/Mid at 3:30.',
+        ? 'Path Top → Bot across all 6 camps to arrive Level 4 near Dragon & Bot lane at 2:55.'
+        : 'Path Bot → Top across all 6 camps to arrive Level 4 near Voidgrubs & Top/Mid at 2:55.',
     steps: strongSide === 'bot' ? topToBotFullSteps : botToTopFullSteps,
   };
 
@@ -245,32 +245,32 @@ export function buildMultiClearRoutes(
     side,
     stage: 'clear_1',
     stageLabel: 'Clear 1 · Fast Lv3',
-    timeWindow: '1:30 – 2:45',
+    timeWindow: '0:55 – 2:10',
     whyThisClear:
       customFirstReason ??
       'Use when your strong side is volatile and you are an early-ganking jungler; strike 45s before enemy full-clear finishes.',
     style: 'three_camp_gank',
-    summary: 'Double-buff + 1 camp for Level 3 gank/invade at 2:45 before enemy hits Level 4.',
+    summary: 'Double-buff + 1 camp for Level 3 gank/invade at 2:10 before enemy hits Level 4.',
     steps:
       strongSide === 'bot'
         ? [
-            makeStep(1, '3c-1', isBlue ? 'Blue Buff' : 'Red Buff', isBlue ? own.blue : own.red, '1:30', 'Fast leashless start'),
-            makeStep(2, '3c-2', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '1:52', 'Smite for clear tempo'),
-            makeStep(3, '3c-3', isBlue ? 'Red Buff' : 'Blue Buff', isBlue ? own.red : own.blue, '2:26', 'Hit Level 3 + Red slow'),
-            makeStep(4, '3c-gank', 'Gank / Dive Bot', own.gankBot, '2:45', 'Punish extended Bot or invade enemy buff'),
+            makeStep(1, '3c-1', isBlue ? 'Blue Buff' : 'Red Buff', isBlue ? own.blue : own.red, '0:55', 'Fast leashless start'),
+            makeStep(2, '3c-2', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '1:17', 'Smite for clear tempo'),
+            makeStep(3, '3c-3', isBlue ? 'Red Buff' : 'Blue Buff', isBlue ? own.red : own.blue, '1:51', 'Hit Level 3 + Red slow'),
+            makeStep(4, '3c-gank', 'Gank / Dive Bot', own.gankBot, '2:10', 'Punish extended Bot or invade enemy buff'),
           ]
         : isBlue
           ? [
-              makeStep(1, '3c-1', 'Red Buff', own.red, '1:30', 'Fast opening buff'),
-              makeStep(2, '3c-2', 'Blue Buff', own.blue, '2:05', 'Cross directly to Top quadrant buff'),
-              makeStep(3, '3c-3', 'Gromp', own.gromp, '2:28', 'Hit Level 3 adjacent to Top lane'),
-              makeStep(4, '3c-gank', 'Gank Top / Invade', own.gankTop, '2:45', 'Gank extended Top or catch enemy jungler'),
+              makeStep(1, '3c-1', 'Red Buff', own.red, '0:55', 'Fast opening buff'),
+              makeStep(2, '3c-2', 'Blue Buff', own.blue, '1:30', 'Cross directly to Top quadrant buff'),
+              makeStep(3, '3c-3', 'Gromp', own.gromp, '1:53', 'Hit Level 3 adjacent to Top lane'),
+              makeStep(4, '3c-gank', 'Gank Top / Invade', own.gankTop, '2:10', 'Gank extended Top or catch enemy jungler'),
             ]
           : [
-              makeStep(1, '3c-1', 'Red Buff', own.red, '1:30', 'Fast Top-side opening buff'),
-              makeStep(2, '3c-2', 'Raptors', own.raptors, '1:52', 'Fast AoE clear while checking Mid'),
-              makeStep(3, '3c-3', 'Krugs', own.krugs, '2:18', 'Hit Level 3 adjacent to Top lane (no cross-map backtrack)'),
-              makeStep(4, '3c-gank', 'Gank Top / Invade', own.gankTop, '2:45', 'Gank extended Top or invade Blue quadrant'),
+              makeStep(1, '3c-1', 'Red Buff', own.red, '0:55', 'Fast Top-side opening buff'),
+              makeStep(2, '3c-2', 'Raptors', own.raptors, '1:17', 'Fast AoE clear while checking Mid'),
+              makeStep(3, '3c-3', 'Krugs', own.krugs, '1:43', 'Hit Level 3 adjacent to Top lane (no cross-map backtrack)'),
+              makeStep(4, '3c-gank', 'Gank Top / Invade', own.gankTop, '2:10', 'Gank extended Top or invade Blue quadrant'),
             ],
   };
 
@@ -286,7 +286,7 @@ export function buildMultiClearRoutes(
           side,
           stage: 'clear_2',
           stageLabel: 'Clear 2 · Cleanup',
-          timeWindow: '3:05 – 4:45',
+          timeWindow: '2:30 – 4:10',
           whyThisClear:
             'After a 3-camp gank, immediately harvest the three untouched minor camps and Scuttle so you avoid falling behind enemy Level 5–6.',
           style: 'full_clear',
@@ -295,16 +295,16 @@ export function buildMultiClearRoutes(
           steps:
             strongSide === 'bot'
               ? [
-                  makeStep(1, 'c2t-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '3:30', 'Grab Bot Scuttle if wave allows'),
-                  makeStep(2, 'c2t-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '3:45', 'Clear untouched outer minor camp'),
-                  makeStep(3, 'c2t-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:05', 'Harvest AoE camp gold & XP'),
-                  makeStep(4, 'c2t-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:25', 'Finish skipped camps before recall'),
+                  makeStep(1, 'c2t-crab', 'Bot Scuttle', RIFT_NODES.river.botScuttle, '2:55', 'Grab Bot Scuttle if wave allows'),
+                  makeStep(2, 'c2t-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '3:10', 'Clear untouched outer minor camp'),
+                  makeStep(3, 'c2t-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '3:30', 'Harvest AoE camp gold & XP'),
+                  makeStep(4, 'c2t-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '3:50', 'Finish skipped camps before recall'),
                 ]
               : [
-                  makeStep(1, 'c2t-crab', 'Top Scuttle', RIFT_NODES.river.topScuttle, '3:30', 'Contest Top Crab with lane prio'),
-                  makeStep(2, 'c2t-1', isBlue ? 'Wolves' : 'Blue Buff', isBlue ? own.wolves : own.blue, '3:48', 'Collect untouched quadrant camps'),
-                  makeStep(3, 'c2t-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:10', 'Catch XP back up cleanly'),
-                  makeStep(4, 'c2t-3', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '4:30', 'Recall with component + Control Ward'),
+                  makeStep(1, 'c2t-crab', 'Top Scuttle', RIFT_NODES.river.topScuttle, '2:55', 'Contest Top Crab with lane prio'),
+                  makeStep(2, 'c2t-1', isBlue ? 'Wolves' : 'Blue Buff', isBlue ? own.wolves : own.blue, '3:13', 'Collect untouched quadrant camps'),
+                  makeStep(3, 'c2t-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '3:35', 'Catch XP back up cleanly'),
+                  makeStep(4, 'c2t-3', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '3:55', 'Recall with component + Control Ward'),
                 ],
         }
       : {
@@ -316,34 +316,34 @@ export function buildMultiClearRoutes(
           side,
           stage: 'clear_2',
           stageLabel: 'Clear 2 · Respawn',
-          timeWindow: '4:15 – 5:45',
+          timeWindow: '3:40 – 5:10',
           whyThisClear:
             'Minor camps respawn ~2:15 after death in the exact order you cleared them. Repeat your Clear 1 starting side after recalling so camps spawn right as you walk up.',
           style: 'full_clear',
           summary:
-            'Recall at 3:45–4:00, buy boots/components + Control Ward, then sweep back through your respawning quadrants to hit Level 5–6.',
+            'Recall at 3:10–3:25, buy boots/components + Control Ward, then sweep back through your respawning quadrants to hit Level 5–6.',
           steps:
             strongSide === 'bot'
               ? [
-                  makeStep(1, 'c2-1', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '4:15', 'First minor camp respawns right after recall'),
-                  makeStep(2, 'c2-2', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:35', 'Keep camps synced on respawn timer'),
-                  makeStep(3, 'c2-3', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:55', 'Look Mid transition gank if wave is pushed'),
-                  makeStep(4, 'c2-4', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '5:15', 'Finish quadrant for Level 5–6'),
-                  makeStep(5, 'c2-obj', 'Dragon Prep', RIFT_NODES.river.dragon, '5:30', 'Drop Control Ward & contest 1st Dragon'),
+                  makeStep(1, 'c2-1', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '3:40', 'First minor camp respawns right after recall'),
+                  makeStep(2, 'c2-2', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:00', 'Keep camps synced on respawn timer'),
+                  makeStep(3, 'c2-3', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:20', 'Look Mid transition gank if wave is pushed'),
+                  makeStep(4, 'c2-4', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '4:40', 'Finish quadrant for Level 5–6'),
+                  makeStep(5, 'c2-obj', 'Dragon Prep', RIFT_NODES.river.dragon, '4:50', 'Drop Control Ward & contest 5:00 Dragon'),
                 ]
               : [
-                  makeStep(1, 'c2-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '4:15', 'First minor camp respawns right after recall'),
-                  makeStep(2, 'c2-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:35', 'Maintain tight camp sequencing'),
-                  makeStep(3, 'c2-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:55', 'Hover Mid/Top if enemy overextends'),
-                  makeStep(4, 'c2-4', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '5:15', 'Hit Level 5–6 before Grubs spawn'),
-                  makeStep(5, 'c2-obj', 'Voidgrubs Setup', RIFT_NODES.river.baronGrubs, '5:50', 'Sweep pit & take 6:00 Voidgrubs'),
+                  makeStep(1, 'c2-1', isBlue ? 'Krugs' : 'Gromp', isBlue ? own.krugs : own.gromp, '3:40', 'First minor camp respawns right after recall'),
+                  makeStep(2, 'c2-2', isBlue ? 'Raptors' : 'Wolves', isBlue ? own.raptors : own.wolves, '4:00', 'Maintain tight camp sequencing'),
+                  makeStep(3, 'c2-3', isBlue ? 'Wolves' : 'Raptors', isBlue ? own.wolves : own.raptors, '4:20', 'Hover Mid/Top if enemy overextends'),
+                  makeStep(4, 'c2-4', isBlue ? 'Gromp' : 'Krugs', isBlue ? own.gromp : own.krugs, '4:40', 'Hit Level 5–6 ahead of objective rotation'),
+                  makeStep(5, 'c2-obj', 'Dragon / Top Setup', RIFT_NODES.river.dragon, '4:50', 'Reset, sweep river & prepare 5:00 Dragon'),
                 ],
         };
 
   // Clear 3: single default objective sync based on strong side (live mode swaps via buildObjectiveSyncRoute)
   const clear3Route = buildObjectiveSyncRoute(side, strongSide === 'top' ? 'grubs' : 'dragon');
 
-  // Clear 4+: Late Baron & Cross-Map Invade (14:00+)
+  // Clear 4+: Late Baron & Cross-Map Invade (15:00+ / 20:00+ Baron)
   const clear4Baron: JungleRoute = {
     id: `${side}-clear4-baron`,
     clearNumber: 4,
@@ -354,7 +354,7 @@ export function buildMultiClearRoutes(
     stage: 'late_baron',
     stageLabel: 'Clear 4 · Mid/Late',
     objectiveFocus: 'baron',
-    timeWindow: '14:00+',
+    timeWindow: '15:00+',
     whyThisClear:
       'In mid/late game, stop full-clearing diagonally from base. Farm the quadrant beside the next major objective (Baron or Soul) and steal opposite camps.',
     style: 'invade',
@@ -448,10 +448,10 @@ export function selectLiveActiveRoute(
   objectives: ObjectiveWindow[],
   routes: JungleRoute[]
 ): JungleRoute {
-  if (gameTime < 235) {
+  if (gameTime < 200) {
     return routes.find((r) => r.stage === 'clear_1') ?? routes[0]!;
   }
-  if (gameTime < 360) {
+  if (gameTime < 325) {
     return routes.find((r) => r.stage === 'clear_2') ?? routes[0]!;
   }
 

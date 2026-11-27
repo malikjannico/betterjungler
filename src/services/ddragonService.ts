@@ -24,6 +24,11 @@ export async function fetchLatestPatchVersion(): Promise<string> {
   }
 }
 
+export function getProfileIconUrl(profileIconId?: number, patch = cachedPatch): string | null {
+  if (!profileIconId || profileIconId <= 0) return null;
+  return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/profileicon/${profileIconId}.png`;
+}
+
 export function getChampionIconUrl(championKey: string, patch = cachedPatch): string {
   return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/champion/${championKey}.png`;
 }

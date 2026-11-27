@@ -16,6 +16,9 @@ const BASE_SETTINGS: UserSettings = {
   minimapSide: 'right',
   targetDivision: 'PLATINUM IV',
   hasApiKey: false,
+  primaryRole: 'jungle',
+  secondaryRole: 'bottom',
+  autoDetectRole: true,
   aiCoach: {
     provider: 'off',
     model: 'gemini-2.5-flash',
@@ -24,44 +27,58 @@ const BASE_SETTINGS: UserSettings = {
   },
 };
 
-describe('SettingsView overlay rollback', () => {
-  it('reverts optimistic hotkey & displays error if Tauri overlay preference update fails', async () => {
+function renderSettings(overrides: Partial<Parameters<typeof SettingsView>[0]> = {}) {
+  return render(
+    <SettingsView
+      settings={BASE_SETTINGS}
+      patchVersion="16.23.1"
+      catalogCounts={{ champions: 0, items: 0 }}
+      apiKeyHealth={null}
+      appMeta={{ version: '2.0.0', commitSha: 'abc1234', logDir: '' }}
+      updateInfo={null}
+      checkingUpdate={false}
+      installingUpdate={false}
+      stagingUpdate={false}
+      stagedUpdateVersion={null}
+      updateError={null}
+      canInstallUpdateSafely
+      isTauri
+      onSettingsChanged={vi.fn()}
+      onProfileLoaded={vi.fn()}
+      onPatchSynced={vi.fn()}
+      onApiKeyHealthChanged={vi.fn()}
+      onCheckUpdate={vi.fn(async () => {})}
+      onInstallUpdate={vi.fn(async () => {})}
+      onStageUpdate={vi.fn(async () => {})}
+      {...overrides}
+    />
+  );
+}
+
+describe('SettingsView master-detail categories, rollback & roles', () => {
+  it('renders stacked category cards instead of tabs, preserves unsaved drafts across subpages, and rolls back failed overlay updates', async () => {
     const spyEnv = vi.spyOn(tauriBridge, 'isTauriEnvironment').mockReturnValue(true);
     const spyPrefs = vi
       .spyOn(tauriBridge, 'updateOverlayPreferences')
       .mockRejectedValueOnce(new Error('Hotkey Alt+B is already registered by another app'));
     const onSettingsChanged = vi.fn();
 
-    render(
-      <SettingsView
-        settings={BASE_SETTINGS}
-        patchVersion="16.23.1"
-        catalogCounts={{ champions: 0, items: 0 }}
-        apiKeyHealth={null}
-        appMeta={{ version: '0.3.0', commitSha: 'abc1234', logDir: '' }}
-        updateInfo={null}
-        checkingUpdate={false}
-        installingUpdate={false}
-        stagingUpdate={false}
-        stagedUpdateVersion={null}
-        updateError={null}
-        canInstallUpdateSafely
-        isTauri
-        onSettingsChanged={onSettingsChanged}
-        onProfileLoaded={vi.fn()}
-        onPatchSynced={vi.fn()}
-        onApiKeyHealthChanged={vi.fn()}
-        onCheckUpdate={vi.fn(async () => {})}
-        onInstallUpdate={vi.fn(async () => {})}
-        onStageUpdate={vi.fn(async () => {})}
-      />
-    );
+    renderSettings({ onSettingsChanged });
 
+    // No horizontal tab strip — stacked category list with descriptions renders first
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /^Account & Riot API/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Roles & Preferences/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Overlay & HUD/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Account & Riot API/ }));
     const riotIdInput = screen.getByLabelText(/Riot ID/i) as HTMLInputElement;
     fireEvent.change(riotIdInput, { target: { value: 'DraftSaver#EUW' } });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Overlay & HUD' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Back to Settings/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Overlay & HUD/ }));
 
+    expect(screen.getByText(/Recommended In-Game League HUD Settings/i)).toBeInTheDocument();
     const hotkeySelect = screen.getByLabelText('Global Hotkey') as HTMLSelectElement;
     await act(async () => {
       fireEvent.change(hotkeySelect, { target: { value: 'Alt+B' } });
@@ -75,8 +92,9 @@ describe('SettingsView overlay rollback', () => {
     expect(hotkeySelect.value).toBe('Alt+J');
     expect(onSettingsChanged).toHaveBeenLastCalledWith(BASE_SETTINGS);
 
-    // Returning to Account & API preserves unsaved draft edits across subpage navigation
-    fireEvent.click(screen.getByRole('tab', { name: 'Account & API' }));
+    // Returning to Account & Riot API preserves unsaved draft edits across subpage navigation
+    fireEvent.click(screen.getByRole('button', { name: /^Back to Settings/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Account & Riot API/ }));
     expect((screen.getByLabelText(/Riot ID/i) as HTMLInputElement).value).toBe('DraftSaver#EUW');
 
     spyEnv.mockRestore();
@@ -88,32 +106,9 @@ describe('SettingsView overlay rollback', () => {
       .spyOn(tauriBridge, 'testAiConnection')
       .mockResolvedValueOnce('Connected to Google Gemini (gemini-4-hydrogen) — ready for coaching debriefs.');
 
-    render(
-      <SettingsView
-        settings={BASE_SETTINGS}
-        patchVersion="16.23.1"
-        catalogCounts={{ champions: 0, items: 0 }}
-        apiKeyHealth={null}
-        appMeta={{ version: '2.0.0', commitSha: 'abc1234', logDir: '' }}
-        updateInfo={null}
-        checkingUpdate={false}
-        installingUpdate={false}
-        stagingUpdate={false}
-        stagedUpdateVersion={null}
-        updateError={null}
-        canInstallUpdateSafely
-        isTauri
-        onSettingsChanged={vi.fn()}
-        onProfileLoaded={vi.fn()}
-        onPatchSynced={vi.fn()}
-        onApiKeyHealthChanged={vi.fn()}
-        onCheckUpdate={vi.fn(async () => {})}
-        onInstallUpdate={vi.fn(async () => {})}
-        onStageUpdate={vi.fn(async () => {})}
-      />
-    );
+    renderSettings();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'AI Coach' }));
+    fireEvent.click(screen.getByRole('button', { name: /^AI Coach/ }));
     fireEvent.change(screen.getByLabelText('AI Provider'), { target: { value: 'gemini' } });
 
     const presetSelect = screen.getByLabelText('AI Model Preset') as HTMLSelectElement;
@@ -142,5 +137,59 @@ describe('SettingsView overlay rollback', () => {
     expect(customInput.value).toBe('gemini-3.6-flash');
 
     spyTestAi.mockRestore();
+  });
+
+  it('saves Roles & Preferences immediately and supports deep-linking via initialSectionToken', async () => {
+    const spySave = vi.spyOn(tauriBridge, 'saveSettings').mockResolvedValue(undefined);
+    const onSettingsChanged = vi.fn();
+
+    const { rerender } = renderSettings({
+      initialSection: 'roles',
+      initialSectionToken: 1,
+      onSettingsChanged,
+    });
+
+    expect(screen.getByRole('heading', { name: 'Roles & Preferences' })).toBeInTheDocument();
+
+    const autoDetectToggle = screen.getByRole('switch', {
+      name: /Auto-detect role from Champ Select/i,
+    });
+    await act(async () => {
+      fireEvent.click(autoDetectToggle);
+      await Promise.resolve();
+    });
+
+    expect(spySave).toHaveBeenCalledWith(expect.objectContaining({ autoDetectRole: false }));
+    expect(onSettingsChanged).toHaveBeenCalledWith(expect.objectContaining({ autoDetectRole: false }));
+
+    rerender(
+      <SettingsView
+        settings={BASE_SETTINGS}
+        patchVersion="16.23.1"
+        catalogCounts={{ champions: 0, items: 0 }}
+        apiKeyHealth={null}
+        appMeta={{ version: '2.0.0', commitSha: 'abc1234', logDir: '' }}
+        updateInfo={null}
+        checkingUpdate={false}
+        installingUpdate={false}
+        stagingUpdate={false}
+        stagedUpdateVersion={null}
+        updateError={null}
+        canInstallUpdateSafely
+        isTauri
+        initialSection="ai"
+        initialSectionToken={2}
+        onSettingsChanged={onSettingsChanged}
+        onProfileLoaded={vi.fn()}
+        onPatchSynced={vi.fn()}
+        onApiKeyHealthChanged={vi.fn()}
+        onCheckUpdate={vi.fn(async () => {})}
+        onInstallUpdate={vi.fn(async () => {})}
+        onStageUpdate={vi.fn(async () => {})}
+      />
+    );
+
+    expect(screen.getByRole('heading', { name: 'AI Coach' })).toBeInTheDocument();
+    spySave.mockRestore();
   });
 });

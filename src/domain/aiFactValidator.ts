@@ -62,7 +62,7 @@ function isTimeSecKey(keyLower: string): boolean {
 }
 
 function extractKeyMinutes(keyLower: string, facts: GroundedFacts) {
-  for (const m of keyLower.matchAll(/at(\d{1,2})(?!\d)/g)) {
+  for (const m of keyLower.matchAll(/(?:at|pre)(\d{1,2})(?!\d)/g)) {
     const mins = Number(m[1]);
     if (Number.isInteger(mins)) facts.timeMin.add(mins);
   }
@@ -298,15 +298,35 @@ export function validateGroundedAiResponse(
     timeMin: new Set<number>(),
   };
 
+  let parsedContextRole: string | null = null;
   try {
     const parsed: unknown = JSON.parse(contextJson);
     facts.structuredJson = true;
     collectFromJson(parsed, '', facts);
+    if (parsed && typeof parsed === 'object' && 'role' in parsed) {
+      const r = (parsed as { role?: unknown }).role;
+      if (typeof r === 'string') parsedContextRole = r.trim().toLowerCase();
+    }
   } catch {
     collectFromString(contextJson, '', facts);
   }
 
   const ungrounded: string[] = [];
+  if (parsedContextRole === 'bottom' || parsedContextRole === 'bot' || parsedContextRole === 'adc') {
+    const jungleLeakMatch =
+      /\b(smite damage|primal smite|unleashed smite|companion treats?|camp cycling|opening clear|jungle clear)\b/i.exec(
+        responseText
+      );
+    if (jungleLeakMatch) {
+      ungrounded.push(`wrong-role:${jungleLeakMatch[0]}`);
+    }
+  } else if (parsedContextRole === 'jungle') {
+    const adcLeakMatch =
+      /\b(support synergy|level-2 wave crash|doran's blade reset)\b/i.exec(responseText);
+    if (adcLeakMatch) {
+      ungrounded.push(`wrong-role:${adcLeakMatch[0]}`);
+    }
+  }
   for (const line of responseText.split(/\r?\n/)) {
     const body = normalizeCommaThousands(stripListPrefix(line));
     const regex = /(?<![\w.:])[+-]?\d[\d.:]*/g;

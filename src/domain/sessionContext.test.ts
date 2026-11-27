@@ -177,4 +177,165 @@ describe('sessionContext', () => {
     expect(ctx.climb.summaries).toHaveLength(1);
     expect(ctx.climb.offRoleExcludedCount).toBe(1);
   });
+
+  it('suppresses jungle/ADC items and macro cues during Top/Mid/Support off-role live games, showing global objectives only', () => {
+    const topLive = {
+      phase: 'in_game' as const,
+      gameflowPhase: 'InProgress',
+      canInstallUpdate: false,
+      lcuConnected: true,
+      liveClientConnected: true,
+      champSelect: null,
+      liveGame: {
+        activePlayer: {
+          summonerName: 'TopPlayer',
+          level: 11,
+          currentGold: 1350,
+          championStats: {
+            attackDamage: 185,
+            abilityPower: 0,
+            armor: 82,
+            magicResist: 52,
+            currentHealth: 1950,
+            maxHealth: 1950,
+            moveSpeed: 365,
+          },
+        },
+        allPlayers: [
+          {
+            summonerName: 'TopPlayer',
+            championName: 'Aatrox',
+            team: 'ORDER' as const,
+            position: 'TOP',
+            level: 11,
+            isDead: false,
+            respawnTimer: 0,
+            items: [],
+            scores: { kills: 3, deaths: 1, assists: 2, creepScore: 140, wardScore: 8 },
+            summonerSpells: {
+              summonerSpellOne: { displayName: 'Teleport' },
+              summonerSpellTwo: { displayName: 'Flash' },
+            },
+          },
+          {
+            summonerName: 'EnemyTop',
+            championName: 'Darius',
+            team: 'CHAOS' as const,
+            position: 'TOP',
+            level: 12,
+            isDead: false,
+            respawnTimer: 0,
+            items: [{ itemID: 6610, displayName: 'Sundered Sky', count: 1, slot: 0, price: 3100 }],
+            scores: { kills: 4, deaths: 2, assists: 1, creepScore: 145, wardScore: 7 },
+          },
+        ],
+        events: { Events: [] },
+        gameData: { gameMode: 'CLASSIC', gameTime: 650, mapName: 'Map11', mapNumber: 11 },
+      },
+      summonerProfile: null,
+      patchVersion: '16.23.1',
+    };
+
+    const ctx = deriveSessionContext({
+      demoScenario: 'idle',
+      liveState: topLive,
+      settings: BASE_SETTINGS,
+      summonerProfile: null,
+      matches: [],
+      lpHistory: [],
+      highEloMeta: null,
+    });
+
+    expect(ctx.livePlayedRole).toBe('off_role');
+    expect(ctx.liveCoach.status).toBe('ready');
+    if (ctx.liveCoach.status === 'ready') {
+      expect(ctx.liveCoach.data.playedRole).toBe('off_role');
+      expect(ctx.liveCoach.data.isJungleRole).toBe(false);
+      expect(ctx.liveCoach.data.buildPlan).toBeNull();
+      expect(ctx.liveCoach.data.macroCues).toEqual([]);
+      expect(ctx.liveCoach.data.objectives.length).toBeGreaterThan(0);
+      expect(ctx.liveCoach.data.objectives.some((o) => o.id === 'atakhan')).toBe(false);
+    }
+  });
+
+  it('auto-detects ADC in live Bot lane matches, serving ADC items (never Chempunk) and ADC macro cues', () => {
+    const adcLive = {
+      phase: 'in_game' as const,
+      gameflowPhase: 'InProgress',
+      canInstallUpdate: false,
+      lcuConnected: true,
+      liveClientConnected: true,
+      champSelect: null,
+      liveGame: {
+        activePlayer: {
+          summonerName: 'AdcPlayer',
+          level: 11,
+          currentGold: 1350,
+          championStats: {
+            attackDamage: 185,
+            abilityPower: 0,
+            armor: 52,
+            magicResist: 42,
+            currentHealth: 1450,
+            maxHealth: 1450,
+            moveSpeed: 375,
+          },
+        },
+        allPlayers: [
+          {
+            summonerName: 'AdcPlayer',
+            championName: 'Jinx',
+            team: 'ORDER' as const,
+            position: 'BOTTOM',
+            level: 11,
+            isDead: false,
+            respawnTimer: 0,
+            items: [],
+            scores: { kills: 3, deaths: 1, assists: 4, creepScore: 140, wardScore: 8 },
+            summonerSpells: {
+              summonerSpellOne: { displayName: 'Heal' },
+              summonerSpellTwo: { displayName: 'Flash' },
+            },
+          },
+          {
+            summonerName: 'EnemyTop',
+            championName: 'Aatrox',
+            team: 'CHAOS' as const,
+            position: 'TOP',
+            level: 12,
+            isDead: false,
+            respawnTimer: 0,
+            items: [{ itemID: 6610, displayName: 'Sundered Sky', count: 1, slot: 0, price: 3100 }],
+            scores: { kills: 5, deaths: 1, assists: 2, creepScore: 150, wardScore: 9 },
+          },
+        ],
+        events: { Events: [] },
+        gameData: { gameMode: 'CLASSIC', gameTime: 650, mapName: 'Map11', mapNumber: 11 },
+      },
+      summonerProfile: null,
+      patchVersion: '16.23.1',
+    };
+
+    const ctx = deriveSessionContext({
+      demoScenario: 'idle',
+      liveState: adcLive,
+      settings: BASE_SETTINGS,
+      summonerProfile: null,
+      matches: [],
+      lpHistory: [],
+      highEloMeta: null,
+    });
+
+    expect(ctx.activeRole).toBe('bottom');
+    expect(ctx.livePlayedRole).toBe('bottom');
+    expect(ctx.liveCoach.status).toBe('ready');
+    if (ctx.liveCoach.status === 'ready') {
+      expect(ctx.liveCoach.data.playedRole).toBe('bottom');
+      expect(ctx.liveCoach.data.isJungleRole).toBe(false);
+      expect(ctx.liveCoach.data.buildPlan).not.toBeNull();
+      expect(ctx.liveCoach.data.buildPlan?.nextItem?.item.id).not.toBe(6609);
+      expect(ctx.liveCoach.data.macroCues.length).toBeGreaterThan(0);
+      expect(ctx.liveCoach.data.objectives.length).toBeGreaterThan(0);
+    }
+  });
 });

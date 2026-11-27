@@ -13,13 +13,14 @@ export type ObjectiveBadgeKind =
   | 'baron'
   | 'grubs'
   | 'herald'
-  | 'atakhan'
   | 'objective';
 
 export interface HudStatusChip {
   dotTone: 'idle' | 'active' | 'urgent';
   label: string;
   hotkey: string;
+  isOffRole?: boolean;
+  activeRole?: 'jungle' | 'bottom' | 'off_role';
 }
 
 export interface HudRouteCard {
@@ -77,6 +78,8 @@ export interface DeriveHudCardsInput {
   topCue: MacroCue | null;
   openingRoute: JungleRoute | null;
   hotkey: string;
+  isOffRole?: boolean;
+  activeRole?: 'jungle' | 'bottom' | 'off_role';
 }
 
 function inferObjectiveBadgeKind(obj: ObjectiveWindow): ObjectiveBadgeKind {
@@ -85,7 +88,6 @@ function inferObjectiveBadgeKind(obj: ObjectiveWindow): ObjectiveBadgeKind {
   if (hay.includes('baron') || hay.includes('nashor')) return 'baron';
   if (hay.includes('grub')) return 'grubs';
   if (hay.includes('herald')) return 'herald';
-  if (hay.includes('atakhan')) return 'atakhan';
   if (hay.includes('dragon') || hay.includes('drake')) return 'dragon';
   return 'objective';
 }
@@ -102,8 +104,6 @@ function toShortObjectiveName(kind: ObjectiveBadgeKind): string {
       return 'GRB';
     case 'herald':
       return 'HLD';
-    case 'atakhan':
-      return 'ATK';
     case 'objective':
       return 'OBJ';
   }
@@ -132,6 +132,10 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
   const isUrgent =
     primaryObj?.status === 'live' || primaryObj?.status === 'prep_vision';
 
+  const effectiveRole: 'jungle' | 'bottom' | 'off_role' =
+    input.activeRole ?? (input.isOffRole ? 'off_role' : 'jungle');
+  const isOffRole = effectiveRole === 'off_role';
+
   const statusChip: HudStatusChip = {
     dotTone: isUrgent
       ? 'urgent'
@@ -147,9 +151,12 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
             ? 'CHAMP SELECT'
             : 'HUD armed · appears in game',
     hotkey: input.hotkey,
+    isOffRole,
+    activeRole: effectiveRole,
   };
 
   const showOpeningRoute =
+    effectiveRole === 'jungle' &&
     Boolean(input.openingRoute) &&
     (input.phase === 'loading' || (input.phase === 'in_game' && input.gameTime < 90));
 
@@ -196,6 +203,7 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
       : null;
 
   const buyCard: HudBuyCard | null =
+    !isOffRole &&
     !showOpeningRoute &&
     input.phase === 'in_game' &&
     input.buildPlan &&
@@ -213,6 +221,7 @@ export function deriveHudCards(input: DeriveHudCardsInput): HudCardModel {
       : null;
 
   const cueCard: HudCueCard | null =
+    !isOffRole &&
     input.phase === 'in_game' &&
     input.topCue &&
     (input.topCue.priority === 'urgent' || input.topCue.priority === 'high')

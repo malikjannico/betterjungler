@@ -74,7 +74,7 @@ export interface DeathHeatmapSummary {
   zoneCounts: Record<MapDangerZone, number>;
 }
 
-const KEY_OBJECTIVE_SPAWNS = [300, 360, 840, 1500];
+const KEY_OBJECTIVE_SPAWNS = [175, 300, 480, 900, 1200];
 
 function classifyMapZone(x: number, y: number): MapDangerZone {
   if (x >= 240 && x <= 430 && y >= 200 && y <= 400) return 'Top River / Baron';

@@ -8,10 +8,14 @@ import {
 import { formatClock } from '../domain/liveCoachEngine';
 import { DEMO_POST_GAME_MATCHES } from '../domain/postGameFixtures';
 import { analyzePostGameMatch } from '../domain/postGameReviewEngine';
+import { ADC_FIXTURE_JINX_CARRY_WIN } from '../domain/adc/adcFixtures';
 import * as tauriBridge from '../services/tauriBridge';
 import { PostGameReviewView } from './PostGameReviewView';
 
-function buildMatchCacheKey(match: (typeof DEMO_POST_GAME_MATCHES)[number], targetDivision: string): string {
+function buildMatchCacheKey(
+  match: (typeof DEMO_POST_GAME_MATCHES)[number],
+  targetDivision: string
+): string {
   const report = analyzePostGameMatch(match, targetDivision);
   const ctx = JSON.stringify({
     champion: report.championName,
@@ -28,11 +32,12 @@ function buildMatchCacheKey(match: (typeof DEMO_POST_GAME_MATCHES)[number], targ
   return `${match.matchId}:${hashAiContext(ctx)}`;
 }
 
-describe('PostGameReviewView subpages & role/champion normalization', () => {
+describe('PostGameReviewView stacked match cards, ADC grading & role normalization', () => {
   beforeEach(() => {
     clearAiResponseCache();
   });
-  it('renders clean per-game subpages, normalizes MonkeyKing to Wukong, and separates off-role games', () => {
+
+  it('lists stacked match cards without tabs, opens per-game detail subpages, evaluates ADC, and keeps Top/Mid/Support off-role ungraded', () => {
     const jgMatch = {
       ...DEMO_POST_GAME_MATCHES[0]!,
       championId: 62,
@@ -42,16 +47,20 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
       role: 'JUNGLE',
     };
     const adcMatch = {
-      ...DEMO_POST_GAME_MATCHES[1]!,
+      ...ADC_FIXTURE_JINX_CARRY_WIN,
       matchId: 'EUW1_ADC_TEST',
-      championId: 222,
-      championName: 'Jinx',
-      role: 'BOTTOM',
+    };
+    const topOffRoleMatch = {
+      ...DEMO_POST_GAME_MATCHES[1]!,
+      matchId: 'EUW1_TOP_OFFROLE',
+      championId: 266,
+      championName: 'Aatrox',
+      role: 'TOP',
     };
 
     render(
       <PostGameReviewView
-        matches={[jgMatch, adcMatch]}
+        matches={[jgMatch, adcMatch, topOffRoleMatch]}
         targetDivision="PLATINUM IV"
         patchVersion="16.23.1"
         aiConfig={{
@@ -66,44 +75,47 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
       />
     );
 
-    // Champion display name normalized everywhere
-    expect(screen.getByText("Wukong vs Kha'Zix")).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Map & Timeline' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Video & Replay' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'AI Debrief' })).toBeInTheDocument();
+    // No horizontal match or section tabs on mount — stacked match list with normalized champion names
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    const list = screen.getByRole('list', { name: 'Match history' });
+    expect(list).toBeInTheDocument();
+    const jgCard = screen.getByRole('button', { name: /Open Wukong, vs Kha'Zix/i });
+    expect(jgCard).toBeInTheDocument();
 
-    // Switching to Map & Timeline renders interactive Rift Replay
-    fireEvent.click(screen.getByRole('tab', { name: 'Map & Timeline' }));
+    // Open Jungle detail page -> renders KPIs, RiftMap timeline slider, and "← All Matches"
+    fireEvent.click(jgCard);
+    expect(screen.getByRole('heading', { name: "Wukong vs Kha'Zix" })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: 'Inspect match timeline minute' })).toBeInTheDocument();
 
-    // Switching to off-role ADC match resets cleanly to Overview with off-role notice & basic stats
-    fireEvent.click(screen.getByRole('button', { name: /Jinx/i }));
-    expect(screen.getByText('Jinx (ADC)')).toBeInTheDocument();
-    expect(screen.getByText(/Off-role game \(ADC\)/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/No deep jungle evaluation or lane-CS grading is generated here/i)
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Map & Timeline' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'AI Debrief' })).not.toBeInTheDocument();
+    // Return to match list and open graded ADC detail page (Jinx vs Ezreal)
+    fireEvent.click(screen.getByRole('button', { name: /Back to all matches/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Open Jinx, vs Ezreal/i }));
+    expect(screen.getByRole('heading', { name: 'Jinx vs Ezreal' })).toBeInTheDocument();
+    expect(screen.getByText(/Provisional Benchmark/i)).toBeInTheDocument();
+    expect(screen.getByText(/Lane Gold Diff @15/i)).toBeInTheDocument();
+
+    // Return to match list and open Top off-role card -> ungraded scoreboard only, no AI Debrief
+    fireEvent.click(screen.getByRole('button', { name: /Back to all matches/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Open Aatrox/i }));
+    expect(screen.getByText(/Off-role game \(Top\)/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Generate AI Coach Debrief' })).not.toBeInTheDocument();
   });
 
   it('excludes the selected match from its personal EWM baseline comparison', () => {
-    // 3 older games have clean ~7.2 CS/min; newest selected game has 3.0 CS/min outlier
     const baseClean = DEMO_POST_GAME_MATCHES[0]!;
     const outlierSelected = {
       ...baseClean,
       matchId: 'EUW1_OUTLIER_NEW',
       playedAt: '2026-11-27T18:00:00Z',
       durationSeconds: 1800,
-      cs: 90, // 3.0 CS/min outlier
+      cs: 90,
     };
     const priorGames = Array.from({ length: 3 }, (_, idx) => ({
       ...baseClean,
       matchId: `EUW1_PRIOR_${idx}`,
       playedAt: new Date(Date.UTC(2026, 10, 27, 10 + idx, 0, 0)).toISOString(),
       durationSeconds: 1800,
-      cs: 216, // 7.2 CS/min
+      cs: 216,
     }));
 
     render(
@@ -123,7 +135,9 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
       />
     );
 
-    // EWM baseline across the 3 prior games excludes 3.0 CS/min and stays near prior+6.6/7.2
+    const listButtons = screen.getByRole('list', { name: 'Match history' }).querySelectorAll('button');
+    fireEvent.click(listButtons[0]!);
+
     const baselineLine = screen.getByText(/vs Personal EWM Baseline:/i).textContent ?? '';
     expect(baselineLine).toContain('6.8 CS/min');
   });
@@ -160,7 +174,7 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: 'AI Debrief' }));
+    fireEvent.click(screen.getByRole('button', { name: /Open Viego, vs Nocturne/i }));
     expect(
       screen.getByText('Cached debrief: chain 1 Control Ward before Dragon setups.')
     ).toBeInTheDocument();
@@ -168,7 +182,6 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
     expect(screen.getByText('Cached')).toBeInTheDocument();
     expect(spyDebrief).not.toHaveBeenCalled();
 
-    // Switching targetDivision must not hydrate the PLATINUM IV cached debrief
     rerender(
       <PostGameReviewView
         matches={[match]}
@@ -190,7 +203,6 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Generate AI Coach Debrief' })).toBeInTheDocument();
 
-    // Returning to PLATINUM IV restores the matching cached debrief cleanly, then Regenerate refreshes it
     rerender(
       <PostGameReviewView
         matches={[match]}
@@ -251,7 +263,7 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: 'AI Debrief' }));
+    fireEvent.click(screen.getByRole('button', { name: /Open Viego, vs Nocturne/i }));
     expect(screen.queryByText(/999\.9/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Generate AI Coach Debrief' })).toBeInTheDocument();
 

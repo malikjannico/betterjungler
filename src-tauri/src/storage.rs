@@ -135,6 +135,26 @@ pub struct PersonalLearningSummary {
     pub mistake_signatures: Vec<MistakeSignatureRow>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_jungle_role() -> String {
+    "jungle".to_string()
+}
+
+fn default_bottom_role() -> String {
+    "bottom".to_string()
+}
+
+pub fn normalize_coached_role(raw: &str, fallback: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "jungle" => "jungle".to_string(),
+        "bottom" | "bot" | "adc" => "bottom".to_string(),
+        _ => fallback.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UserSettings {
@@ -147,6 +167,16 @@ pub struct UserSettings {
     pub hud_scale: u16,
     pub hud_monitor: String,
     pub minimap_side: String,
+    pub hud_x: Option<i32>,
+    pub hud_y: Option<i32>,
+    #[serde(default = "default_true")]
+    pub hud_locked: bool,
+    #[serde(default = "default_jungle_role")]
+    pub primary_role: String,
+    #[serde(default = "default_bottom_role")]
+    pub secondary_role: String,
+    #[serde(default = "default_true")]
+    pub auto_detect_role: bool,
     pub window_width: Option<f64>,
     pub window_height: Option<f64>,
     pub window_x: Option<i32>,
@@ -171,6 +201,12 @@ impl Default for UserSettings {
             hud_scale: 100,
             hud_monitor: "primary".to_string(),
             minimap_side: "right".to_string(),
+            hud_x: None,
+            hud_y: None,
+            hud_locked: true,
+            primary_role: "jungle".to_string(),
+            secondary_role: "bottom".to_string(),
+            auto_detect_role: true,
             window_width: None,
             window_height: None,
             window_x: None,
@@ -205,6 +241,8 @@ pub struct LpHistoryRecord {
 #[serde(rename_all = "camelCase")]
 pub struct ClimbGoalRecord {
     pub id: String,
+    #[serde(default = "default_jungle_role")]
+    pub role: String,
     pub target_division: String,
     pub metric: String,
     pub title: String,
@@ -511,11 +549,54 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
     }
 
     if version < 5 {
-        backfill_match_facts(conn)?;
+        ensure_v6_columns(conn)?;
+        if version == 4 {
+            backfill_match_facts(conn)?;
+        }
         conn.pragma_update(None, "user_version", 5_i64)
             .map_err(|e| AppError::Storage(e.to_string()))?;
     }
 
+    if version < 6 {
+        ensure_v6_columns(conn)?;
+        backfill_match_facts(conn)?;
+        conn.pragma_update(None, "user_version", 6_i64)
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
+fn ensure_v6_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "climb_goals", "role")? {
+        conn.execute_batch(
+            "ALTER TABLE climb_goals ADD COLUMN role TEXT NOT NULL DEFAULT 'jungle';",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+    for (col, ddl) in [
+        (
+            "damage_share",
+            "ALTER TABLE match_metrics ADD COLUMN damage_share REAL NOT NULL DEFAULT 0;",
+        ),
+        (
+            "turret_plates",
+            "ALTER TABLE match_metrics ADD COLUMN turret_plates INTEGER NOT NULL DEFAULT 0;",
+        ),
+        (
+            "deaths_pre_14",
+            "ALTER TABLE match_metrics ADD COLUMN deaths_pre_14 INTEGER NOT NULL DEFAULT 0;",
+        ),
+        (
+            "gd_at_15_lane",
+            "ALTER TABLE match_metrics ADD COLUMN gd_at_15_lane INTEGER;",
+        ),
+    ] {
+        if !table_has_column(conn, "match_metrics", col)? {
+            conn.execute_batch(ddl)
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+    }
     Ok(())
 }
 
@@ -548,6 +629,8 @@ pub fn load_settings(conn: &Connection) -> AppResult<UserSettings> {
     settings.recording.preset = normalize_recording_preset(&settings.recording.preset);
     settings.recording.max_storage_gb = settings.recording.max_storage_gb.clamp(1, 50);
     settings.recording.keep_last_n_games = settings.recording.keep_last_n_games.clamp(1, 100);
+    settings.primary_role = normalize_coached_role(&settings.primary_role, "jungle");
+    settings.secondary_role = normalize_coached_role(&settings.secondary_role, "bottom");
     if settings.lol_install_path.trim().is_empty()
         || !PathBuf::from(&settings.lol_install_path).exists()
     {
@@ -712,11 +795,29 @@ fn upsert_match_facts_inner(
     } else {
         None
     };
+    let gd_15_lane = if duration_sec >= 900 {
+        frame15.map(|f| {
+            let opp_gold = f["laneOpponentGold"]
+                .as_i64()
+                .unwrap_or_else(|| f["enemyJunglerGold"].as_i64().unwrap_or(0));
+            f["totalGold"].as_i64().unwrap_or(0) - opp_gold
+        })
+    } else {
+        None
+    };
     let xp_15 = if duration_sec >= 900 {
         frame15.map(|f| f["xp"].as_i64().unwrap_or(0) - f["enemyJunglerXp"].as_i64().unwrap_or(0))
     } else {
         None
     };
+    let dmg_self = detail["damageDealtToChampions"].as_f64().unwrap_or(0.0);
+    let dmg_team = detail["teamTotalDamage"].as_f64().unwrap_or(0.0);
+    let damage_share = if dmg_team > 0.0 {
+        ((dmg_self / dmg_team) * 1000.0).round() / 10.0
+    } else {
+        0.0
+    };
+    let turret_plates = detail["turretPlatesTaken"].as_i64().unwrap_or(0);
 
     let team_obj = detail["teamObjectives"].as_i64().unwrap_or(0);
     let enemy_obj = detail["enemyObjectives"].as_i64().unwrap_or(0);
@@ -757,7 +858,8 @@ fn upsert_match_facts_inner(
     }
     player_death_ts.sort_unstable();
     let early_deaths = player_death_ts.iter().filter(|&&ts| ts < 600).count() as i64;
-    let spawn_windows = [300_i64, 360, 840, 1500];
+    let deaths_pre_14 = player_death_ts.iter().filter(|&&ts| ts < 840).count() as i64;
+    let spawn_windows = [175_i64, 300, 480, 900, 1200];
     let pre_obj_ts: Vec<i64> = player_death_ts
         .iter()
         .copied()
@@ -777,8 +879,9 @@ fn upsert_match_facts_inner(
             match_id, cs_per_min, cs_at_4, cs_at_5, cs_at_10,
             gold_diff_at_10, gold_diff_at_15, xp_diff_at_15, vision_per_min,
             control_wards, objective_share_pct, kill_participation_pct,
-            early_deaths, pre_obj_deaths
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            early_deaths, pre_obj_deaths, damage_share, turret_plates,
+            deaths_pre_14, gd_at_15_lane
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
          ON CONFLICT(match_id) DO UPDATE SET
             cs_per_min = excluded.cs_per_min,
             cs_at_4 = excluded.cs_at_4,
@@ -792,7 +895,11 @@ fn upsert_match_facts_inner(
             objective_share_pct = excluded.objective_share_pct,
             kill_participation_pct = excluded.kill_participation_pct,
             early_deaths = excluded.early_deaths,
-            pre_obj_deaths = excluded.pre_obj_deaths",
+            pre_obj_deaths = excluded.pre_obj_deaths,
+            damage_share = excluded.damage_share,
+            turret_plates = excluded.turret_plates,
+            deaths_pre_14 = excluded.deaths_pre_14,
+            gd_at_15_lane = excluded.gd_at_15_lane",
         params![
             match_id,
             cs_per_min,
@@ -807,7 +914,11 @@ fn upsert_match_facts_inner(
             obj_share,
             kp_pct,
             early_deaths,
-            pre_obj_deaths
+            pre_obj_deaths,
+            damage_share,
+            turret_plates,
+            deaths_pre_14,
+            gd_15_lane
         ],
     )
     .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -903,6 +1014,45 @@ fn upsert_match_facts_inner(
             conn.execute(
                 "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
                  VALUES (?1, 'early_gold_deficit_15', 900, 'medium', 'Fell 400g+ behind enemy jungler by 15:00')",
+                params![match_id],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+    } else if role == "BOTTOM" && duration_sec >= 300 {
+        for d_ts in &pre_obj_ts {
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'adc_pre_obj_death', ?2, 'high', 'Caught before neutral objective setup')",
+                params![match_id, d_ts],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if duration_sec >= 600 && cs_at_10.is_some_and(|c| c < 64) {
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'adc_cs_deficit_10', 600, 'medium', 'Missed laning waves kept CS@10 below 64')",
+                params![match_id],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if deaths_pre_14 >= 2 {
+            let second_ts = player_death_ts
+                .iter()
+                .copied()
+                .filter(|&ts| ts < 840)
+                .nth(1)
+                .unwrap_or(600);
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'adc_lane_death_pre_14', ?2, 'medium', '2+ bot-lane deaths before 14:00 plate drop')",
+                params![match_id, second_ts],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if duration_sec >= 900 && dmg_team > 0.0 && damage_share < 23.0 {
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'adc_low_damage_share', 900, 'medium', 'Team champion damage share dropped below 23%')",
                 params![match_id],
             )
             .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -1062,6 +1212,150 @@ pub fn recompute_jungle_baselines(conn: &Connection) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+pub fn load_personal_learning_summary_for_role(
+    conn: &Connection,
+    puuid: Option<&str>,
+    role: &str,
+) -> AppResult<PersonalLearningSummary> {
+    let db_role = match role.trim().to_ascii_uppercase().as_str() {
+        "BOTTOM" | "BOT" | "ADC" => "BOTTOM",
+        _ => "JUNGLE",
+    };
+    if db_role == "JUNGLE" {
+        return load_personal_learning_summary_for_account(conn, puuid);
+    }
+    if !(table_exists(conn, "matches_fact")?
+        && table_exists(conn, "match_metrics")?
+        && table_exists(conn, "mistake_hits")?)
+    {
+        return Ok(PersonalLearningSummary {
+            jungle_match_count: 0,
+            baselines: Vec::new(),
+            mistake_signatures: Vec::new(),
+        });
+    }
+
+    let scoped_puuid = puuid.map(str::trim).filter(|p| !p.is_empty());
+    let mut stmt = conn
+        .prepare(
+            "SELECT m.cs_at_10, m.cs_per_min, COALESCE(m.gd_at_15_lane, m.gold_diff_at_15),
+                    m.damage_share, m.deaths_pre_14, m.turret_plates, m.kill_participation_pct
+             FROM match_metrics m
+             INNER JOIN matches_fact f ON f.match_id = m.match_id
+             WHERE f.role = 'BOTTOM'
+               AND f.duration_sec >= 300
+               AND (?1 IS NULL OR f.puuid = ?1)
+             ORDER BY f.played_at DESC, f.match_id DESC",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(params![scoped_puuid], |row| {
+            Ok((
+                row.get::<_, Option<i64>>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    let mut cs10_vals = Vec::new();
+    let mut cs_vals = Vec::new();
+    let mut gd15_vals = Vec::new();
+    let mut dmg_vals = Vec::new();
+    let mut d14_vals = Vec::new();
+    let mut plate_vals = Vec::new();
+    let mut kp_vals = Vec::new();
+    let mut n = 0_i64;
+    for row in rows {
+        let (cs10, cs, gd15, dmg, d14, plates, kp) =
+            row.map_err(|e| AppError::Storage(e.to_string()))?;
+        n += 1;
+        if let Some(c) = cs10 {
+            cs10_vals.push(c as f64);
+        }
+        cs_vals.push(cs);
+        if let Some(g) = gd15 {
+            gd15_vals.push(g as f64);
+        }
+        dmg_vals.push(dmg);
+        d14_vals.push(d14 as f64);
+        plate_vals.push(plates as f64);
+        kp_vals.push(kp as f64);
+    }
+
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let mut baselines = Vec::new();
+    for (b_key, vals) in [
+        ("cs_at_10", &cs10_vals),
+        ("cs_per_min", &cs_vals),
+        ("gold_diff_at_15", &gd15_vals),
+        ("damage_share_pct", &dmg_vals),
+        ("deaths_pre_14", &d14_vals),
+        ("turret_plates", &plate_vals),
+        ("kill_participation_pct", &kp_vals),
+    ] {
+        if let Some(b_val) = compute_ewma(vals) {
+            baselines.push(PersonalBaselineRow {
+                key: b_key.to_string(),
+                value: b_val,
+                sample_n: vals.len() as i64,
+                updated_at: now_iso.clone(),
+            });
+        }
+    }
+
+    let mut m_stmt = conn
+        .prepare(
+            "SELECT h.detector_id,
+                    COUNT(DISTINCT h.match_id),
+                    COUNT(*),
+                    COALESCE((
+                        SELECT h2.timestamp_sec
+                        FROM mistake_hits h2
+                        INNER JOIN matches_fact f2 ON f2.match_id = h2.match_id
+                        WHERE h2.detector_id = h.detector_id
+                          AND f2.role = 'BOTTOM'
+                          AND f2.duration_sec >= 300
+                          AND (?1 IS NULL OR f2.puuid = ?1)
+                        ORDER BY f2.played_at DESC, h2.timestamp_sec DESC
+                        LIMIT 1
+                    ), 0)
+             FROM mistake_hits h
+             INNER JOIN matches_fact f ON f.match_id = h.match_id
+             WHERE f.role = 'BOTTOM'
+               AND f.duration_sec >= 300
+               AND (?1 IS NULL OR f.puuid = ?1)
+             GROUP BY h.detector_id
+             ORDER BY COUNT(DISTINCT h.match_id) DESC, h.detector_id ASC",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let m_rows = m_stmt
+        .query_map(params![scoped_puuid], |row| {
+            Ok(MistakeSignatureRow {
+                detector_id: row.get(0)?,
+                hit_matches: row.get(1)?,
+                total_hits: row.get(2)?,
+                last_timestamp_sec: row.get(3)?,
+            })
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let mut mistake_signatures = Vec::new();
+    for row in m_rows {
+        mistake_signatures.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+    }
+
+    Ok(PersonalLearningSummary {
+        jungle_match_count: n,
+        baselines,
+        mistake_signatures,
+    })
 }
 
 pub fn load_personal_learning_summary_for_account(
@@ -2112,6 +2406,7 @@ mod tests {
 
         let goal = ClimbGoalRecord {
             id: "goal-1".to_string(),
+            role: "jungle".to_string(),
             target_division: "PLATINUM IV".to_string(),
             metric: "csPerMin".to_string(),
             title: "Hit 6.6 CS/min".to_string(),
@@ -2182,7 +2477,7 @@ mod tests {
         let user_ver: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read user_version");
-        assert_eq!(user_ver, 5);
+        assert_eq!(user_ver, 6);
 
         let sample_detail = serde_json::json!({
             "matchId": "EUW1_9001",
@@ -2357,9 +2652,16 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("stored role");
+        let jg_mistakes_on_adc: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mistake_hits WHERE match_id = 'EUW1_ADC' AND detector_id NOT LIKE 'adc_%'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("zero jungle mistakes on adc");
         let adc_mistakes: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM mistake_hits WHERE match_id = 'EUW1_ADC'",
+                "SELECT COUNT(*) FROM mistake_hits WHERE match_id = 'EUW1_ADC' AND detector_id = 'adc_pre_obj_death'",
                 [],
                 |r| r.get(0),
             )
@@ -2372,8 +2674,23 @@ mod tests {
             )
             .expect("baseline sample_n");
         assert_eq!(stored_role, "BOTTOM");
-        assert_eq!(adc_mistakes, 0);
+        assert_eq!(jg_mistakes_on_adc, 0);
+        assert_eq!(adc_mistakes, 1);
         assert_eq!(baseline_n, 1);
+        let jg_snap = load_personal_learning_summary_for_role(&conn, Some("puuid-1"), "JUNGLE")
+            .expect("jungle isolated");
+        let adc_snap = load_personal_learning_summary_for_role(&conn, Some("puuid-1"), "BOTTOM")
+            .expect("adc isolated");
+        assert_eq!(jg_snap.jungle_match_count, 1);
+        assert_eq!(adc_snap.jungle_match_count, 1);
+        assert!(jg_snap
+            .mistake_signatures
+            .iter()
+            .all(|s| !s.detector_id.starts_with("adc_")));
+        assert!(adc_snap
+            .mistake_signatures
+            .iter()
+            .any(|s| s.detector_id == "adc_pre_obj_death"));
 
         // Clearing all jungle matches and keeping only off-role clears stale baselines (n == 0)
         let conn_offrole_only = Connection::open_in_memory().expect("in-memory sqlite offrole");
@@ -2567,6 +2884,7 @@ mod tests {
         // Atomic focus toggle across multiple goals + error on unknown ID
         let g1 = ClimbGoalRecord {
             id: "g1".to_string(),
+            role: "jungle".to_string(),
             target_division: "PLATINUM IV".to_string(),
             metric: "csPerMin".to_string(),
             title: "G1".to_string(),
@@ -2674,12 +2992,13 @@ mod tests {
         )
         .expect("seed stale baseline");
 
-        run_migrations(&conn).expect("upgrade v3 to v4+v5");
+        run_migrations(&conn).expect("upgrade v3 to v6");
         let new_ver: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read new user_version");
-        assert_eq!(new_ver, 5);
+        assert_eq!(new_ver, 6);
         assert!(table_has_column(&conn, "matches_fact", "role").expect("check role col"));
+        assert!(table_has_column(&conn, "match_metrics", "damage_share").expect("check dmg col"));
         let v4_role: String = conn
             .query_row(
                 "SELECT role FROM matches_fact WHERE match_id = 'EUW1_V3_ADC'",
@@ -2689,13 +3008,19 @@ mod tests {
             .expect("migrated role");
         let v4_mistakes: i64 = conn
             .query_row("SELECT COUNT(*) FROM mistake_hits", [], |r| r.get(0))
-            .expect("cleared off-role mistakes");
+            .expect("recomputed adc mistakes on v6");
         let v4_baselines: i64 = conn
             .query_row("SELECT COUNT(*) FROM baselines", [], |r| r.get(0))
-            .expect("cleared stale baselines");
+            .expect("cleared jungle baselines");
         assert_eq!(v4_role, "BOTTOM");
-        assert_eq!(v4_mistakes, 0);
+        assert_eq!(v4_mistakes, 1); // adc_pre_obj_death detected for BOTTOM without contaminating Jungle
         assert_eq!(v4_baselines, 0);
+        let jg_only = load_personal_learning_summary_for_role(&conn, None, "JUNGLE")
+            .expect("jungle summary isolated");
+        assert_eq!(jg_only.jungle_match_count, 0);
+        let adc_only = load_personal_learning_summary_for_role(&conn, None, "BOTTOM")
+            .expect("adc summary isolated");
+        assert_eq!(adc_only.jungle_match_count, 1);
     }
 
     #[test]
