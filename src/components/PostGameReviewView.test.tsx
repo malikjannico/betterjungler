@@ -59,4 +59,44 @@ describe('PostGameReviewView subpages & role/champion normalization', () => {
     expect(screen.queryByRole('tab', { name: 'Map & Timeline' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'AI Debrief' })).not.toBeInTheDocument();
   });
+
+  it('excludes the selected match from its personal EWM baseline comparison', () => {
+    // 3 older games have clean ~7.2 CS/min; newest selected game has 3.0 CS/min outlier
+    const baseClean = DEMO_POST_GAME_MATCHES[0]!;
+    const outlierSelected = {
+      ...baseClean,
+      matchId: 'EUW1_OUTLIER_NEW',
+      playedAt: '2026-11-27T18:00:00Z',
+      durationSeconds: 1800,
+      cs: 90, // 3.0 CS/min outlier
+    };
+    const priorGames = Array.from({ length: 3 }, (_, idx) => ({
+      ...baseClean,
+      matchId: `EUW1_PRIOR_${idx}`,
+      playedAt: new Date(Date.UTC(2026, 10, 27, 10 + idx, 0, 0)).toISOString(),
+      durationSeconds: 1800,
+      cs: 216, // 7.2 CS/min
+    }));
+
+    render(
+      <PostGameReviewView
+        matches={[outlierSelected, ...priorGames]}
+        targetDivision="PLATINUM IV"
+        patchVersion="16.23.1"
+        aiConfig={{
+          provider: 'off',
+          model: 'gemini-2.5-flash',
+          endpoint: 'http://127.0.0.1:11434',
+          hasApiKey: false,
+        }}
+        canSyncLive={false}
+        isTauri={false}
+        onSyncMatches={vi.fn(async () => {})}
+      />
+    );
+
+    // EWM baseline across the 3 prior games excludes 3.0 CS/min and stays near prior+6.6/7.2
+    const baselineLine = screen.getByText(/vs Personal EWM Baseline:/i).textContent ?? '';
+    expect(baselineLine).toContain('6.8 CS/min');
+  });
 });

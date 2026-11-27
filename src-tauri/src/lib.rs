@@ -532,11 +532,11 @@ fn get_cached_matches(
         .db
         .lock()
         .map_err(|e| AppError::Storage(e.to_string()))?;
-    let (_summaries, details) = storage::list_cached_matches(&conn, puuid.as_deref(), 15)?;
+    let (_summaries, details) = storage::list_cached_matches(&conn, puuid.as_deref(), 30)?;
     if details.is_empty() {
         if let Some(ref p) = puuid {
             if riot_api::is_unencrypted_lcu_uuid(p) {
-                let (_all_sum, all_details) = storage::list_cached_matches(&conn, None, 15)?;
+                let (_all_sum, all_details) = storage::list_cached_matches(&conn, None, 30)?;
                 return Ok(all_details);
             }
         }
@@ -1124,6 +1124,22 @@ fn open_recordings_folder(state: State<'_, Arc<SharedState>>) -> AppResult<()> {
         );
     }
     Ok(())
+}
+
+#[tauri::command]
+fn get_personal_learning_snapshot(
+    state: State<'_, Arc<SharedState>>,
+    puuid: Option<String>,
+) -> AppResult<storage::PersonalLearningSummary> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    let effective_puuid = puuid
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && !riot_api::is_unencrypted_lcu_uuid(p));
+    storage::load_personal_learning_summary_for_account(&conn, effective_puuid)
 }
 
 #[tauri::command]
@@ -1750,6 +1766,7 @@ pub fn run() {
             save_recording_clip,
             delete_recording_clip,
             open_recordings_folder,
+            get_personal_learning_snapshot,
             inspect_replay_config,
             set_replay_api_enabled,
             seek_riot_replay

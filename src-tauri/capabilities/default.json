@@ -48,6 +48,7 @@
     "allow-save-recording-clip",
     "allow-delete-recording-clip",
     "allow-open-recordings-folder",
+    "allow-get-personal-learning-snapshot",
     "allow-inspect-replay-config",
     "allow-set-replay-api-enabled",
     "allow-seek-riot-replay"

@@ -2,6 +2,14 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [1.4.0] - 2026-11-27
+
+### Added
+- **Deterministic Jungle Mistake Detectors & SQLite v5 Persistence (`PRAGMA user_version = 5`)**: Evaluates 5 deterministic jungle-only mistake detectors (`pre_obj_death`, `early_death_before_10`, `midgame_farm_drop`, `blind_river_vision`, `early_gold_deficit_15`) in both Rust SQLite fact tables (`mistake_hits`, `baselines`, `get_personal_learning_snapshot`) and TypeScript (`personalLearningEngine.ts`).
+- **Exponentially Weighted Personal Baselines & KPI Quartile Bands**: Computes half-life-8 EWMA KPI baselines shrunk smoothly toward target division priors (`CS/min`, `GD @15`, `Obj Share`, `Pre-Obj Deaths`, `Vision/min`, `KP%`) along with P25–P75 range bands inside Climb & Goals and Post-Game comparisons.
+- **Statistical Surfacing Gate & Auto-Proposed Match Focus**: Enforces Binomial Wilson 95% lower-bound + minimum-hit gating (`Confirmed Leak` vs `Emerging Pattern` vs `Monitoring`, verified at `<5%` false positives and `>=80%` planted-leak recall across 1,000 Monte Carlo seeds) and proposes one-click Match Focus goals.
+- **Multi-Session Stamina & Requeue Tilt Analytics**: Clusters matches into discrete sessions separated by 2h inactivity gaps to measure Games 1–2 vs Game 3+ stamina and immediate post-loss requeue win rates.
+
 ## [1.3.0] - 2026-11-27
 
 ### Added

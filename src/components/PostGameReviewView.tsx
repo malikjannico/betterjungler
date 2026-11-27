@@ -5,6 +5,7 @@ import { synthesizeDemoPostGameDebrief } from '../domain/aiCoachFallback';
 import { formatChampionName } from '../domain/championNames';
 import { evaluateFocusGoalAgainstMatch } from '../domain/climbLadderEngine';
 import { formatClock } from '../domain/liveCoachEngine';
+import { computePersonalLearningSnapshot } from '../domain/personalLearningEngine';
 import {
   analyzePostGameMatch,
   formatRoleLabel,
@@ -152,6 +153,13 @@ export function PostGameReviewView({
     if (!focusGoal || !report || !report.isJungle) return null;
     return evaluateFocusGoalAgainstMatch(focusGoal, report.kpis);
   }, [focusGoal, report]);
+
+  const personalLearning = useMemo(() => {
+    const jgMatches = matches.filter(
+      (m) => isJungleMatch(m) && m.matchId !== selectedMatch?.matchId
+    );
+    return computePersonalLearningSnapshot(jgMatches, matches, targetDivision);
+  }, [matches, selectedMatch?.matchId, targetDivision]);
 
   function handleExportReview() {
     if (!report) return;
@@ -585,6 +593,15 @@ export function PostGameReviewView({
                       report.highlights[0]?.detail ??
                       'Solid jungle fundamentals across objective setups.'}
                   </p>
+                  {personalLearning &&
+                    personalLearning.jungleMatchCount >= 3 &&
+                    personalLearning.baselines?.csPerMin && (
+                    <p className="tabular-nums mt-1 text-[11px] text-white/[0.5]">
+                      vs Personal EWM Baseline: {personalLearning.baselines.csPerMin.shrunkBaseline}{' '}
+                      CS/min · {personalLearning.baselines.visionPerMin.shrunkBaseline} vis/min ·{' '}
+                      {personalLearning.baselines.preObjectiveDeaths.shrunkBaseline} pre-obj deaths/g
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-7">

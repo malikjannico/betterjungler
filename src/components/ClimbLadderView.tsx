@@ -2,6 +2,7 @@ import { CheckCircle2, Circle, Trash2, TrendingUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { findJungleChampionById } from '../data/jungleKnowledgePack';
 import { formatChampionName } from '../domain/championNames';
+import { computePersonalLearningSnapshot } from '../domain/personalLearningEngine';
 import {
   KPI_META,
   MIN_GOAL_COMPLETION_GAMES,
@@ -17,6 +18,7 @@ import type {
   HighEloMetaSnapshot,
   JungleKpiKey,
   LpHistoryPoint,
+  SqlPersonalLearningSummary,
 } from '../types/coaching';
 import type {
   MatchSummaryRecord,
@@ -26,12 +28,15 @@ import type {
 import { ClimbTrendCharts } from './ClimbTrendCharts';
 import { EmptyState } from './EmptyState';
 import { GlassSurface } from './GlassSurface';
+import { PersonalLearningPanel } from './PersonalLearningPanel';
 
 interface ClimbLadderViewProps {
   summonerProfile: SummonerProfileSummary | null;
   targetDivision: string;
   summaries: MatchSummaryRecord[];
   matches: MatchV5Detail[];
+  allMatchesForSessions?: MatchV5Detail[];
+  sqlPersonalLearning?: SqlPersonalLearningSummary | null;
   offRoleExcludedCount?: number;
   lpHistory: LpHistoryPoint[];
   patchVersion: string;
@@ -46,6 +51,7 @@ interface ClimbLadderViewProps {
   onUpsertGoal: (goal: ClimbGoal) => Promise<void>;
   onDeleteGoal: (goalId: string) => Promise<void>;
   onSetFocusGoal?: (goalId: string) => Promise<void>;
+  onAdoptFocusGoal?: (goal: ClimbGoal) => Promise<void>;
   onRefreshHighElo: () => Promise<void>;
   onSyncMatches?: () => Promise<void>;
   onOpenSettings?: () => void;
@@ -67,6 +73,8 @@ export function ClimbLadderView({
   targetDivision,
   summaries,
   matches,
+  allMatchesForSessions,
+  sqlPersonalLearning,
   offRoleExcludedCount = 0,
   lpHistory,
   patchVersion,
@@ -81,6 +89,7 @@ export function ClimbLadderView({
   onUpsertGoal,
   onDeleteGoal,
   onSetFocusGoal,
+  onAdoptFocusGoal,
   onRefreshHighElo,
   onSyncMatches,
   onOpenSettings,
@@ -101,7 +110,37 @@ export function ClimbLadderView({
   );
 
   const hasMatches = summaries.length > 0;
-  const sessionTilting = useMemo(() => isSessionTilting(matches), [matches]);
+  const sessionSourceMatches = allMatchesForSessions ?? matches;
+  const sessionTilting = useMemo(
+    () => isSessionTilting(matches.filter((m) => m.durationSeconds >= 300)),
+    [matches]
+  );
+  const personalLearning = useMemo(
+    () =>
+      computePersonalLearningSnapshot(
+        matches,
+        sessionSourceMatches,
+        targetDivision,
+        sqlPersonalLearning
+      ),
+    [matches, sessionSourceMatches, targetDivision, sqlPersonalLearning]
+  );
+  const activeFocusGoalId =
+    goals.find((g) => g.isFocusGoal && g.status === 'active')?.id ??
+    goals.find((g) => g.isFocusGoal)?.id ??
+    null;
+
+  async function handleAdoptFocusGoal(goal: ClimbGoal) {
+    if (onAdoptFocusGoal) {
+      await onAdoptFocusGoal(goal);
+      return;
+    }
+    const cleanGoal: ClimbGoal = { ...goal, isFocusGoal: !onSetFocusGoal };
+    await onUpsertGoal(cleanGoal);
+    if (onSetFocusGoal) {
+      await onSetFocusGoal(cleanGoal.id);
+    }
+  }
   const syncedGoals = useMemo(
     () => syncGoalsWithRollingProgress(goals, evaluation.comparisons, evaluation.matchCount),
     [goals, evaluation.comparisons, evaluation.matchCount]
@@ -391,6 +430,15 @@ export function ClimbLadderView({
                   />
                 </div>
                 <div className="t-caption mt-1.5 text-white/[0.5]">{comp.gapText}</div>
+                {personalLearning &&
+                  personalLearning.jungleMatchCount >= 2 &&
+                  personalLearning.baselines?.[comp.metric] && (
+                  <div className="tabular-nums mt-1 text-[11px] text-white/[0.45]">
+                    EWM {personalLearning.baselines[comp.metric].shrunkBaseline}
+                    {comp.unit} · IQR {personalLearning.baselines[comp.metric].p25}–
+                    {personalLearning.baselines[comp.metric].p75}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -402,6 +450,13 @@ export function ClimbLadderView({
         matches={matches}
         lpHistory={lpHistory}
         patchVersion={patchVersion}
+      />
+
+      {/* M13 Personal Baselines, Statistical Mistake Detectors & Multi-Session Tilt Analytics */}
+      <PersonalLearningPanel
+        snapshot={personalLearning}
+        currentFocusGoalId={activeFocusGoalId}
+        onAdoptFocusGoal={handleAdoptFocusGoal}
       />
 
       {/* Goals & High-Elo Sampler */}

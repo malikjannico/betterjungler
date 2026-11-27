@@ -46,6 +46,7 @@ import {
   getCachedMatches,
   getCachedMetaSnapshot,
   getLcuProfile,
+  getPersonalLearningSnapshot,
   installAppUpdate,
   isTauriEnvironment,
   loadClimbGoals,
@@ -70,6 +71,7 @@ import type {
   HudCorner,
   LpHistoryPoint,
   OverlayMode,
+  SqlPersonalLearningSummary,
   UpdateCheckResult,
   UserSettings,
 } from './types/coaching';
@@ -79,6 +81,29 @@ import type {
   MatchV5Detail,
   SummonerProfileSummary,
 } from './types/riot';
+
+function mergeMatchesById(
+  existing: MatchV5Detail[],
+  incoming: MatchV5Detail[],
+  maxItems = 30
+): MatchV5Detail[] {
+  const seen = new Map<string, MatchV5Detail>();
+  for (const m of incoming) {
+    seen.set(m.matchId, m);
+  }
+  for (const m of existing) {
+    if (!seen.has(m.matchId)) {
+      seen.set(m.matchId, m);
+    }
+  }
+  return [...seen.values()]
+    .sort((a, b) => {
+      const ta = Date.parse(a.playedAt);
+      const tb = Date.parse(b.playedAt);
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    })
+    .slice(0, maxItems);
+}
 
 const DEMO_OPTIONS: Array<{ id: DemoScenarioId; label: string }> = [
   { id: 'idle', label: 'Live Client Mode' },
@@ -146,6 +171,9 @@ export function App() {
   const [lpHistory, setLpHistory] = useState<LpHistoryPoint[]>([]);
   const [climbGoals, setClimbGoals] = useState<ClimbGoal[]>([]);
   const [highEloMeta, setHighEloMeta] = useState<HighEloMetaSnapshot | null>(null);
+  const [sqlPersonalLearning, setSqlPersonalLearning] = useState<SqlPersonalLearningSummary | null>(
+    null
+  );
   const [settings, setSettings] = useState<UserSettings>({
     riotId: '',
     region: 'EUW1',
@@ -206,6 +234,7 @@ export function App() {
   const simButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const lastPhaseRef = useRef<GamePhase | null>(null);
+  const lastAccountPuuidRef = useRef<string | null>(null);
   const hadActiveMatchRef = useRef(false);
   const inEndOfGameCycleRef = useRef(false);
   const endOfGameAtMsRef = useRef<number>(0);
@@ -278,8 +307,15 @@ export function App() {
       if (active && snap) setHighEloMeta(snap);
     });
     void getCachedMatches().then((cached) => {
-      if (active && cached.length > 0) setMatches(cached);
+      if (active && !lastAccountPuuidRef.current && cached.length > 0) setMatches(cached);
     });
+    void getPersonalLearningSnapshot()
+      .then((snap) => {
+        if (active && !lastAccountPuuidRef.current) {
+          setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
+        }
+      })
+      .catch(() => {});
     void loadLpHistory().then((hist) => {
       if (active && hist.length > 0) setLpHistory(hist);
     });
@@ -333,17 +369,34 @@ export function App() {
   }, [isTauri]);
 
   useEffect(() => {
+    const nextPuuid = summonerProfile?.puuid?.trim() || null;
+    if (!isTauri || !nextPuuid) return;
+    lastAccountPuuidRef.current = nextPuuid;
+    let active = true;
+    void getCachedMatches(nextPuuid)
+      .then((cached) => {
+        if (active) setMatches(cached);
+      })
+      .catch(() => {});
+    void getPersonalLearningSnapshot(nextPuuid)
+      .then((snap) => {
+        if (active) {
+          setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isTauri, summonerProfile?.puuid]);
+
+  useEffect(() => {
     if (!isTauri || !liveState?.lcuConnected || summonerProfile) return;
     let active = true;
     void getLcuProfile(settings.region)
       .then((profile) => {
         if (!active) return;
         setSummonerProfile(profile);
-        if (profile.puuid) {
-          void getCachedMatches(profile.puuid).then((cached) => {
-            if (active && cached.length > 0) setMatches(cached);
-          });
-        }
       })
       .catch(() => {});
     return () => {
@@ -518,9 +571,16 @@ export function App() {
             matchUpdated = true;
             syncedWin = newest.win;
             syncedMatchId = newest.matchId;
-            setMatches(synced);
+            setMatches((prev) => mergeMatchesById(prev, synced, 30));
             setLastAutoSyncedMatchId(newest.matchId);
             setAutoSyncNotice(null);
+            void getPersonalLearningSnapshot(curProfile.puuid)
+              .then((snap) => {
+                if (!cancelled) {
+                  setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
+                }
+              })
+              .catch(() => {});
           } else {
             if (isFinalAttempt) {
               setAutoSyncNotice(
@@ -712,8 +772,13 @@ export function App() {
     }
     const synced = await syncRecentMatches(profilePuuid ?? '', settings.region, 8);
     if (synced.length > 0) {
-      setMatches(synced);
+      setMatches((prev) => mergeMatchesById(prev, synced, 30));
       setAutoSyncNotice(null);
+      void getPersonalLearningSnapshot(profilePuuid ?? null)
+        .then((snap) => {
+          setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
+        })
+        .catch(() => {});
     }
   }
 
@@ -723,14 +788,24 @@ export function App() {
   }
 
   async function handleSetFocusGoal(goalId: string) {
-    const previous = climbGoals;
-    setClimbGoals(setSingleFocusGoal(previous, goalId));
+    setClimbGoals((prev) => setSingleFocusGoal(prev, goalId));
     try {
       const persisted = await setFocusGoal(goalId);
       setClimbGoals(persisted);
     } catch {
-      setClimbGoals(previous);
+      const authoritative = await loadClimbGoals().catch(() => null);
+      if (authoritative) {
+        setClimbGoals(authoritative);
+      }
     }
+  }
+
+  async function handleAdoptFocusGoal(goal: ClimbGoal) {
+    const cleanGoal: ClimbGoal = { ...goal, isFocusGoal: false };
+    await upsertClimbGoal(cleanGoal);
+    setClimbGoals((prev) => [cleanGoal, ...prev.filter((g) => g.id !== cleanGoal.id)]);
+    const persisted = await setFocusGoal(cleanGoal.id);
+    setClimbGoals(persisted);
   }
 
   async function handleDeleteGoal(goalId: string) {
@@ -744,14 +819,29 @@ export function App() {
   }
 
   function handleProfileLoaded(profile: SummonerProfileSummary) {
+    const nextPuuid = profile.puuid?.trim() || null;
+    if (nextPuuid && lastAccountPuuidRef.current && lastAccountPuuidRef.current !== nextPuuid) {
+      setMatches([]);
+      setSqlPersonalLearning(null);
+    }
+    if (nextPuuid) {
+      lastAccountPuuidRef.current = nextPuuid;
+    }
     setSummonerProfile(profile);
     void loadLpHistory().then((hist) => {
       if (hist.length > 0) setLpHistory(hist);
     });
-    if (profile.puuid) {
-      void getCachedMatches(profile.puuid).then((cached) => {
-        if (cached.length > 0) setMatches(cached);
-      });
+    if (nextPuuid) {
+      void getCachedMatches(nextPuuid)
+        .then((cached) => {
+          setMatches(cached);
+        })
+        .catch(() => {});
+      void getPersonalLearningSnapshot(nextPuuid)
+        .then((snap) => {
+          setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
+        })
+        .catch(() => {});
     }
   }
 
@@ -1199,6 +1289,8 @@ export function App() {
                     targetDivision={settings.targetDivision}
                     summaries={sessionCtx.climb.summaries}
                     matches={sessionCtx.climb.jungleMatches}
+                    allMatchesForSessions={sessionCtx.climb.matches}
+                    sqlPersonalLearning={demoScenario === 'idle' ? sqlPersonalLearning : null}
                     offRoleExcludedCount={sessionCtx.climb.offRoleExcludedCount}
                     lpHistory={sessionCtx.climb.lpHistory}
                     patchVersion={patchVersion}
@@ -1213,6 +1305,7 @@ export function App() {
                     onUpsertGoal={handleUpsertGoal}
                     onDeleteGoal={handleDeleteGoal}
                     onSetFocusGoal={handleSetFocusGoal}
+                    onAdoptFocusGoal={handleAdoptFocusGoal}
                     onRefreshHighElo={handleRefreshHighElo}
                     onSyncMatches={handleSyncMatches}
                     onOpenSettings={() => openSettingsSection('account')}

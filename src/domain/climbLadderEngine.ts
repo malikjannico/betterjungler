@@ -11,19 +11,20 @@ export interface DivisionBenchmarkProfile {
   goldDiffAt15: number;
   objectiveSharePct: number;
   preObjectiveDeaths: number;
+  earlyDeaths: number;
   visionPerMin: number;
   killParticipationPct: number;
 }
 
 export const DIVISION_BENCHMARKS: Record<DivisionTier, DivisionBenchmarkProfile> = {
-  IRON: { csPerMin: 5.0, goldDiffAt15: -150, objectiveSharePct: 45, preObjectiveDeaths: 1.8, visionPerMin: 0.55, killParticipationPct: 48 },
-  BRONZE: { csPerMin: 5.4, goldDiffAt15: 0, objectiveSharePct: 48, preObjectiveDeaths: 1.5, visionPerMin: 0.65, killParticipationPct: 50 },
-  SILVER: { csPerMin: 5.8, goldDiffAt15: 100, objectiveSharePct: 52, preObjectiveDeaths: 1.2, visionPerMin: 0.75, killParticipationPct: 53 },
-  GOLD: { csPerMin: 6.2, goldDiffAt15: 200, objectiveSharePct: 55, preObjectiveDeaths: 0.9, visionPerMin: 0.85, killParticipationPct: 56 },
-  PLATINUM: { csPerMin: 6.6, goldDiffAt15: 300, objectiveSharePct: 58, preObjectiveDeaths: 0.6, visionPerMin: 0.95, killParticipationPct: 59 },
-  EMERALD: { csPerMin: 6.9, goldDiffAt15: 400, objectiveSharePct: 60, preObjectiveDeaths: 0.45, visionPerMin: 1.05, killParticipationPct: 62 },
-  DIAMOND: { csPerMin: 7.2, goldDiffAt15: 500, objectiveSharePct: 63, preObjectiveDeaths: 0.3, visionPerMin: 1.15, killParticipationPct: 65 },
-  MASTER: { csPerMin: 7.5, goldDiffAt15: 650, objectiveSharePct: 66, preObjectiveDeaths: 0.2, visionPerMin: 1.25, killParticipationPct: 68 },
+  IRON: { csPerMin: 5.0, goldDiffAt15: -150, objectiveSharePct: 45, preObjectiveDeaths: 1.8, earlyDeaths: 1.6, visionPerMin: 0.55, killParticipationPct: 48 },
+  BRONZE: { csPerMin: 5.4, goldDiffAt15: 0, objectiveSharePct: 48, preObjectiveDeaths: 1.5, earlyDeaths: 1.4, visionPerMin: 0.65, killParticipationPct: 50 },
+  SILVER: { csPerMin: 5.8, goldDiffAt15: 100, objectiveSharePct: 52, preObjectiveDeaths: 1.2, earlyDeaths: 1.2, visionPerMin: 0.75, killParticipationPct: 53 },
+  GOLD: { csPerMin: 6.2, goldDiffAt15: 200, objectiveSharePct: 55, preObjectiveDeaths: 0.9, earlyDeaths: 1.0, visionPerMin: 0.85, killParticipationPct: 56 },
+  PLATINUM: { csPerMin: 6.6, goldDiffAt15: 300, objectiveSharePct: 58, preObjectiveDeaths: 0.6, earlyDeaths: 0.9, visionPerMin: 0.95, killParticipationPct: 59 },
+  EMERALD: { csPerMin: 6.9, goldDiffAt15: 400, objectiveSharePct: 60, preObjectiveDeaths: 0.45, earlyDeaths: 0.75, visionPerMin: 1.05, killParticipationPct: 62 },
+  DIAMOND: { csPerMin: 7.2, goldDiffAt15: 500, objectiveSharePct: 63, preObjectiveDeaths: 0.3, earlyDeaths: 0.6, visionPerMin: 1.15, killParticipationPct: 65 },
+  MASTER: { csPerMin: 7.5, goldDiffAt15: 650, objectiveSharePct: 66, preObjectiveDeaths: 0.2, earlyDeaths: 0.5, visionPerMin: 1.25, killParticipationPct: 68 },
 };
 
 export const KPI_META: Record<
@@ -53,6 +54,12 @@ export const KPI_META: Record<
     unit: '/game',
     lowerIsBetter: true,
     goalTemplate: 'Keep Pre-Objective Deaths <= {target}/game',
+  },
+  earlyDeaths: {
+    label: 'Early Deaths (<10m)',
+    unit: '/game',
+    lowerIsBetter: true,
+    goalTemplate: 'Keep Early Deaths (<10m) <= {target}/game',
   },
   visionPerMin: {
     label: 'Vision Score / Min',
@@ -158,7 +165,7 @@ export function evaluateDivisionProgress(
     return roundTo(sum / count, decimals);
   };
 
-  const currentMap: Record<JungleKpiKey, number> = {
+  const currentMap: Record<Exclude<JungleKpiKey, 'earlyDeaths'>, number> = {
     csPerMin: avg((m) => m.csPerMin, 1),
     goldDiffAt15: avg((m) => m.goldDiffAt15, 0),
     objectiveSharePct: avg((m) => m.objectiveSharePct, 0),
@@ -167,7 +174,7 @@ export function evaluateDivisionProgress(
     killParticipationPct: avg((m) => m.killParticipationPct, 0),
   };
 
-  const keys: JungleKpiKey[] = [
+  const keys: Array<Exclude<JungleKpiKey, 'earlyDeaths'>> = [
     'preObjectiveDeaths',
     'csPerMin',
     'objectiveSharePct',
@@ -307,6 +314,7 @@ export function evaluateFocusGoalAgainstMatch(
     goldDiffAt15: number;
     objectiveSharePct: number;
     preObjectiveDeaths: number;
+    earlyDeaths?: number;
     visionPerMin: number;
     killParticipationPct: number;
   }
@@ -320,7 +328,14 @@ export function evaluateFocusGoalAgainstMatch(
       deltaLabel: 'Metric unavailable',
     };
   }
-  const decimals = goal.metric === 'visionPerMin' ? 2 : goal.metric === 'csPerMin' ? 1 : 0;
+  const decimals =
+    goal.metric === 'visionPerMin' ||
+    goal.metric === 'preObjectiveDeaths' ||
+    goal.metric === 'earlyDeaths'
+      ? 2
+      : goal.metric === 'csPerMin'
+        ? 1
+        : 0;
   const actualValue = roundTo(raw, decimals);
   const passed = goal.lowerIsBetter
     ? actualValue <= goal.targetValue

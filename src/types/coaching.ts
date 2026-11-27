@@ -541,6 +541,7 @@ export type JungleKpiKey =
   | 'goldDiffAt15'
   | 'objectiveSharePct'
   | 'preObjectiveDeaths'
+  | 'earlyDeaths'
   | 'visionPerMin'
   | 'killParticipationPct';
 
@@ -611,4 +612,84 @@ export interface ChangelogEntry {
   version: string;
   date: string;
   sections: Array<{ title: string; items: string[] }>;
+}
+
+export type MistakeDetectorId =
+  | 'pre_obj_death'
+  | 'early_death_before_10'
+  | 'midgame_farm_drop'
+  | 'blind_river_vision'
+  | 'early_gold_deficit_15';
+
+export type InsightConfidenceStatus = 'confirmed' | 'emerging' | 'monitoring';
+
+export interface PersonalBaselineMetric {
+  metric: JungleKpiKey;
+  ewmValue: number;
+  shrunkBaseline: number;
+  priorTarget: number;
+  effectiveN: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  trendDelta: number;
+}
+
+export interface MistakeSignatureInsight {
+  detectorId: MistakeDetectorId;
+  label: string;
+  category: 'farming' | 'pathing' | 'objectives' | 'vision' | 'fighting';
+  metric: JungleKpiKey;
+  status: InsightConfidenceStatus;
+  hitMatches: number;
+  totalMatches: number;
+  hitRatePct: number;
+  wilsonLowerBoundPct: number;
+  baseRatePct: number;
+  drill: string;
+  recentTimestamps: number[];
+}
+
+export interface MultiSessionTiltSummary {
+  sessionCount: number;
+  avgGamesPerSession: number;
+  freshWrPct: number;
+  freshGames: number;
+  extendedWrPct: number | null;
+  extendedGames: number;
+  postLossWrPct: number | null;
+  postLossGames: number;
+  postWinWrPct: number | null;
+  postWinGames: number;
+  advisory: string;
+}
+
+export interface ProposedFocusGoal {
+  goal: ClimbGoal;
+  reason: string;
+  sourceDetectorId: MistakeDetectorId;
+}
+
+export interface PersonalLearningSnapshot {
+  jungleMatchCount: number;
+  baselines: Record<JungleKpiKey, PersonalBaselineMetric>;
+  signatures: MistakeSignatureInsight[];
+  proposedFocus: ProposedFocusGoal | null;
+  tiltAnalytics: MultiSessionTiltSummary;
+}
+
+export interface SqlPersonalLearningSummary {
+  jungleMatchCount: number;
+  baselines: Array<{
+    key: string;
+    value: number;
+    sampleN: number;
+    updatedAt: string;
+  }>;
+  mistakeSignatures: Array<{
+    detectorId: string;
+    hitMatches: number;
+    totalHits: number;
+    lastTimestampSec: number;
+  }>;
 }

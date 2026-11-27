@@ -128,6 +128,11 @@ vi.mock('./services/tauriBridge', () => ({
     previewDiff: '',
   }),
   listRecordings: vi.fn().mockResolvedValue([]),
+  getPersonalLearningSnapshot: vi.fn().mockResolvedValue({
+    jungleMatchCount: 0,
+    baselines: [],
+    mistakeSignatures: [],
+  }),
 }));
 
 import { App } from './App';

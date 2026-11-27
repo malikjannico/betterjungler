@@ -110,6 +110,32 @@ pub struct RecordingClipRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalBaselineRow {
+    pub key: String,
+    pub value: f64,
+    pub sample_n: i64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MistakeSignatureRow {
+    pub detector_id: String,
+    pub hit_matches: i64,
+    pub total_hits: i64,
+    pub last_timestamp_sec: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalLearningSummary {
+    pub jungle_match_count: i64,
+    pub baselines: Vec<PersonalBaselineRow>,
+    pub mistake_signatures: Vec<MistakeSignatureRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UserSettings {
     pub riot_id: String,
@@ -200,6 +226,17 @@ pub fn init_database(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path).map_err(|e| AppError::Storage(e.to_string()))?;
     run_migrations(&conn)?;
     Ok(conn)
+}
+
+fn table_exists(conn: &Connection, table: &str) -> AppResult<bool> {
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table],
+            |row| row.get(0),
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    Ok(exists > 0)
 }
 
 fn table_has_column(conn: &Connection, table: &str, col_name: &str) -> AppResult<bool> {
@@ -391,8 +428,6 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
         )
         .map_err(|e| AppError::Storage(e.to_string()))?;
 
-        backfill_match_facts(conn)?;
-
         conn.pragma_update(None, "user_version", 2_i64)
             .map_err(|e| AppError::Storage(e.to_string()))?;
     }
@@ -465,7 +500,6 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             )
             .map_err(|e| AppError::Storage(e.to_string()))?;
         }
-        backfill_match_facts(conn)?;
         conn.execute(
             "DELETE FROM mistake_hits
              WHERE match_id IN (SELECT match_id FROM matches_fact WHERE role != 'JUNGLE')",
@@ -473,6 +507,12 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
         )
         .map_err(|e| AppError::Storage(e.to_string()))?;
         conn.pragma_update(None, "user_version", 4_i64)
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+
+    if version < 5 {
+        backfill_match_facts(conn)?;
+        conn.pragma_update(None, "user_version", 5_i64)
             .map_err(|e| AppError::Storage(e.to_string()))?;
     }
 
@@ -533,12 +573,44 @@ fn find_frame_by_minute(frames: &[Value], minute: i64) -> Option<&Value> {
     frames.iter().find(|f| f["minute"].as_i64() == Some(minute))
 }
 
+fn with_savepoint<F>(conn: &Connection, name: &str, f: F) -> AppResult<()>
+where
+    F: FnOnce() -> AppResult<()>,
+{
+    conn.execute_batch(&format!("SAVEPOINT {name};"))
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    match f() {
+        Ok(()) => {
+            conn.execute_batch(&format!("RELEASE SAVEPOINT {name};"))
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = conn.execute_batch(&format!("ROLLBACK TO {name}; RELEASE SAVEPOINT {name};"));
+            Err(err)
+        }
+    }
+}
+
 fn upsert_match_facts(
     conn: &Connection,
     match_id: &str,
     puuid: &str,
     played_at: &str,
     detail: &Value,
+) -> AppResult<()> {
+    with_savepoint(conn, "sp_upsert_match_facts", || {
+        upsert_match_facts_inner(conn, match_id, puuid, played_at, detail, true)
+    })
+}
+
+fn upsert_match_facts_inner(
+    conn: &Connection,
+    match_id: &str,
+    puuid: &str,
+    played_at: &str,
+    detail: &Value,
+    recompute_baselines: bool,
 ) -> AppResult<()> {
     let champion_id = detail["championId"].as_i64().unwrap_or(0);
     let champion_name = detail["championName"].as_str().unwrap_or("Unknown");
@@ -633,11 +705,18 @@ fn upsert_match_facts(
     let gd_10 = frame10.map(|f| {
         f["totalGold"].as_i64().unwrap_or(0) - f["enemyJunglerGold"].as_i64().unwrap_or(0)
     });
-    let gd_15 = frame15.map(|f| {
-        f["totalGold"].as_i64().unwrap_or(0) - f["enemyJunglerGold"].as_i64().unwrap_or(0)
-    });
-    let xp_15 =
-        frame15.map(|f| f["xp"].as_i64().unwrap_or(0) - f["enemyJunglerXp"].as_i64().unwrap_or(0));
+    let gd_15 = if duration_sec >= 900 {
+        frame15.map(|f| {
+            f["totalGold"].as_i64().unwrap_or(0) - f["enemyJunglerGold"].as_i64().unwrap_or(0)
+        })
+    } else {
+        None
+    };
+    let xp_15 = if duration_sec >= 900 {
+        frame15.map(|f| f["xp"].as_i64().unwrap_or(0) - f["enemyJunglerXp"].as_i64().unwrap_or(0))
+    } else {
+        None
+    };
 
     let team_obj = detail["teamObjectives"].as_i64().unwrap_or(0);
     let enemy_obj = detail["enemyObjectives"].as_i64().unwrap_or(0);
@@ -676,6 +755,7 @@ fn upsert_match_facts(
             player_death_ts.push(ts);
         }
     }
+    player_death_ts.sort_unstable();
     let early_deaths = player_death_ts.iter().filter(|&&ts| ts < 600).count() as i64;
     let spawn_windows = [300_i64, 360, 840, 1500];
     let pre_obj_ts: Vec<i64> = player_death_ts
@@ -774,67 +854,209 @@ fn upsert_match_facts(
         }
     }
 
-    if role != "JUNGLE" {
-        conn.execute(
-            "DELETE FROM mistake_hits WHERE match_id = ?1",
-            params![match_id],
-        )
-        .map_err(|e| AppError::Storage(e.to_string()))?;
-    } else {
-        let has_mistakes: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM mistake_hits WHERE match_id = ?1",
-                params![match_id],
-                |row| row.get(0),
+    conn.execute(
+        "DELETE FROM mistake_hits WHERE match_id = ?1",
+        params![match_id],
+    )
+    .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    if role == "JUNGLE" && duration_sec >= 300 {
+        for d_ts in &pre_obj_ts {
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'pre_obj_death', ?2, 'high', 'Died before major objective spawn/take')",
+                params![match_id, d_ts],
             )
-            .unwrap_or(0);
-        if has_mistakes == 0 {
-            for d_ts in &pre_obj_ts {
-                conn.execute(
-                    "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
-                     VALUES (?1, 'pre_obj_death', ?2, 'high', 'Died before major objective spawn/take')",
-                    params![match_id, d_ts],
-                )
-                .map_err(|e| AppError::Storage(e.to_string()))?;
-            }
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if early_deaths >= 2 {
+            let second_early_ts = player_death_ts
+                .iter()
+                .copied()
+                .filter(|&ts| ts < 600)
+                .nth(1)
+                .unwrap_or(540);
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'early_death_before_10', ?2, 'medium', '2+ deaths before 10:00 surrendered early tempo')",
+                params![match_id, second_early_ts],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if duration_sec >= 900 && cs_per_min < 5.7 {
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'midgame_farm_drop', 900, 'medium', 'Low camp cycling kept CS/min below 5.7')",
+                params![match_id],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if duration_sec >= 720 && (control_wards <= 1 || vision_per_min < 0.70) {
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'blind_river_vision', 720, 'medium', 'Low Control Ward and vision/min setup around neutral pits')",
+                params![match_id],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if duration_sec >= 900 && gd_15.is_some_and(|gd| gd <= -400) {
+            conn.execute(
+                "INSERT INTO mistake_hits (match_id, detector_id, timestamp_sec, severity, detail)
+                 VALUES (?1, 'early_gold_deficit_15', 900, 'medium', 'Fell 400g+ behind enemy jungler by 15:00')",
+                params![match_id],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
         }
     }
 
-    let now_iso = chrono::Utc::now().to_rfc3339();
-    if let Ok((n, avg_cs, avg_vis, avg_pre)) = conn.query_row(
-        "SELECT COUNT(*), AVG(m.cs_per_min), AVG(m.vision_per_min), AVG(m.pre_obj_deaths)
-         FROM match_metrics m
-         INNER JOIN matches_fact f ON f.match_id = m.match_id
-         WHERE f.role = 'JUNGLE'",
-        [],
-        |row| {
+    if recompute_baselines {
+        recompute_jungle_baselines(conn)?;
+    }
+
+    Ok(())
+}
+
+fn compute_ewma(values_newest_first: &[f64]) -> Option<f64> {
+    if values_newest_first.is_empty() {
+        return None;
+    }
+    let mut num = 0.0_f64;
+    let mut den = 0.0_f64;
+    for (idx, val) in values_newest_first.iter().enumerate() {
+        if !val.is_finite() {
+            continue;
+        }
+        let weight = 0.5_f64.powf(idx as f64 / 8.0);
+        num += val * weight;
+        den += weight;
+    }
+    if den > 0.0 {
+        Some(num / den)
+    } else {
+        None
+    }
+}
+
+fn compute_jungle_baseline_rows(
+    conn: &Connection,
+    puuid: Option<&str>,
+) -> AppResult<(i64, Vec<PersonalBaselineRow>)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT m.cs_per_min, m.gold_diff_at_15, m.objective_share_pct,
+                    m.pre_obj_deaths, m.early_deaths, m.vision_per_min, m.kill_participation_pct
+             FROM match_metrics m
+             INNER JOIN matches_fact f ON f.match_id = m.match_id
+             WHERE f.role = 'JUNGLE'
+               AND f.duration_sec >= 300
+               AND (?1 IS NULL OR f.puuid = ?1)
+             ORDER BY f.played_at DESC, f.match_id DESC",
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(params![puuid], |row| {
             Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<f64>>(1)?,
-                row.get::<_, Option<f64>>(2)?,
-                row.get::<_, Option<f64>>(3)?,
+                row.get::<_, f64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, f64>(5)?,
+                row.get::<_, i64>(6)?,
             ))
-        },
-    ) {
-        if n > 0 {
-            for (b_key, b_val) in [
-                ("cs_per_min", avg_cs.unwrap_or(0.0)),
-                ("vision_per_min", avg_vis.unwrap_or(0.0)),
-                ("pre_obj_deaths", avg_pre.unwrap_or(0.0)),
-            ] {
-                conn.execute(
-                    "INSERT INTO baselines (key, scope, value, sample_n, updated_at)
-                     VALUES (?1, 'global', ?2, ?3, ?4)
-                     ON CONFLICT(key) DO UPDATE SET
-                        value = excluded.value,
-                        sample_n = excluded.sample_n,
-                        updated_at = excluded.updated_at",
-                    params![b_key, b_val, n, now_iso],
-                )
-                .map_err(|e| AppError::Storage(e.to_string()))?;
-            }
-        } else {
-            conn.execute("DELETE FROM baselines", [])
+        })
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+    let mut cs_vals = Vec::new();
+    let mut gd15_vals = Vec::new();
+    let mut obj_vals = Vec::new();
+    let mut pre_vals = Vec::new();
+    let mut early_vals = Vec::new();
+    let mut vis_vals = Vec::new();
+    let mut kp_vals = Vec::new();
+    let mut n = 0_i64;
+
+    for row in rows {
+        let (cs, gd15, obj, pre, early, vis, kp) =
+            row.map_err(|e| AppError::Storage(e.to_string()))?;
+        n += 1;
+        cs_vals.push(cs);
+        if let Some(g) = gd15 {
+            gd15_vals.push(g as f64);
+        }
+        if let Some(o) = obj {
+            obj_vals.push(o as f64);
+        }
+        pre_vals.push(pre as f64);
+        early_vals.push(early as f64);
+        vis_vals.push(vis);
+        kp_vals.push(kp as f64);
+    }
+
+    if n == 0 {
+        return Ok((0, Vec::new()));
+    }
+
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let mut out = Vec::new();
+    for (b_key, vals) in [
+        ("cs_per_min", &cs_vals),
+        ("early_deaths", &early_vals),
+        ("gold_diff_at_15", &gd15_vals),
+        ("kill_participation_pct", &kp_vals),
+        ("objective_share_pct", &obj_vals),
+        ("pre_obj_deaths", &pre_vals),
+        ("vision_per_min", &vis_vals),
+    ] {
+        if let Some(b_val) = compute_ewma(vals) {
+            out.push(PersonalBaselineRow {
+                key: b_key.to_string(),
+                value: b_val,
+                sample_n: vals.len() as i64,
+                updated_at: now_iso.clone(),
+            });
+        }
+    }
+
+    Ok((n, out))
+}
+
+pub fn recompute_jungle_baselines(conn: &Connection) -> AppResult<()> {
+    let (n, computed_rows) = compute_jungle_baseline_rows(conn, None)?;
+
+    if n == 0 {
+        conn.execute("DELETE FROM baselines", [])
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        return Ok(());
+    }
+
+    let mut present_keys = Vec::new();
+    for row in &computed_rows {
+        present_keys.push(row.key.as_str());
+        conn.execute(
+            "INSERT INTO baselines (key, scope, value, sample_n, updated_at)
+             VALUES (?1, 'global', ?2, ?3, ?4)
+             ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                sample_n = excluded.sample_n,
+                updated_at = excluded.updated_at",
+            params![row.key, row.value, row.sample_n, row.updated_at],
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+
+    for key in [
+        "cs_per_min",
+        "gold_diff_at_15",
+        "objective_share_pct",
+        "pre_obj_deaths",
+        "early_deaths",
+        "vision_per_min",
+        "kill_participation_pct",
+    ] {
+        if !present_keys.contains(&key) {
+            conn.execute("DELETE FROM baselines WHERE key = ?1", params![key])
                 .map_err(|e| AppError::Storage(e.to_string()))?;
         }
     }
@@ -842,32 +1064,129 @@ fn upsert_match_facts(
     Ok(())
 }
 
-pub fn backfill_match_facts(conn: &Connection) -> AppResult<()> {
-    let mut stmt = conn
-        .prepare("SELECT match_id, puuid, played_at, detail_json FROM match_details_cache")
+pub fn load_personal_learning_summary_for_account(
+    conn: &Connection,
+    puuid: Option<&str>,
+) -> AppResult<PersonalLearningSummary> {
+    if !(table_exists(conn, "matches_fact")?
+        && table_exists(conn, "baselines")?
+        && table_exists(conn, "mistake_hits")?)
+    {
+        return Ok(PersonalLearningSummary {
+            jungle_match_count: 0,
+            baselines: Vec::new(),
+            mistake_signatures: Vec::new(),
+        });
+    }
+
+    let scoped_puuid = puuid.map(str::trim).filter(|p| !p.is_empty());
+    let (jungle_match_count, baselines) = if let Some(p) = scoped_puuid {
+        compute_jungle_baseline_rows(conn, Some(p))?
+    } else {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM matches_fact WHERE role = 'JUNGLE' AND duration_sec >= 300",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut b_stmt = conn
+            .prepare("SELECT key, value, sample_n, updated_at FROM baselines ORDER BY key ASC")
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let b_rows = b_stmt
+            .query_map([], |row| {
+                Ok(PersonalBaselineRow {
+                    key: row.get(0)?,
+                    value: row.get(1)?,
+                    sample_n: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let mut out = Vec::new();
+        for row in b_rows {
+            out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+        (count, out)
+    };
+
+    let mut m_stmt = conn
+        .prepare(
+            "SELECT h.detector_id,
+                    COUNT(DISTINCT h.match_id),
+                    COUNT(*),
+                    COALESCE((
+                        SELECT h2.timestamp_sec
+                        FROM mistake_hits h2
+                        INNER JOIN matches_fact f2 ON f2.match_id = h2.match_id
+                        WHERE h2.detector_id = h.detector_id
+                          AND f2.role = 'JUNGLE'
+                          AND f2.duration_sec >= 300
+                          AND (?1 IS NULL OR f2.puuid = ?1)
+                        ORDER BY f2.played_at DESC, h2.timestamp_sec DESC
+                        LIMIT 1
+                    ), 0)
+             FROM mistake_hits h
+             INNER JOIN matches_fact f ON f.match_id = h.match_id
+             WHERE f.role = 'JUNGLE'
+               AND f.duration_sec >= 300
+               AND (?1 IS NULL OR f.puuid = ?1)
+             GROUP BY h.detector_id
+             ORDER BY COUNT(DISTINCT h.match_id) DESC, h.detector_id ASC",
+        )
         .map_err(|e| AppError::Storage(e.to_string()))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
+    let m_rows = m_stmt
+        .query_map(params![scoped_puuid], |row| {
+            Ok(MistakeSignatureRow {
+                detector_id: row.get(0)?,
+                hit_matches: row.get(1)?,
+                total_hits: row.get(2)?,
+                last_timestamp_sec: row.get(3)?,
+            })
         })
         .map_err(|e| AppError::Storage(e.to_string()))?;
-
-    let mut cached = Vec::new();
-    for r in rows {
-        cached.push(r.map_err(|e| AppError::Storage(e.to_string()))?);
+    let mut mistake_signatures = Vec::new();
+    for row in m_rows {
+        mistake_signatures.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
     }
 
-    for (match_id, puuid, played_at, detail_json) in cached {
-        if let Ok(detail) = serde_json::from_str::<Value>(&detail_json) {
-            upsert_match_facts(conn, &match_id, &puuid, &played_at, &detail)?;
+    Ok(PersonalLearningSummary {
+        jungle_match_count,
+        baselines,
+        mistake_signatures,
+    })
+}
+
+pub fn backfill_match_facts(conn: &Connection) -> AppResult<()> {
+    with_savepoint(conn, "sp_backfill_match_facts", || {
+        let mut stmt = conn
+            .prepare("SELECT match_id, puuid, played_at, detail_json FROM match_details_cache")
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut cached = Vec::new();
+        for r in rows {
+            cached.push(r.map_err(|e| AppError::Storage(e.to_string()))?);
         }
-    }
-    Ok(())
+
+        for (match_id, puuid, played_at, detail_json) in cached {
+            if let Ok(detail) = serde_json::from_str::<Value>(&detail_json) {
+                upsert_match_facts_inner(conn, &match_id, &puuid, &played_at, &detail, false)?;
+            }
+        }
+        recompute_jungle_baselines(conn)?;
+        Ok(())
+    })
 }
 
 pub fn cache_match_record(
@@ -1863,7 +2182,7 @@ mod tests {
         let user_ver: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read user_version");
-        assert_eq!(user_ver, 4);
+        assert_eq!(user_ver, 5);
 
         let sample_detail = serde_json::json!({
             "matchId": "EUW1_9001",
@@ -1987,7 +2306,16 @@ mod tests {
         assert_eq!(remake_gd15, None);
         assert_eq!(remake_obj, None);
         assert_eq!(mistake_count, 1);
-        assert_eq!(baseline_count, 3);
+        assert_eq!(baseline_count, 7);
+
+        let learning =
+            load_personal_learning_summary_for_account(&conn, None).expect("load learning summary");
+        assert_eq!(learning.jungle_match_count, 1);
+        assert_eq!(learning.baselines.len(), 7);
+        assert!(learning
+            .mistake_signatures
+            .iter()
+            .any(|m| m.detector_id == "pre_obj_death" && m.hit_matches == 1));
 
         // Off-role (e.g., BOTTOM ADC) games persist role='BOTTOM' and stay excluded from jungle mistakes/baselines
         let adc_game = serde_json::json!({
@@ -2045,7 +2373,7 @@ mod tests {
             .expect("baseline sample_n");
         assert_eq!(stored_role, "BOTTOM");
         assert_eq!(adc_mistakes, 0);
-        assert_eq!(baseline_n, 2);
+        assert_eq!(baseline_n, 1);
 
         // Clearing all jungle matches and keeping only off-role clears stale baselines (n == 0)
         let conn_offrole_only = Connection::open_in_memory().expect("in-memory sqlite offrole");
@@ -2056,11 +2384,21 @@ mod tests {
             "kills": 2, "deaths": 1, "assists": 5, "cs": 180, "visionScore": 20, "controlWardsBought": 2,
             "teamKills": 10, "teamObjectives": 3, "enemyObjectives": 1, "frames": [], "events": []
         })).expect("seed stale jungle");
-        assert_eq!(
+        assert!(
             conn_offrole_only
                 .query_row("SELECT COUNT(*) FROM baselines", [], |r| r.get::<_, i64>(0))
-                .expect("count seeded"),
-            3
+                .expect("count seeded")
+                >= 5
+        );
+        assert!(
+            conn_offrole_only
+                .query_row(
+                    "SELECT COUNT(*) FROM baselines WHERE key = 'gold_diff_at_15'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .expect("gd15 omitted without m15 frame")
+                == 0
         );
         conn_offrole_only
             .execute("DELETE FROM matches_fact", [])
@@ -2079,6 +2417,152 @@ mod tests {
                 .expect("cleared stale baselines"),
             0
         );
+
+        // Unmigrated database returns empty summary cleanly; all 5 detectors + remake/off-role filtering work
+        let uninit_conn = Connection::open_in_memory().expect("uninit sqlite");
+        let empty_summary = load_personal_learning_summary_for_account(&uninit_conn, None)
+            .expect("uninit returns empty ok");
+        assert_eq!(empty_summary.jungle_match_count, 0);
+        assert!(empty_summary.baselines.is_empty());
+        assert!(empty_summary.mistake_signatures.is_empty());
+
+        let m13_conn = Connection::open_in_memory().expect("m13 test sqlite");
+        run_migrations(&m13_conn).expect("migrate m13");
+        // 1) Jungle game triggering all 5 detectors with unsorted death events (520s before 210s)
+        let bad_jg_detail = serde_json::json!({
+            "matchId": "EUW1_ALL5",
+            "role": "JUNGLE",
+            "championId": 104,
+            "championName": "Graves",
+            "win": false,
+            "durationSeconds": 1500,
+            "mapSide": "blue",
+            "playerParticipantId": 2,
+            "kills": 1,
+            "deaths": 5,
+            "assists": 2,
+            "cs": 110,
+            "visionScore": 10,
+            "controlWardsBought": 1,
+            "teamKills": 10,
+            "teamObjectives": 1,
+            "enemyObjectives": 4,
+            "frames": [
+                { "minute": 15, "cs": 70, "totalGold": 4200, "enemyJunglerGold": 4850, "xp": 5100, "enemyJunglerXp": 5700 }
+            ],
+            "events": [
+                { "type": "ELITE_MONSTER_KILL", "timestampSec": 560, "killerTeamId": 200 },
+                { "type": "CHAMPION_KILL", "timestampSec": 520, "victimId": 2 },
+                { "type": "CHAMPION_KILL", "timestampSec": 210, "victimId": 2 }
+            ]
+        });
+        // 2) Remake jungle game (<300s) that must NOT count in baselines or detectors
+        let remake_jg_detail = serde_json::json!({
+            "matchId": "EUW1_REMAKE",
+            "role": "JUNGLE",
+            "championId": 64,
+            "championName": "LeeSin",
+            "win": false,
+            "durationSeconds": 195,
+            "mapSide": "blue",
+            "playerParticipantId": 2,
+            "kills": 0,
+            "deaths": 2,
+            "assists": 0,
+            "cs": 12,
+            "visionScore": 1,
+            "controlWardsBought": 0,
+            "teamKills": 0,
+            "teamObjectives": 0,
+            "enemyObjectives": 0,
+            "frames": [],
+            "events": [
+                { "type": "CHAMPION_KILL", "timestampSec": 120, "victimId": 2 },
+                { "type": "CHAMPION_KILL", "timestampSec": 170, "victimId": 2 }
+            ]
+        });
+        upsert_match_facts(
+            &m13_conn,
+            "EUW1_ALL5",
+            "p",
+            "2026-11-27T04:00:00Z",
+            &bad_jg_detail,
+        )
+        .expect("insert all5");
+        upsert_match_facts(
+            &m13_conn,
+            "EUW1_REMAKE",
+            "p",
+            "2026-11-27T05:00:00Z",
+            &remake_jg_detail,
+        )
+        .expect("insert remake");
+        upsert_match_facts(
+            &m13_conn,
+            "EUW1_ADC_IGN",
+            "p",
+            "2026-11-27T06:00:00Z",
+            &adc_game,
+        )
+        .expect("insert adc ignore");
+
+        let m13_summary =
+            load_personal_learning_summary_for_account(&m13_conn, None).expect("load m13 summary");
+        assert_eq!(m13_summary.jungle_match_count, 1);
+        assert_eq!(m13_summary.mistake_signatures.len(), 5);
+        let early_sig = m13_summary
+            .mistake_signatures
+            .iter()
+            .find(|s| s.detector_id == "early_death_before_10")
+            .expect("early_death_before_10 detected");
+        assert_eq!(early_sig.last_timestamp_sec, 520);
+        let gd_row = m13_summary
+            .baselines
+            .iter()
+            .find(|b| b.key == "gold_diff_at_15")
+            .expect("gd15 row");
+        assert_eq!(gd_row.sample_n, 1);
+        assert!((gd_row.value - (-650.0)).abs() < 0.01);
+
+        // Account scoping isolates alt accounts so other accounts' leaks never bleed over
+        upsert_match_facts(
+            &m13_conn,
+            "EUW1_ALT_CLEAN",
+            "alt-puuid",
+            "2026-11-27T07:00:00Z",
+            &serde_json::json!({
+                "matchId": "EUW1_ALT_CLEAN",
+                "role": "JUNGLE",
+                "championId": 32,
+                "championName": "Amumu",
+                "win": true,
+                "durationSeconds": 1800,
+                "mapSide": "blue",
+                "playerParticipantId": 2,
+                "kills": 6,
+                "deaths": 0,
+                "assists": 10,
+                "cs": 216,
+                "visionScore": 30,
+                "controlWardsBought": 4,
+                "teamKills": 18,
+                "teamObjectives": 4,
+                "enemyObjectives": 1,
+                "frames": [],
+                "events": []
+            }),
+        )
+        .expect("insert clean alt game");
+        let alt_summary = load_personal_learning_summary_for_account(&m13_conn, Some("alt-puuid"))
+            .expect("load alt summary");
+        assert_eq!(alt_summary.jungle_match_count, 1);
+        assert!(alt_summary.mistake_signatures.is_empty());
+        let alt_cs = alt_summary
+            .baselines
+            .iter()
+            .find(|b| b.key == "cs_per_min")
+            .expect("alt cs");
+        assert!((alt_cs.value - 7.2).abs() < 0.05);
 
         // Atomic focus toggle across multiple goals + error on unknown ID
         let g1 = ClimbGoalRecord {
@@ -2190,11 +2674,11 @@ mod tests {
         )
         .expect("seed stale baseline");
 
-        run_migrations(&conn).expect("upgrade v3 to v4");
+        run_migrations(&conn).expect("upgrade v3 to v4+v5");
         let new_ver: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read new user_version");
-        assert_eq!(new_ver, 4);
+        assert_eq!(new_ver, 5);
         assert!(table_has_column(&conn, "matches_fact", "role").expect("check role col"));
         let v4_role: String = conn
             .query_row(

@@ -19,6 +19,7 @@ import type {
   RecordingSettings,
   ReplaySeekResult,
   RunePageSpec,
+  SqlPersonalLearningSummary,
   UpdateCheckResult,
   UserSettings,
 } from '../types/coaching';
@@ -583,5 +584,18 @@ export async function seekRiotReplay(
     matchId,
     timeSec,
     launchIfClosed,
+  });
+}
+
+export type { SqlPersonalLearningSummary };
+
+export async function getPersonalLearningSnapshot(
+  puuid?: string | null
+): Promise<SqlPersonalLearningSummary> {
+  if (!isTauriEnvironment()) {
+    return { jungleMatchCount: 0, baselines: [], mistakeSignatures: [] };
+  }
+  return invokeTauri<SqlPersonalLearningSummary>('get_personal_learning_snapshot', {
+    puuid: puuid ?? null,
   });
 }

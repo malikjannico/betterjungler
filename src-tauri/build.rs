@@ -37,6 +37,7 @@ fn main() {
             "save_recording_clip",
             "delete_recording_clip",
             "open_recordings_folder",
+            "get_personal_learning_snapshot",
             "inspect_replay_config",
             "set_replay_api_enabled",
             "seek_riot_replay",
