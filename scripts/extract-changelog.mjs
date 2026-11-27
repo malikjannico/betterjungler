@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-const targetVersion = (process.argv[2] ?? pkg.version).replace(/^v/, '').trim();
+const positionalVersion =
+  process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : pkg.version;
+const targetVersion = positionalVersion.replace(/^v/, '').trim();
 
 const changelogRaw = fs.readFileSync(path.join(rootDir, 'CHANGELOG.md'), 'utf8');
 const lines = changelogRaw.split(/\r?\n/);
