@@ -369,7 +369,10 @@ async fn sync_recent_matches(
     .await
     {
         Ok(ids) => ids,
-        Err(AppError::RiotHttp { status: 400, detail }) if !already_resolved => {
+        Err(AppError::RiotHttp {
+            status: 400,
+            detail,
+        }) if !already_resolved => {
             if let Some(ref rid) = candidate_riot_id {
                 effective_puuid = riot_api::resolve_encrypted_puuid_by_riot_id(
                     &state.riot_web_client,
