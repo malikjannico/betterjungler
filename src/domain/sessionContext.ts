@@ -29,7 +29,9 @@ import type {
   HighEloMetaSnapshot,
   LpHistoryPoint,
   MacroCue,
+  ObjectiveTimingsConfig,
   ObjectiveWindow,
+  PersonalLearningSnapshot,
   UserSettings,
   WinConditionPlan,
 } from '../types/coaching';
@@ -120,6 +122,8 @@ export interface DeriveSessionContextInput {
   lpHistory: LpHistoryPoint[];
   highEloMeta: HighEloMetaSnapshot | null;
   interpolatedGameTime?: number;
+  objectiveTimings?: ObjectiveTimingsConfig;
+  personalLearning?: PersonalLearningSnapshot | null;
 }
 
 const SIMULATION_LABELS: Record<Exclude<DemoScenarioId, 'idle'>, string> = {
@@ -355,7 +359,8 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
     const objectives = computeObjectiveWindows(
       liveGame.gameData.gameTime,
       liveGame.events.Events,
-      liveGame.allPlayers
+      liveGame.allPlayers,
+      input.objectiveTimings
     );
     const activeWinPlan = winPlanGate.status === 'ready' ? winPlanGate.data.plan : null;
     const champProfile = playerChampionName
@@ -363,7 +368,7 @@ export function deriveSessionContext(input: DeriveSessionContextInput): SessionC
       : undefined;
     const buildPlan = computeAdaptiveBuild(liveGame, champProfile);
     const macroCues = activeWinPlan
-      ? computeMacroGuidance(liveGame, activeWinPlan, objectives)
+      ? computeMacroGuidance(liveGame, activeWinPlan, objectives, input.personalLearning)
       : [];
     liveCoachGate = {
       status: 'ready',

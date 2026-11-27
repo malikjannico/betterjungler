@@ -11,6 +11,7 @@ import {
   inferEnemyJunglerId,
   recommendJunglePicks,
   sanitizeChampSelectSession,
+  scoreChampion,
 } from './champSelectEngine';
 import { DEMO_HIGH_ELO_SNAPSHOT } from './postGameFixtures';
 import { DEMO_CHAMP_SELECT } from './simulationFixtures';
@@ -176,5 +177,51 @@ describe('champSelectEngine', () => {
     if (leeSin) {
       expect(leeSin.warnings.some((w) => w.includes('Low personal WR: 0% (4G)'))).toBe(true);
     }
+  });
+
+  it('applies signed patch pack metaTierOverrides to scores and surfaces override reason', () => {
+    const kha = JUNGLE_CHAMPIONS.find((c) => c.championId === 121)!;
+    expect(kha).toBeDefined();
+
+    const baseScore = scoreChampion(kha, {
+      allyIds: [58, 61, 145, 111],
+      enemyIds: [266, 56, 517, 222, 16],
+      masterySet: new Set([121]),
+    });
+    const boostedScore = scoreChampion(kha, {
+      allyIds: [58, 61, 145, 111],
+      enemyIds: [266, 56, 517, 222, 16],
+      masterySet: new Set([121]),
+      metaTierOverrides: [
+        {
+          championId: 121,
+          championName: "Kha'Zix",
+          metaTier: 'S+',
+          metaScore: 99,
+        },
+      ],
+    });
+
+    expect(boostedScore.breakdown.meta).toBeGreaterThan(baseScore.breakdown.meta);
+    expect(boostedScore.totalScore).toBeGreaterThan(baseScore.totalScore);
+    expect(boostedScore.reasons).toContain('Signed Patch Pack S+-tier override (99.0)');
+
+    const recs = recommendJunglePicks({
+      allyChampionIds: [58, 61, 145, 111],
+      enemyChampionIds: [266, 56, 517, 222, 16],
+      bannedChampionIds: [],
+      masteryChampionIds: [121],
+      metaTierOverrides: [
+        {
+          championId: 121,
+          championName: "Kha'Zix",
+          metaTier: 'S+',
+          metaScore: 99,
+        },
+      ],
+    });
+    const topKha = recs.find((r) => r.champion.championId === 121);
+    expect(topKha).toBeDefined();
+    expect(topKha?.reasons).toContain('Signed Patch Pack S+-tier override (99.0)');
   });
 });

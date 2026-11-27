@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  AI_MODEL_PRESETS,
+  findModelPreset,
+  getDefaultModelForProvider,
+} from '../domain/aiModelCatalog';
 import { syncFullDdragonCatalog } from '../services/ddragonService';
 import {
   DEFAULT_RECORDING_SETTINGS,
@@ -14,10 +19,12 @@ import {
   saveSettings,
   setReplayApiEnabled,
   syncDdragonPatch,
+  testAiConnection,
   updateOverlayPreferences,
 } from '../services/tauriBridge';
 import { formatStorageBytes } from '../domain/recordingSync';
 import type {
+  ActivePatchPackStatus,
   AiProvider,
   ApiKeyHealthStatus,
   AppMetaInfo,
@@ -62,6 +69,7 @@ interface SettingsViewProps {
   updateError: string | null;
   canInstallUpdateSafely: boolean;
   isTauri: boolean;
+  patchPackStatus?: ActivePatchPackStatus | null;
   initialSection?: SettingsSectionId;
   initialSectionToken?: number;
   onSettingsChanged: (next: UserSettings) => void;
@@ -71,6 +79,7 @@ interface SettingsViewProps {
   onCheckUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
   onStageUpdate: () => Promise<void>;
+  onInstallPatchPack?: (envelopeJson: string) => Promise<void>;
 }
 
 export function validateHttpsProxyUrl(raw: string): string | null {
@@ -150,6 +159,7 @@ export function SettingsView({
   updateError,
   canInstallUpdateSafely,
   isTauri,
+  patchPackStatus,
   initialSection = 'account',
   initialSectionToken = 0,
   onSettingsChanged,
@@ -159,6 +169,7 @@ export function SettingsView({
   onCheckUpdate,
   onInstallUpdate,
   onStageUpdate,
+  onInstallPatchPack,
 }: SettingsViewProps) {
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(initialSection);
   const [draft, setDraft] = useState<UserSettings>(settings);
@@ -170,6 +181,8 @@ export function SettingsView({
   const [replayCfg, setReplayCfg] = useState<GameCfgReplayStatus | null>(null);
   const [storedRecordings, setStoredRecordings] = useState<RecordingRecord[]>([]);
   const [togglingReplay, setTogglingReplay] = useState(false);
+  const [testingAi, setTestingAi] = useState(false);
+  const [customAiModelMode, setCustomAiModelMode] = useState(false);
   const proxyValidationError = validateHttpsProxyUrl(draft.riotApiProxyUrl ?? '');
 
   useEffect(() => {
@@ -478,6 +491,26 @@ export function SettingsView({
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to store AI API key.');
+    }
+  }
+
+  async function handleTestAiConnection() {
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setTestingAi(true);
+    try {
+      const result = await testAiConnection(
+        draft.aiCoach.provider,
+        draft.aiCoach.model,
+        draft.aiCoach.endpoint
+      );
+      setStatusMessage(result);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'AI Coach connection check failed.'
+      );
+    } finally {
+      setTestingAi(false);
     }
   }
 
@@ -1083,121 +1116,193 @@ export function SettingsView({
       )}
 
       {/* Optional BYOK AI Coach */}
-      {activeSection === 'ai' && (
-        <GlassSurface className="space-y-3 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-            Optional BYOK AI Coach (Natural-Language Debriefs)
-          </h3>
-          <span className="text-[11px] text-slate-500">
-            Deterministic coaching always runs offline; AI is strictly optional.
-          </span>
-        </div>
+      {activeSection === 'ai' && (() => {
+        const aiProvider = draft.aiCoach.provider;
+        const presets = aiProvider === 'off' ? [] : AI_MODEL_PRESETS[aiProvider];
+        const activePreset = findModelPreset(aiProvider, draft.aiCoach.model);
+        const selectValue =
+          aiProvider === 'off'
+            ? ''
+            : customAiModelMode || !activePreset
+              ? '__custom__'
+              : activePreset.id;
 
-        <div className="grid gap-2.5 sm:grid-cols-3">
-          <label className="block text-xs">
-            <span className="text-slate-300">AI Provider</span>
-            <select
-              aria-label="AI Provider"
-              value={draft.aiCoach.provider}
-              onChange={(e) => {
-                const provider = e.target.value as AiProvider;
-                const defaultModel =
-                  provider === 'gemini'
-                    ? 'gemini-2.5-flash'
-                    : provider === 'openai'
-                      ? 'gpt-4o-mini'
-                      : provider === 'ollama'
-                        ? 'llama3.1'
-                        : draft.aiCoach.model;
-                setDraft({
-                  ...draft,
-                  aiCoach: { ...draft.aiCoach, provider, model: defaultModel },
-                });
-              }}
-              className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
-            >
-              <option value="off" className="bg-zinc-900">
-                Off (Deterministic Only)
-              </option>
-              <option value="gemini" className="bg-zinc-900">
-                Google Gemini (BYOK)
-              </option>
-              <option value="openai" className="bg-zinc-900">
-                OpenAI (BYOK)
-              </option>
-              <option value="ollama" className="bg-zinc-900">
-                Local Ollama (127.0.0.1)
-              </option>
-            </select>
-          </label>
-
-          <label className="block text-xs">
-            <span className="text-slate-300">Model</span>
-            <input
-              type="text"
-              value={draft.aiCoach.model}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  aiCoach: { ...draft.aiCoach, model: e.target.value },
-                })
-              }
-              className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-            />
-          </label>
-
-          {draft.aiCoach.provider === 'ollama' ? (
-            <label className="block text-xs">
-              <span className="text-slate-300">Local Ollama URL</span>
-              <input
-                type="text"
-                value={draft.aiCoach.endpoint}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    aiCoach: { ...draft.aiCoach, endpoint: e.target.value },
-                  })
-                }
-                className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
-              />
-            </label>
-          ) : (
-            <label className="block text-xs">
-              <span className="text-slate-300">
-                AI Key ({draft.aiCoach.hasApiKey ? 'Stored Securely' : 'Not Saved'})
+        return (
+          <GlassSurface className="space-y-3 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                Optional BYOK AI Coach (Natural-Language Debriefs)
+              </h3>
+              <span className="text-[11px] text-slate-500">
+                Deterministic coaching always runs offline; AI is strictly optional.
               </span>
-              <div className="mt-1.5 flex gap-1.5">
-                <input
-                  type="password"
-                  value={aiKeyInput}
-                  onChange={(e) => setAiKeyInput(e.target.value)}
-                  placeholder="Paste Gemini / OpenAI key"
-                  className="lg-inset flex-1 px-2.5 py-2 text-xs text-slate-100 outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveAiKey}
-                  className="lg-btn-glass px-3 py-2 text-xs font-medium text-white"
-                >
-                  Save
-                </button>
-              </div>
-            </label>
-          )}
-        </div>
+            </div>
 
-        <div className="flex justify-end border-t border-white/[0.07] pt-3">
-          <button
-            type="button"
-            onClick={handleSaveSettings}
-            className="lg-btn-primary px-4 py-2 text-xs font-bold"
-          >
-            Save Preferences
-          </button>
-        </div>
-      </GlassSurface>
-      )}
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              <label className="block text-xs">
+                <span className="text-slate-300">AI Provider</span>
+                <select
+                  aria-label="AI Provider"
+                  value={aiProvider}
+                  onChange={(e) => {
+                    const provider = e.target.value as AiProvider;
+                    const defaultModel = getDefaultModelForProvider(provider, draft.aiCoach.model);
+                    setCustomAiModelMode(false);
+                    setDraft({
+                      ...draft,
+                      aiCoach: { ...draft.aiCoach, provider, model: defaultModel },
+                    });
+                  }}
+                  className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
+                >
+                  <option value="off" className="bg-zinc-900">
+                    Off (Deterministic Only)
+                  </option>
+                  <option value="gemini" className="bg-zinc-900">
+                    Google Gemini (BYOK)
+                  </option>
+                  <option value="openai" className="bg-zinc-900">
+                    OpenAI (BYOK)
+                  </option>
+                  <option value="ollama" className="bg-zinc-900">
+                    Local Ollama (127.0.0.1)
+                  </option>
+                </select>
+              </label>
+
+              <label className="block text-xs">
+                <span className="text-slate-300">Model Preset</span>
+                {aiProvider === 'off' ? (
+                  <input
+                    type="text"
+                    disabled
+                    value="Deterministic only (no LLM)"
+                    className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-500 outline-none"
+                  />
+                ) : (
+                  <select
+                    aria-label="AI Model Preset"
+                    value={selectValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__custom__') {
+                        setCustomAiModelMode(true);
+                      } else {
+                        setCustomAiModelMode(false);
+                        setDraft({
+                          ...draft,
+                          aiCoach: { ...draft.aiCoach, model: val },
+                        });
+                      }
+                    }}
+                    className="lg-inset mt-1.5 w-full px-2.5 py-2 text-xs text-slate-100 outline-none"
+                  >
+                    {presets.map((preset) => (
+                      <option key={preset.id} value={preset.id} className="bg-zinc-900">
+                        {preset.label}
+                      </option>
+                    ))}
+                    <option value="__custom__" className="bg-zinc-900">
+                      Custom model ID...
+                    </option>
+                  </select>
+                )}
+              </label>
+
+              {aiProvider === 'ollama' ? (
+                <label className="block text-xs">
+                  <span className="text-slate-300">Local Ollama URL</span>
+                  <input
+                    type="text"
+                    value={draft.aiCoach.endpoint}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        aiCoach: { ...draft.aiCoach, endpoint: e.target.value },
+                      })
+                    }
+                    className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
+                  />
+                </label>
+              ) : (
+                <label className="block text-xs">
+                  <span className="text-slate-300">
+                    AI Key ({draft.aiCoach.hasApiKey ? 'Stored Securely' : 'Not Saved'})
+                  </span>
+                  <div className="mt-1.5 flex gap-1.5">
+                    <input
+                      type="password"
+                      value={aiKeyInput}
+                      onChange={(e) => setAiKeyInput(e.target.value)}
+                      placeholder="Paste Gemini / OpenAI key"
+                      className="lg-inset flex-1 px-2.5 py-2 text-xs text-slate-100 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveAiKey}
+                      className="lg-btn-glass px-3 py-2 text-xs font-medium text-white"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </label>
+              )}
+            </div>
+
+            {aiProvider !== 'off' && selectValue === '__custom__' && (
+              <label className="block text-xs">
+                <span className="text-slate-300">Custom AI Model ID</span>
+                <input
+                  type="text"
+                  aria-label="Custom AI Model"
+                  value={draft.aiCoach.model}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      aiCoach: { ...draft.aiCoach, model: e.target.value },
+                    })
+                  }
+                  placeholder="Enter exact provider model ID (e.g. gemini-3.8-flash)"
+                  className="lg-inset mt-1.5 w-full px-3 py-2 text-xs text-slate-100 outline-none"
+                />
+              </label>
+            )}
+
+            {activePreset && (
+              <div
+                className={`lg-inset flex flex-wrap items-center gap-2 px-3 py-2 text-[11px] ${
+                  activePreset.tier === 'paid'
+                    ? 'border border-amber-400/25 text-amber-200/90'
+                    : 'border border-emerald-400/20 text-emerald-200/90'
+                }`}
+              >
+                <span className="rounded-full border border-current/30 px-2 py-0.5 text-[10px] font-semibold">
+                  {activePreset.tierLabel}
+                </span>
+                <span className="text-slate-300">{activePreset.note}</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] pt-3">
+              <button
+                type="button"
+                disabled={aiProvider === 'off' || testingAi}
+                onClick={() => void handleTestAiConnection()}
+                className="lg-btn-glass px-3.5 py-2 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {testingAi ? 'Testing Connection...' : 'Test Connection'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveSettings}
+                className="lg-btn-primary px-4 py-2 text-xs font-bold"
+              >
+                Save Preferences
+              </button>
+            </div>
+          </GlassSurface>
+        );
+      })()}
 
       {activeSection === 'updates' && (
         <AboutUpdatesSection
@@ -1211,10 +1316,12 @@ export function SettingsView({
           updateError={updateError}
           canInstallUpdateSafely={canInstallUpdateSafely}
           isTauri={isTauri}
+          patchPackStatus={patchPackStatus}
           onUpdateModeChange={handleUpdateModeChange}
           onCheckUpdate={onCheckUpdate}
           onInstallUpdate={onInstallUpdate}
           onStageUpdate={onStageUpdate}
+          onInstallPatchPack={onInstallPatchPack}
         />
       )}
 

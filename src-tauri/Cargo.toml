@@ -1,6 +1,6 @@
 [package]
 name = "betterjungler"
-version = "1.4.0"
+version = "2.0.0"
 description = "Riot-compliant League of Legends Jungle Companion & Windows HUD Overlay"
 authors = ["BetterJungler"]
 edition = "2021"
@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 keyring = { version = "3", features = ["windows-native"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "native-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

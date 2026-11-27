@@ -11,12 +11,37 @@ import type {
   ItemRecommendation,
   JungleChampionProfile,
   MacroCue,
+  ObjectiveTimingsConfig,
   ObjectiveWindow,
+  PersonalLearningSnapshot,
+  PersonalLiveGuardrailContext,
+  SmiteThresholdsConfig,
   SmiteTierStatus,
   ThreatAssessment,
   WinConditionPlan,
 } from '../types/coaching';
 import type { LiveGameData, LivePlayer } from '../types/riot';
+
+export const DEFAULT_OBJECTIVE_TIMINGS: ObjectiveTimingsConfig = {
+  scuttleInitialSec: 210,
+  dragonFirstSpawnSec: 300,
+  dragonRespawnSec: 300,
+  elderRespawnSec: 360,
+  voidgrubsSpawnSec: 360,
+  heraldSpawnSec: 840,
+  heraldDespawnSec: 1485,
+  atakhanSpawnSec: 1200,
+  baronSpawnSec: 1500,
+  baronRespawnSec: 360,
+};
+
+export const DEFAULT_SMITE_THRESHOLDS: SmiteThresholdsConfig = {
+  baseDamage: 600,
+  unleashedDamage: 900,
+  primalDamage: 1200,
+  unleashedStacks: 20,
+  primalStacks: 40,
+};
 
 const ANTI_HEAL_ITEM_IDS = new Set([3123, 3916, 3076, 3075, 6609, 3165]);
 const MR_ITEM_IDS = new Set([3111, 3155, 3156, 2504, 3001, 6664, 3102]);
@@ -92,28 +117,30 @@ function findMetaByName(championName: string, rawChampionName?: string): Champio
 export function computeObjectiveWindows(
   gameTime: number,
   events: LiveGameData['events']['Events'],
-  allPlayers?: LivePlayer[]
+  allPlayers?: LivePlayer[],
+  timings: ObjectiveTimingsConfig = DEFAULT_OBJECTIVE_TIMINGS
 ): ObjectiveWindow[] {
   const windows: ObjectiveWindow[] = [];
 
-  // 1. Scuttle Crab (initial 3:30 = 210s)
-  if (gameTime < 240) {
-    const remaining = Math.max(0, 210 - gameTime);
+  // 1. Scuttle Crab
+  if (gameTime < timings.scuttleInitialSec + 30) {
+    const remaining = Math.max(0, timings.scuttleInitialSec - gameTime);
+    const scuttleClock = formatClock(timings.scuttleInitialSec);
     windows.push({
       id: 'scuttle',
       name: 'Rift Scuttler',
       status: remaining === 0 ? 'live' : remaining <= 30 ? 'prep_vision' : 'upcoming',
       secondsRemaining: remaining,
-      nextSpawnFormatted: formatClock(210),
+      nextSpawnFormatted: scuttleClock,
       priority: remaining <= 30 ? 'high' : 'medium',
       actionText:
         remaining === 0
           ? 'Scuttle is LIVE — contest with lane priority or trade opposite crab.'
-          : 'Finish clear with 1 Smite charge saved for 3:30 Scuttle.',
+          : `Finish clear with 1 Smite charge saved for ${scuttleClock} Scuttle.`,
     });
   }
 
-  // 2. Dragon (first 5:00 = 300s, Elemental respawn 5:00 = 300s, Elder respawn 6:00 = 360s)
+  // 2. Dragon
   const dragonKills = events.filter((e) => e.EventName === 'DragonKill');
   const lastDragonKill =
     dragonKills.length > 0
@@ -144,8 +171,13 @@ export function computeObjectiveWindows(
     (maxTeamDragons > 0 ? maxTeamDragons >= 4 : dragonKills.length >= 7);
   const isSoulPoint = !isElderCandidate && maxTeamDragons === 3;
   const dragonRespawnSec =
-    lastDragonKill?.DragonType?.toLowerCase() === 'elder' || isElderCandidate ? 360 : 300;
-  const nextDragonSpawn = lastDragonKill !== null ? lastDragonKill.EventTime + dragonRespawnSec : 300;
+    lastDragonKill?.DragonType?.toLowerCase() === 'elder' || isElderCandidate
+      ? timings.elderRespawnSec
+      : timings.dragonRespawnSec;
+  const nextDragonSpawn =
+    lastDragonKill !== null
+      ? lastDragonKill.EventTime + dragonRespawnSec
+      : timings.dragonFirstSpawnSec;
   const dragonRem = Math.max(0, nextDragonSpawn - gameTime);
 
   windows.push({
@@ -167,71 +199,77 @@ export function computeObjectiveWindows(
           : 'Cycle camps toward bot side ahead of Dragon spawn.',
   });
 
-  // 2b. Atakhan (20:00 = 1200s until slain)
+  // 2b. Atakhan (until slain)
   const atakhanKills = events.filter((e) => e.EventName === 'AtakhanKill');
-  if (gameTime >= 1020 && atakhanKills.length === 0) {
-    const atakhanRem = Math.max(0, 1200 - gameTime);
+  if (gameTime >= Math.max(0, timings.atakhanSpawnSec - 180) && atakhanKills.length === 0) {
+    const atakhanRem = Math.max(0, timings.atakhanSpawnSec - gameTime);
+    const atakhanClock = formatClock(timings.atakhanSpawnSec);
     windows.push({
       id: 'atakhan',
       name: 'Atakhan',
       status: atakhanRem === 0 ? 'live' : atakhanRem <= 60 ? 'prep_vision' : 'upcoming',
       secondsRemaining: atakhanRem,
-      nextSpawnFormatted: formatClock(1200),
+      nextSpawnFormatted: atakhanClock,
       priority: atakhanRem <= 60 ? 'critical' : 'high',
       actionText:
         atakhanRem === 0
           ? 'Atakhan is LIVE — clear side waves & secure river vision before starting.'
-          : 'Prepare side-river Control Ward ahead of 20:00 Atakhan spawn.',
+          : `Prepare side-river Control Ward ahead of ${atakhanClock} Atakhan spawn.`,
     });
   }
 
-  // 3. Voidgrubs (6:00 = 360s) / Rift Herald (14:00–24:45 = 840..1485s) / Baron (25:00 = 1500s)
+  // 3. Voidgrubs / Rift Herald / Baron
   const voidgrubKills = events.filter((e) => e.EventName === 'HordeKill');
   const heraldKills = events.filter((e) => e.EventName === 'HeraldKill');
   const baronKills = events.filter((e) => e.EventName === 'BaronKill');
 
-  if (gameTime < 840) {
-    const grubsSpawn = 360;
+  if (gameTime < timings.heraldSpawnSec) {
+    const grubsSpawn = timings.voidgrubsSpawnSec;
     const grubRem = Math.max(0, grubsSpawn - gameTime);
-    if (gameTime < 660 && voidgrubKills.length < 3) {
+    const grubsClock = formatClock(grubsSpawn);
+    if (gameTime < timings.heraldSpawnSec - 180 && voidgrubKills.length < 3) {
       windows.push({
         id: 'voidgrubs',
         name: 'Voidgrubs',
         status: grubRem === 0 ? 'live' : grubRem <= 50 ? 'prep_vision' : 'upcoming',
         secondsRemaining: grubRem,
-        nextSpawnFormatted: formatClock(grubsSpawn),
+        nextSpawnFormatted: grubsClock,
         priority: grubRem <= 50 ? 'high' : 'medium',
         actionText:
           grubRem === 0
             ? 'Voidgrubs LIVE — secure at least 3+ grubs for turret siege plates.'
-            : 'Path top-side with top/mid prio before 6:00.',
+            : `Path top-side with top/mid prio before ${grubsClock}.`,
       });
     } else {
-      const heraldRem = Math.max(0, 840 - gameTime);
+      const heraldRem = Math.max(0, timings.heraldSpawnSec - gameTime);
+      const heraldClock = formatClock(timings.heraldSpawnSec);
       windows.push({
         id: 'herald',
         name: 'Rift Herald',
         status: heraldRem <= 60 ? 'prep_vision' : 'upcoming',
         secondsRemaining: heraldRem,
-        nextSpawnFormatted: formatClock(840),
+        nextSpawnFormatted: heraldClock,
         priority: heraldRem <= 60 ? 'high' : 'medium',
-        actionText: 'Prepare Top river vision for 14:00 Rift Herald spawn.',
+        actionText: `Prepare Top river vision for ${heraldClock} Rift Herald spawn.`,
       });
     }
-  } else if (gameTime < 1485 && heraldKills.length === 0) {
+  } else if (gameTime < timings.heraldDespawnSec && heraldKills.length === 0) {
     windows.push({
       id: 'herald',
       name: 'Rift Herald',
       status: 'live',
       secondsRemaining: 0,
-      nextSpawnFormatted: formatClock(840),
+      nextSpawnFormatted: formatClock(timings.heraldSpawnSec),
       priority: 'high',
-      actionText: 'Rift Herald LIVE (despawns 24:45) — use to crack Mid Tier-1 turret.',
+      actionText: `Rift Herald LIVE (despawns ${formatClock(timings.heraldDespawnSec)}) — use to crack Mid Tier-1 turret.`,
     });
   } else {
     const lastBaron =
       baronKills.length > 0 ? Math.max(...baronKills.map((e) => e.EventTime)) : null;
-    const nextBaron = lastBaron !== null ? Math.max(1500, lastBaron + 360) : 1500;
+    const nextBaron =
+      lastBaron !== null
+        ? Math.max(timings.baronSpawnSec, lastBaron + timings.baronRespawnSec)
+        : timings.baronSpawnSec;
     const baronRem = Math.max(0, nextBaron - gameTime);
     windows.push({
       id: 'baron',
@@ -581,10 +619,80 @@ export function computeAdaptiveBuild(
   };
 }
 
+/**
+ * Evaluates up to 2 capped personalized live guardrails strictly from public
+ * Live Client scoreboard metrics paired with Confirmed personal EWM weaknesses.
+ */
+export function computePersonalizedLiveGuardrails(
+  ctx: PersonalLiveGuardrailContext,
+  maxGuardrails = 2
+): MacroCue[] {
+  const learning = ctx.personalLearning;
+  const cap = Math.max(0, Math.min(2, maxGuardrails));
+  if (!learning || cap <= 0) return [];
+  const confirmedSet = new Set(
+    learning.signatures.filter((s) => s.status === 'confirmed').map((s) => s.detectorId)
+  );
+  if (confirmedSet.size === 0) return [];
+
+  const guardrails: MacroCue[] = [];
+  const nextObj = ctx.objectives.find((o) => o.secondsRemaining > 0);
+
+  if (
+    confirmedSet.has('pre_obj_death') &&
+    nextObj &&
+    nextObj.secondsRemaining <= 90
+  ) {
+    const secs = Math.round(nextObj.secondsRemaining);
+    guardrails.push({
+      id: 'personal-pre-obj-guard',
+      category: 'objective',
+      priority: 'urgent',
+      source: 'personal_guardrail',
+      title: `Guardrail: Hold flash/position before ${nextObj.name} (${secs}s)`,
+      detail: `Confirmed pre-objective death pattern (${learning.baselines.preObjectiveDeaths.shrunkBaseline}/g EWM). Reset early with Support before entering fog.`,
+    });
+  }
+
+  if (confirmedSet.has('blind_river_vision') && ctx.gameTime >= 420) {
+    const wardPerMin = ctx.wardScore / Math.max(1, ctx.gameTime / 60);
+    if (wardPerMin < 0.75) {
+      guardrails.push({
+        id: 'personal-vision-guard',
+        category: 'vision',
+        priority: 'high',
+        source: 'personal_guardrail',
+        title: `Guardrail: River setup behind (${wardPerMin.toFixed(2)} ward/min)`,
+        detail:
+          'Confirmed blind-river leak: pick up 1 Control Ward on base and sweep pit approach first.',
+      });
+    }
+  }
+
+  if (confirmedSet.has('midgame_farm_drop') && ctx.gameTime >= 600) {
+    const csPerMin = ctx.creepScore / Math.max(1, ctx.gameTime / 60);
+    const farmFloor = Math.max(5.7, learning.baselines.csPerMin.priorTarget - 0.5);
+    if (csPerMin < farmFloor) {
+      guardrails.push({
+        id: 'personal-farm-guard',
+        category: 'clear',
+        priority: 'normal',
+        source: 'personal_guardrail',
+        title: `Guardrail: Rebuild camp tempo (${csPerMin.toFixed(1)} CS/min)`,
+        detail:
+          'Confirmed mid-game farm drop: cycle spawned quadrant camps before shadowing even skirmishes.',
+      });
+    }
+  }
+
+  return guardrails.slice(0, cap);
+}
+
 export function computeMacroGuidance(
   liveData: LiveGameData,
   winPlan: WinConditionPlan | null,
-  objectives: ObjectiveWindow[]
+  objectives: ObjectiveWindow[],
+  personalLearning?: PersonalLearningSnapshot | null
 ): MacroCue[] {
   const gameTime = liveData.gameData.gameTime;
   const selfPlayer = resolveSelfPlayer(liveData);
@@ -599,6 +707,7 @@ export function computeMacroGuidance(
       id: 'obj-setup',
       category: 'objective',
       priority: 'urgent',
+      source: 'standard',
       title: `${topObjective.name} (${topObjective.status === 'live' ? 'LIVE' : `in ${secs}s`})`,
       detail: topObjective.actionText,
     });
@@ -610,6 +719,7 @@ export function computeMacroGuidance(
       id: 'recall-spike',
       category: 'clear',
       priority: 'high',
+      source: 'standard',
       title: `Spend ${currentGold}g before next objective`,
       detail: 'Clear remaining quadrant camps -> Reset & spend gold so you arrive at full strength.',
     });
@@ -618,6 +728,7 @@ export function computeMacroGuidance(
       id: 'first-clear',
       category: 'clear',
       priority: 'high',
+      source: 'standard',
       title: winPlan
         ? `Execute ${winPlan.strongSide.toUpperCase()} pathing tempo`
         : 'Execute disciplined opening clear',
@@ -628,6 +739,7 @@ export function computeMacroGuidance(
       id: 'camp-sequencing',
       category: 'clear',
       priority: 'normal',
+      source: 'standard',
       title: 'Sequence camps toward strong side',
       detail: winPlan
         ? `Clear camps from ${winPlan.weakSide.toUpperCase()} -> ${winPlan.strongSide.toUpperCase()} so you are naturally positioned for ganks & objectives.`
@@ -641,6 +753,7 @@ export function computeMacroGuidance(
       id: 'gank-push',
       category: 'gank',
       priority: 'high',
+      source: 'standard',
       title: winPlan
         ? `Play around ${winPlan.strongSide.toUpperCase()} lane & tower plates`
         : 'Convert ganks into wave shove & tower plates',
@@ -652,6 +765,7 @@ export function computeMacroGuidance(
       id: 'cross-map',
       category: 'invade',
       priority: 'normal',
+      source: 'standard',
       title: 'Cross-map trade & deep vision',
       detail:
         'Whenever enemy jungler shows on the opposite side of the map, immediately take their quadrant camps or push opposite lane/objective.',
@@ -665,6 +779,7 @@ export function computeMacroGuidance(
     id: 'vision-habit',
     category: 'vision',
     priority: Number(wardScorePerMin) < 0.8 && gameTime > 360 ? 'high' : 'normal',
+    source: 'standard',
     title: `Vision Control (${wardScorePerMin} ward score/min)`,
     detail:
       'Place Control Wards in river/pit entrances 45s prior to Dragon/Baron; use Oracle Lens when entering enemy jungle.',
@@ -676,51 +791,70 @@ export function computeMacroGuidance(
       id: 'wave-before-obj',
       category: 'push',
       priority: 'normal',
+      source: 'standard',
       title: 'Push side & mid waves before grouping',
       detail: 'Push mid/side waves past river first so enemies lose CS & cannot contest Baron/Dragon unseen.',
     });
+  }
+
+  // 6. Capped (<= 2) personalized guardrails grounded in confirmed habits + public scoreboard
+  if (selfPlayer) {
+    const guardrails = computePersonalizedLiveGuardrails(
+      {
+        gameTime,
+        wardScore: selfPlayer.scores.wardScore,
+        creepScore: selfPlayer.scores.creepScore,
+        objectives,
+        personalLearning,
+      },
+      2
+    );
+    cues.push(...guardrails);
   }
 
   return cues;
 }
 
 /**
- * Estimates jungle companion / Smite damage progression (600 -> 900 -> 1200)
- * from live match clock and jungle CS tempo.
+ * Estimates jungle companion / Smite damage progression from live match clock and
+ * jungle CS tempo using embedded or hot-swapped signed patch-pack thresholds.
  */
-export function computeSmiteProgression(liveData: LiveGameData): SmiteTierStatus {
+export function computeSmiteProgression(
+  liveData: LiveGameData,
+  thresholds: SmiteThresholdsConfig = DEFAULT_SMITE_THRESHOLDS
+): SmiteTierStatus {
   const selfPlayer = resolveSelfPlayer(liveData);
   const rawCs = selfPlayer?.scores.creepScore ?? 0;
   const rawGameTime = liveData.gameData.gameTime;
   const cs = Number.isFinite(rawCs) ? Math.max(0, rawCs) : 0;
   const mins = Number.isFinite(rawGameTime) ? Math.max(0, rawGameTime / 60) : 0;
   const estimatedTreats = Math.min(
-    40,
+    thresholds.primalStacks,
     Math.floor(cs / 3.6) + Math.floor(mins / 1.5)
   );
 
-  if (estimatedTreats >= 40 || (mins >= 18 && cs >= 105)) {
+  if (estimatedTreats >= thresholds.primalStacks || (mins >= 18 && cs >= 105)) {
     return {
       tierName: 'Primal',
-      damage: 1200,
+      damage: thresholds.primalDamage,
       estimatedStacksRemaining: 0,
-      note: 'Primal Smite active (1200 true damage) — pair burst spells cleanly at 1200 HP.',
+      note: `Primal Smite active (${thresholds.primalDamage} true damage) — pair burst spells cleanly at ${thresholds.primalDamage} HP.`,
     };
   }
-  if (estimatedTreats >= 20 || (mins >= 10 && cs >= 55)) {
-    const remaining = Math.max(1, 40 - estimatedTreats);
+  if (estimatedTreats >= thresholds.unleashedStacks || (mins >= 10 && cs >= 55)) {
+    const remaining = Math.max(1, thresholds.primalStacks - estimatedTreats);
     return {
       tierName: 'Unleashed',
-      damage: 900,
+      damage: thresholds.unleashedDamage,
       estimatedStacksRemaining: remaining,
-      note: `~${remaining} companion treats left until 1200 Primal Smite.`,
+      note: `~${remaining} companion treats left until ${thresholds.primalDamage} Primal Smite.`,
     };
   }
-  const remaining = Math.max(1, 20 - estimatedTreats);
+  const remaining = Math.max(1, thresholds.unleashedStacks - estimatedTreats);
   return {
     tierName: 'Base',
-    damage: 600,
+    damage: thresholds.baseDamage,
     estimatedStacksRemaining: remaining,
-    note: `Keep cycling camps (~${remaining} treats left for 900 Unleashed Smite).`,
+    note: `Keep cycling camps (~${remaining} treats left for ${thresholds.unleashedDamage} Unleashed Smite).`,
   };
 }

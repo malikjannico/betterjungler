@@ -31,6 +31,7 @@
     "allow-get-cached-meta-snapshot",
     "allow-save-ai-api-key",
     "allow-generate-ai-debrief",
+    "allow-test-ai-connection",
     "allow-update-overlay-preferences",
     "allow-get-lp-history",
     "allow-check-riot-api-key-health",
@@ -49,6 +50,8 @@
     "allow-delete-recording-clip",
     "allow-open-recordings-folder",
     "allow-get-personal-learning-snapshot",
+    "allow-get-active-patch-pack",
+    "allow-install-signed-patch-pack",
     "allow-inspect-replay-config",
     "allow-set-replay-api-enabled",
     "allow-seek-riot-replay"

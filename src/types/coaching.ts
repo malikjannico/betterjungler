@@ -183,7 +183,7 @@ export interface LaneGankabilityRow {
 
 export interface SmiteTierStatus {
   tierName: 'Base' | 'Unleashed' | 'Primal';
-  damage: 600 | 900 | 1200;
+  damage: number;
   estimatedStacksRemaining: number;
   note: string;
 }
@@ -264,6 +264,70 @@ export interface MacroCue {
   priority: 'urgent' | 'high' | 'normal';
   title: string;
   detail: string;
+  source?: 'standard' | 'personal_guardrail';
+}
+
+export interface ObjectiveTimingsConfig {
+  scuttleInitialSec: number;
+  dragonFirstSpawnSec: number;
+  dragonRespawnSec: number;
+  elderRespawnSec: number;
+  voidgrubsSpawnSec: number;
+  heraldSpawnSec: number;
+  heraldDespawnSec: number;
+  atakhanSpawnSec: number;
+  baronSpawnSec: number;
+  baronRespawnSec: number;
+}
+
+export interface SmiteThresholdsConfig {
+  baseDamage: number;
+  unleashedDamage: number;
+  primalDamage: number;
+  unleashedStacks: number;
+  primalStacks: number;
+}
+
+export interface ChampionTierOverride {
+  championId: number;
+  championName: string;
+  metaTier: string;
+  metaScore: number;
+}
+
+export interface KnowledgePackPayload {
+  objectiveTimings: ObjectiveTimingsConfig;
+  smiteThresholds: SmiteThresholdsConfig;
+  metaTierOverrides: ChampionTierOverride[];
+}
+
+export interface ActivePatchPackStatus {
+  patch: string;
+  issuedAt: string;
+  verified: boolean;
+  metaVerified?: boolean;
+  source: 'embedded' | 'hot_swapped' | 'embedded_fallback' | string;
+  fallbackReason: string | null;
+  payload: KnowledgePackPayload;
+}
+
+/**
+ * Compile-time Riot compliance boundary: live guardrails may ONLY consume public
+ * Live Client Data + confirmed personal EWM baselines — hidden game-state fields
+ * are statically forbidden via `never`.
+ */
+export interface PersonalLiveGuardrailContext {
+  gameTime: number;
+  wardScore: number;
+  creepScore: number;
+  objectives: ObjectiveWindow[];
+  personalLearning?: PersonalLearningSnapshot | null;
+  enemyCooldowns?: never;
+  enemySpellTimers?: never;
+  enemyPositions?: never;
+  fogOfWarUnits?: never;
+  enemyWardPositions?: never;
+  summonerNames?: never;
 }
 
 export type OverlayMode = 'compact' | 'expanded';

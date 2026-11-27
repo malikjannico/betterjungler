@@ -8,17 +8,26 @@ import {
   computeObjectiveWindows,
   resolveSelfPlayer,
 } from './domain/liveCoachEngine';
+import { computePersonalLearningSnapshot } from './domain/personalLearningEngine';
 import { generateWinConditionPlan } from './domain/winConditionEngine';
 import { useInterpolatedGameTime } from './hooks/useInterpolatedGameTime';
 import {
+  getActivePatchPack,
   getAppState,
+  getCachedMatches,
+  getPersonalLearningSnapshot,
   loadSettings,
   setOverlayMode,
   subscribeGameState,
   subscribeHudPreferences,
+  subscribePatchPackUpdated,
 } from './services/tauriBridge';
-import type { HudScalePercent } from './types/coaching';
-import type { AppRuntimeState, LaneRole, LiveGameData } from './types/riot';
+import type {
+  ActivePatchPackStatus,
+  HudScalePercent,
+  SqlPersonalLearningSummary,
+} from './types/coaching';
+import type { AppRuntimeState, LaneRole, LiveGameData, MatchV5Detail } from './types/riot';
 
 const IDLE_RUNTIME_STATE: AppRuntimeState = {
   phase: 'idle',
@@ -78,15 +87,42 @@ export function HudApp() {
   const [opacity, setOpacity] = useState(80);
   const [scalePercent, setScalePercent] = useState<HudScalePercent>(100);
   const [hotkey, setHotkey] = useState('Alt+J');
+  const [targetDivision, setTargetDivision] = useState('PLATINUM IV');
+  const [patchPackStatus, setPatchPackStatus] = useState<ActivePatchPackStatus | null>(null);
+  const [cachedMatches, setCachedMatches] = useState<MatchV5Detail[]>([]);
+  const [sqlPersonalLearning, setSqlPersonalLearning] = useState<SqlPersonalLearningSummary | null>(
+    null
+  );
 
   useEffect(() => {
     let active = true;
+    let lastPhase = '';
+    let lastPuuid = '';
+    const refreshPersonalAndPack = (puuid?: string | null) => {
+      void getActivePatchPack()
+        .then((pack) => {
+          if (active && pack) setPatchPackStatus(pack);
+        })
+        .catch(() => {});
+      void getCachedMatches(puuid ?? undefined)
+        .then((matches) => {
+          if (active) setCachedMatches(matches);
+        })
+        .catch(() => {});
+      void getPersonalLearningSnapshot(puuid ?? null)
+        .then((snap) => {
+          if (active) setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
+        })
+        .catch(() => {});
+    };
+
     void loadSettings()
       .then((s) => {
         if (!active) return;
         setOpacity(s.hudOpacity);
         setScalePercent((s.hudScale ?? 100) as HudScalePercent);
         setHotkey(s.overlayHotkey);
+        setTargetDivision(s.targetDivision);
       })
       .catch((err) => {
         console.warn('HUD settings fallback:', err);
@@ -94,14 +130,31 @@ export function HudApp() {
 
     void getAppState()
       .then((state) => {
-        if (active && state) setRuntimeState(state);
+        if (!active || !state) return;
+        setRuntimeState(state);
+        lastPhase = state.phase;
+        lastPuuid = state.summonerProfile?.puuid ?? '';
+        refreshPersonalAndPack(state.summonerProfile?.puuid);
       })
       .catch((err) => {
         console.warn('HUD runtime state fetch failed:', err);
       });
 
     const unsubGame = subscribeGameState(
-      (state) => setRuntimeState(state),
+      (state) => {
+        setRuntimeState(state);
+        const nextPuuid = state.summonerProfile?.puuid ?? '';
+        const enteredMatchPhase =
+          (state.phase === 'in_game' || state.phase === 'loading') && state.phase !== lastPhase;
+        const accountChanged = nextPuuid !== '' && nextPuuid !== lastPuuid;
+        lastPhase = state.phase;
+        if (nextPuuid) {
+          lastPuuid = nextPuuid;
+        }
+        if (enteredMatchPhase || accountChanged) {
+          refreshPersonalAndPack(nextPuuid || null);
+        }
+      },
       () => {}
     );
     const unsubPrefs = subscribeHudPreferences((prefs) => {
@@ -109,11 +162,15 @@ export function HudApp() {
       setScalePercent((prefs.hudScale ?? 100) as HudScalePercent);
       setHotkey(prefs.overlayHotkey);
     });
+    const unsubPatchPack = subscribePatchPackUpdated((pack) => {
+      if (active) setPatchPackStatus(pack);
+    });
 
     return () => {
       active = false;
       void unsubGame.then((fn) => fn());
       void unsubPrefs.then((fn) => fn());
+      void unsubPatchPack.then((fn) => fn());
     };
   }, []);
 
@@ -138,9 +195,21 @@ export function HudApp() {
     return computeObjectiveWindows(
       liveGameSynced.gameData.gameTime,
       liveGameSynced.events.Events,
-      liveGameSynced.allPlayers
+      liveGameSynced.allPlayers,
+      patchPackStatus?.payload.objectiveTimings
     );
-  }, [liveGameSynced]);
+  }, [liveGameSynced, patchPackStatus]);
+
+  const personalLearning = useMemo(
+    () =>
+      computePersonalLearningSnapshot(
+        cachedMatches,
+        cachedMatches,
+        targetDivision,
+        sqlPersonalLearning
+      ),
+    [cachedMatches, targetDivision, sqlPersonalLearning]
+  );
 
   const winPlan = useMemo(() => {
     if (runtimeState.phase !== 'loading' && runtimeState.phase !== 'in_game') {
@@ -189,8 +258,8 @@ export function HudApp() {
 
   const macroCues = useMemo(() => {
     if (!liveGameSynced) return [];
-    return computeMacroGuidance(liveGameSynced, winPlan, objectives);
-  }, [liveGameSynced, winPlan, objectives]);
+    return computeMacroGuidance(liveGameSynced, winPlan, objectives, personalLearning);
+  }, [liveGameSynced, winPlan, objectives, personalLearning]);
 
   const hudStyle = {
     '--hud-alpha': String(Math.max(0.7, Math.min(1, opacity / 100))),

@@ -25,7 +25,7 @@ impl Default for AiCoachConfig {
     fn default() -> Self {
         Self {
             provider: "off".to_string(),
-            model: "gemini-2.5-flash".to_string(),
+            model: "gemini-3.8-flash".to_string(),
             endpoint: "http://127.0.0.1:11434".to_string(),
             has_api_key: false,
         }

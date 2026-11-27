@@ -80,6 +80,8 @@ vi.mock('./services/tauriBridge', () => ({
   loadClimbGoals: vi.fn().mockResolvedValue([]),
   getCachedMetaSnapshot: vi.fn().mockResolvedValue(null),
   getCachedMatches: vi.fn().mockResolvedValue([DEMO_POST_GAME_MATCHES[1]!]),
+  getActivePatchPack: vi.fn().mockResolvedValue(null),
+  installSignedPatchPack: vi.fn(),
   loadLpHistory: vi.fn().mockResolvedValue([]),
   subscribeGameState: vi.fn().mockImplementation(async (onGame: (s: AppRuntimeState) => void) => {
     emitGameStateRef.current = onGame;

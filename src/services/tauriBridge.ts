@@ -1,5 +1,7 @@
 import pkg from '../../package.json';
 import type {
+  ActivePatchPackStatus,
+  AiProvider,
   ApiKeyHealthStatus,
   AppMetaInfo,
   ClimbGoal,
@@ -64,7 +66,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   riotApiProxyUrl: '',
   aiCoach: {
     provider: 'off',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.8-flash',
     endpoint: 'http://127.0.0.1:11434',
     hasApiKey: false,
   },
@@ -137,6 +139,19 @@ export async function subscribeHudPreferences(
   const { listen } = await import('@tauri-apps/api/event');
   const unlisten = await listen<HudPreferencesEvent>('hud-preferences-changed', (e) => {
     onPrefs(e.payload);
+  });
+  return () => {
+    unlisten();
+  };
+}
+
+export async function subscribePatchPackUpdated(
+  onUpdate: (pack: ActivePatchPackStatus) => void
+): Promise<() => void> {
+  if (!isTauriEnvironment()) return () => {};
+  const { listen } = await import('@tauri-apps/api/event');
+  const unlisten = await listen<ActivePatchPackStatus>('patch-pack-updated', (e) => {
+    onUpdate(e.payload);
   });
   return () => {
     unlisten();
@@ -353,6 +368,17 @@ export async function generateAiDebrief(context: string): Promise<string> {
     throw new Error('DEMO_FALLBACK');
   }
   return invokeTauri<string>('generate_ai_debrief', { context });
+}
+
+export async function testAiConnection(
+  provider: AiProvider,
+  model: string,
+  endpoint: string
+): Promise<string> {
+  if (!isTauriEnvironment()) {
+    return 'Demo Mode: AI Coach connection test runs inside the Windows desktop app.';
+  }
+  return invokeTauri<string>('test_ai_connection', { provider, model, endpoint });
 }
 
 export async function subscribeGameState(
@@ -597,5 +623,23 @@ export async function getPersonalLearningSnapshot(
   }
   return invokeTauri<SqlPersonalLearningSummary>('get_personal_learning_snapshot', {
     puuid: puuid ?? null,
+  });
+}
+
+export async function getActivePatchPack(): Promise<ActivePatchPackStatus | null> {
+  if (!isTauriEnvironment()) {
+    return null;
+  }
+  return invokeTauri<ActivePatchPackStatus>('get_active_patch_pack');
+}
+
+export async function installSignedPatchPack(
+  envelopeJson: string
+): Promise<ActivePatchPackStatus> {
+  if (!isTauriEnvironment()) {
+    throw new Error('Signed patch pack installation requires the desktop app.');
+  }
+  return invokeTauri<ActivePatchPackStatus>('install_signed_patch_pack', {
+    envelopeJson,
   });
 }

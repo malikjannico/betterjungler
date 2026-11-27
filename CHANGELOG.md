@@ -2,6 +2,14 @@
 
 All notable changes to **BetterJungler** are documented in this file.
 
+## [2.0.0] - 2026-11-27
+
+### Added
+- **Signed Ed25519 Patch Packs & Zero-Rebuild Hot-Swap (`knowledge/<patch>.json`, `meta-<patch>.json`)**: Verifies embedded and hot-swapped objective timings, Smite thresholds, and champion meta overrides via strict `Ed25519` (`verify_strict` in `patch_pack.rs`) with automatic fallback to verified embedded defaults when an external pack is tampered or malformed.
+- **Capped Personalized Live Objective Guardrails**: Appends at most 2 real-time macro guardrails strictly from public Live Client scoreboard telemetry + Confirmed personal EWM weaknesses, protected by compile-time `never` type guards banning enemy cooldowns or fog-of-war fields.
+- **Numeric-Fact-Validated AI Narrator (`ai_coach.rs` & `aiFactValidator.ts`)**: Cross-checks generated post-game debriefs and Win-Con briefs against unit-scoped telemetry JSON metrics and timestamps (`gold`, `%`, `m`/`min`, `s`, `MM:SS`/`HH:MM:SS`), rejecting invented figures on the backend and marking checked summaries in the UI.
+- **AI Coach `HTTP 429`/`402` Diagnostics, Curated Model Presets & Response Cache**: Parses Google Gemini, OpenAI, and Ollama error bodies (`limit: 0` free-tier exclusion vs `402` prepayment balance gate vs transient RPM limits) with bounded transient retries, curated model presets with Free/Paid tier badges (`gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-4-hydrogen`, `gemini-4-neon`, `gpt-6-luna`), an in-app `"Test Connection"` probe, and persistent `(matchId/planKey, provider, model)` response caching to avoid burning duplicate API quota.
+
 ## [1.4.0] - 2026-11-27
 
 ### Added

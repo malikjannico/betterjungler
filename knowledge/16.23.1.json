@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "kind": "knowledge",
+  "patch": "16.23.1",
+  "issuedAt": "2026-11-27T00:00:00Z",
+  "payloadJson": "{\"objectiveTimings\":{\"scuttleInitialSec\":210,\"dragonFirstSpawnSec\":300,\"dragonRespawnSec\":300,\"elderRespawnSec\":360,\"voidgrubsSpawnSec\":360,\"heraldSpawnSec\":840,\"heraldDespawnSec\":1485,\"atakhanSpawnSec\":1200,\"baronSpawnSec\":1500,\"baronRespawnSec\":360},\"smiteThresholds\":{\"baseDamage\":600,\"unleashedDamage\":900,\"primalDamage\":1200,\"unleashedStacks\":20,\"primalStacks\":40},\"metaTierOverrides\":[{\"championId\":234,\"championName\":\"Viego\",\"metaTier\":\"S+\",\"metaScore\":95.4},{\"championId\":64,\"championName\":\"Lee Sin\",\"metaTier\":\"S\",\"metaScore\":92.8},{\"championId\":121,\"championName\":\"Kha'Zix\",\"metaTier\":\"S\",\"metaScore\":91.5},{\"championId\":62,\"championName\":\"Wukong\",\"metaTier\":\"S\",\"metaScore\":90.9}]}",
+  "signatureB64": "Pw2b8LixCbgHQOaetUZewPJrr6B7Tstl7eswZFfFWTXyzK9YJcipoV7YVN732YfUq6Km4Hy3jngPLrdyW76ADg=="
+}

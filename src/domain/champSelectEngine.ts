@@ -1,6 +1,7 @@
 import { JUNGLE_CHAMPIONS, getChampionMeta } from '../data/jungleKnowledgePack';
 import type {
   ChampSelectRecommendation,
+  ChampionTierOverride,
   HighEloMetaSnapshot,
   JungleChampionProfile,
   TeamCompAnalysis,
@@ -127,6 +128,7 @@ export interface RecommendJungleInput {
   masteryChampionIds?: number[];
   highEloMeta?: HighEloMetaSnapshot | null;
   personalStats?: Record<number, PersonalChampRecord>;
+  metaTierOverrides?: ChampionTierOverride[];
 }
 
 /**
@@ -176,6 +178,7 @@ export interface ScoreChampionContext {
   highEloMeta?: HighEloMetaSnapshot | null;
   personalStats?: Record<number, PersonalChampRecord>;
   baselinePersonalWr?: number;
+  metaTierOverrides?: ChampionTierOverride[];
 }
 
 /**
@@ -212,8 +215,15 @@ export function scoreChampion(
   const reasons: string[] = [];
   const warnings: string[] = [];
 
-  // 1. Meta Tier baseline (0..35) + optional High-Elo Match-V5 Bayesian-shrunk blend (-5..+5)
-  let metaPoints = Math.max(0, Math.min(35, Math.round(((jungler.metaScore - 75) / 25) * 35)));
+  // 1. Meta Tier baseline (0..35) with optional signed Patch Pack override + High-Elo blend (-5..+5)
+  const metaOverride = ctx.metaTierOverrides?.find(
+    (ov) => ov.championId === jungler.championId
+  );
+  const effectiveMetaScore = metaOverride ? metaOverride.metaScore : jungler.metaScore;
+  let metaPoints = Math.max(0, Math.min(35, Math.round(((effectiveMetaScore - 75) / 25) * 35)));
+  if (metaOverride) {
+    reasons.push(`Signed Patch Pack ${metaOverride.metaTier}-tier override (${metaOverride.metaScore.toFixed(1)})`);
+  }
   const highEloStat = ctx.highEloMeta?.champions.find(
     (c) => c.championId === jungler.championId && c.games >= 5
   );
@@ -361,6 +371,7 @@ export function recommendJunglePicks(
     highEloMeta: input.highEloMeta,
     personalStats: input.personalStats,
     baselinePersonalWr: computePersonalBaselineWinRate(input.personalStats),
+    metaTierOverrides: input.metaTierOverrides,
   };
 
   const recommendations: ChampSelectRecommendation[] = [];

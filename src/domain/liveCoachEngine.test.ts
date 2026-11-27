@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { findJungleChampionByName } from '../data/jungleKnowledgePack';
+import { computePersonalLearningSnapshot } from './personalLearningEngine';
+import { DEMO_POST_GAME_MATCHES } from './postGameFixtures';
 import {
+  DEFAULT_OBJECTIVE_TIMINGS,
   computeAdaptiveBuild,
   computeMacroGuidance,
   computeObjectiveWindows,
+  computePersonalizedLiveGuardrails,
   computeSmiteProgression,
   formatClock,
   resolveSelfPlayer,
@@ -157,5 +161,118 @@ describe('liveCoachEngine', () => {
     expect(full.tierName).toBe('Primal');
     expect(full.damage).toBe(1200);
     expect(full.estimatedStacksRemaining).toBe(0);
+  });
+
+  it('applies hot-swapped ObjectiveTimingsConfig cleanly without rebuild', () => {
+    const customTimings = {
+      ...DEFAULT_OBJECTIVE_TIMINGS,
+      dragonFirstSpawnSec: 330,
+      voidgrubsSpawnSec: 390,
+    };
+    const objs = computeObjectiveWindows(185, [], undefined, customTimings);
+    const dragon = objs.find((o) => o.id === 'dragon');
+    const grubs = objs.find((o) => o.id === 'voidgrubs');
+    expect(dragon?.nextSpawnFormatted).toBe('5:30');
+    expect(dragon?.secondsRemaining).toBe(145);
+    expect(grubs?.nextSpawnFormatted).toBe('6:30');
+    expect(grubs?.secondsRemaining).toBe(205);
+  });
+
+  it('caps personalized live guardrails at <= 2 cues from public scoreboard + Confirmed habits only', () => {
+    const badJgBase = DEMO_POST_GAME_MATCHES[1]!;
+    const leakHistory = Array.from({ length: 8 }, (_, idx) => ({
+      ...badJgBase,
+      matchId: `EUW1_GUARD_${idx}`,
+      playedAt: new Date(Date.UTC(2026, 10, 27, 10 + idx, 0, 0)).toISOString(),
+    }));
+    const confirmedLearning = computePersonalLearningSnapshot(
+      leakHistory,
+      leakHistory,
+      'PLATINUM IV'
+    );
+    const objs = computeObjectiveWindows(
+      DEMO_IN_GAME_MID.gameData.gameTime,
+      DEMO_IN_GAME_MID.events.Events
+    );
+    const guardrails = computePersonalizedLiveGuardrails(
+      {
+        gameTime: DEMO_IN_GAME_MID.gameData.gameTime,
+        wardScore: 4, // low ward/min triggers blind_river_vision
+        creepScore: 60, // low CS/min triggers midgame_farm_drop
+        objectives: objs,
+        personalLearning: confirmedLearning,
+      },
+      2
+    );
+    expect(guardrails.length).toBeLessThanOrEqual(2);
+    expect(guardrails.length).toBeGreaterThanOrEqual(1);
+    expect(guardrails.every((g) => g.source === 'personal_guardrail')).toBe(true);
+
+    // Monitoring-only learning snapshot (2 games) must emit 0 guardrails
+    const monitoringOnly = computePersonalLearningSnapshot(
+      leakHistory.slice(0, 2),
+      leakHistory.slice(0, 2),
+      'PLATINUM IV'
+    );
+    expect(
+      computePersonalizedLiveGuardrails({
+        gameTime: DEMO_IN_GAME_MID.gameData.gameTime,
+        wardScore: 4,
+        creepScore: 60,
+        objectives: objs,
+        personalLearning: monitoringOnly,
+      })
+    ).toEqual([]);
+
+    // When index 0 is LIVE (0s remaining, e.g. Herald), pre_obj guardrail still fires for upcoming Dragon (<= 90s)
+    const liveHeraldThenDragon = computePersonalizedLiveGuardrails({
+      gameTime: 1000,
+      wardScore: 20,
+      creepScore: 150,
+      objectives: [
+        {
+          id: 'herald',
+          name: 'Rift Herald',
+          status: 'live',
+          secondsRemaining: 0,
+          nextSpawnFormatted: '14:00',
+          priority: 'high',
+          actionText: 'Live',
+        },
+        {
+          id: 'dragon',
+          name: 'Elemental Dragon',
+          status: 'prep_vision',
+          secondsRemaining: 48,
+          nextSpawnFormatted: '17:28',
+          priority: 'critical',
+          actionText: 'Prep',
+        },
+      ],
+      personalLearning: confirmedLearning,
+    });
+    expect(liveHeraldThenDragon.some((g) => g.id === 'personal-pre-obj-guard')).toBe(true);
+
+    // Custom hot-swapped SmiteThresholdsConfig alters Unleashed/Primal damage & treat counts
+    const customSmite = computeSmiteProgression(DEMO_IN_GAME_MID, {
+      baseDamage: 650,
+      unleashedDamage: 950,
+      primalDamage: 1250,
+      unleashedStacks: 25,
+      primalStacks: 45,
+    });
+    expect([950, 1250]).toContain(customSmite.damage);
+
+    // Compile-time Riot compliance check: hidden enemy state must never compile into guardrails
+    const forbiddenInput = {
+      gameTime: 900,
+      wardScore: 10,
+      creepScore: 100,
+      objectives: objs,
+      personalLearning: confirmedLearning,
+      enemyCooldowns: { flash: 120 },
+    };
+    // @ts-expect-error enemyCooldowns is statically banned by PersonalLiveGuardrailContext
+    expect(computePersonalizedLiveGuardrails(forbiddenInput).length).toBeLessThanOrEqual(2);
   });
 });

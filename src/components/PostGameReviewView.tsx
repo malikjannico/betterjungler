@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import pkg from '../../package.json';
 import { synthesizeDemoPostGameDebrief } from '../domain/aiCoachFallback';
 import { formatChampionName } from '../domain/championNames';
+import { validateGroundedAiResponse } from '../domain/aiFactValidator';
+import { getCachedAiResponse, hashAiContext, setCachedAiResponse } from '../domain/aiResponseCache';
 import { evaluateFocusGoalAgainstMatch } from '../domain/climbLadderEngine';
 import { formatClock } from '../domain/liveCoachEngine';
 import { computePersonalLearningSnapshot } from '../domain/personalLearningEngine';
@@ -86,7 +88,8 @@ export function PostGameReviewView({
   const [aiDebriefState, setAiDebriefState] = useState<{
     matchId: string;
     text: string | null;
-  }>({ matchId: '', text: null });
+    verified?: boolean;
+  }>({ matchId: '', text: null, verified: false });
   const [aiErrorState, setAiErrorState] = useState<{
     matchId: string;
     message: string | null;
@@ -130,19 +133,63 @@ export function PostGameReviewView({
     selectedMatch && activeSecondState.matchId === selectedMatch.matchId
       ? activeSecondState.second
       : null;
-  const aiDebrief =
-    selectedMatch && aiDebriefState.matchId === selectedMatch.matchId ? aiDebriefState.text : null;
-  const aiError =
-    selectedMatch && aiErrorState.matchId === selectedMatch.matchId ? aiErrorState.message : null;
-  const exportFeedback =
-    selectedMatch && exportFeedbackState?.matchId === selectedMatch.matchId
-      ? exportFeedbackState
-      : null;
-
   const report = useMemo(() => {
     if (!selectedMatch) return null;
     return analyzePostGameMatch(selectedMatch, targetDivision);
   }, [selectedMatch, targetDivision]);
+
+  const aiContextJson = useMemo(() => {
+    if (!report || !report.isJungle) return '';
+    return JSON.stringify({
+      champion: report.championName,
+      enemyJungler: report.enemyJunglerName,
+      duration: formatClock(report.durationSeconds),
+      win: report.win,
+      grade: report.grade,
+      targetDivision,
+      kpis: report.kpis,
+      highlights: report.highlights.map((h) => h.title),
+      mistakes: report.mistakes.map((m) => m.title),
+      improvements: report.improvements.map((imp) => imp.title),
+    });
+  }, [report, targetDivision]);
+
+  const aiCacheKey =
+    selectedMatch && aiContextJson
+      ? `${selectedMatch.matchId}:${hashAiContext(aiContextJson)}`
+      : '';
+
+  const cachedDebrief = useMemo(() => {
+    if (!aiCacheKey || !aiContextJson || aiConfig.provider === 'off') return null;
+    const entry = getCachedAiResponse(
+      'post_game',
+      aiCacheKey,
+      aiConfig.provider,
+      aiConfig.model
+    );
+    if (!entry) return null;
+    return validateGroundedAiResponse(aiContextJson, entry.text).valid ? entry : null;
+  }, [aiCacheKey, aiContextJson, aiConfig.provider, aiConfig.model]);
+  const aiError =
+    aiCacheKey && aiErrorState.matchId === aiCacheKey ? aiErrorState.message : null;
+  const hasLiveMatchDebrief = Boolean(
+    aiCacheKey &&
+      aiDebriefState.matchId === aiCacheKey &&
+      aiDebriefState.text !== null
+  );
+  const aiDebrief = hasLiveMatchDebrief
+    ? aiDebriefState.text
+    : !aiError && cachedDebrief
+      ? cachedDebrief.text
+      : null;
+  const aiDebriefVerified = hasLiveMatchDebrief
+    ? Boolean(aiDebriefState.verified)
+    : !aiError && Boolean(cachedDebrief?.verified);
+  const aiDebriefFromCache = !hasLiveMatchDebrief && !aiError && Boolean(cachedDebrief);
+  const exportFeedback =
+    selectedMatch && exportFeedbackState?.matchId === selectedMatch.matchId
+      ? exportFeedbackState
+      : null;
 
   const availableSubpages = report?.isJungle ? JUNGLE_SUBPAGES : OFFROLE_SUBPAGES;
   const activeSubpage: PostGameSubpageId = availableSubpages.some((t) => t.id === subpage)
@@ -242,45 +289,53 @@ export function PostGameReviewView({
     }
   }
 
-  const isAiLoading = Boolean(selectedMatch && aiLoadingMatchId === selectedMatch.matchId);
+  const isAiLoading = Boolean(aiCacheKey && aiLoadingMatchId === aiCacheKey);
 
   async function handleGenerateAiDebrief() {
-    if (!report || !report.isJungle) return;
-    const requestMatchId = report.matchId;
-    setAiLoadingMatchId(requestMatchId);
-    setAiErrorState({ matchId: requestMatchId, message: null });
-    const context = JSON.stringify({
-      champion: report.championName,
-      enemyJungler: report.enemyJunglerName,
-      duration: formatClock(report.durationSeconds),
-      win: report.win,
-      grade: report.grade,
-      targetDivision,
-      kpis: report.kpis,
-      highlights: report.highlights.map((h) => h.title),
-      mistakes: report.mistakes.map((m) => m.title),
-    });
+    if (!report || !report.isJungle || !aiContextJson || !aiCacheKey) return;
+    const requestCacheKey = aiCacheKey;
+    setAiLoadingMatchId(requestCacheKey);
+    setAiDebriefState({ matchId: requestCacheKey, text: null, verified: false });
+    setAiErrorState({ matchId: requestCacheKey, message: null });
+    const context = aiContextJson;
 
     try {
       const response = await generateAiDebrief(context);
       if (!mountedRef.current) return;
-      setAiDebriefState({ matchId: requestMatchId, text: response });
+      const check = validateGroundedAiResponse(context, response);
+      if (!check.valid) {
+        setAiErrorState({
+          matchId: requestCacheKey,
+          message: `AI debrief rejected by numeric fact validator — ungrounded figures: ${check.ungroundedTokens.join(', ')}`,
+        });
+        return;
+      }
+      if (aiConfig.provider !== 'off') {
+        setCachedAiResponse('post_game', requestCacheKey, aiConfig.provider, aiConfig.model, {
+          text: response,
+          verified: true,
+        });
+      }
+      setAiDebriefState({ matchId: requestCacheKey, text: response, verified: true });
     } catch (err) {
       if (!mountedRef.current) return;
       if (err instanceof Error && err.message === 'DEMO_FALLBACK') {
+        const fallback = synthesizeDemoPostGameDebrief(report);
+        const check = validateGroundedAiResponse(context, fallback);
         setAiDebriefState({
-          matchId: requestMatchId,
-          text: synthesizeDemoPostGameDebrief(report),
+          matchId: requestCacheKey,
+          text: fallback,
+          verified: check.valid,
         });
       } else {
         setAiErrorState({
-          matchId: requestMatchId,
+          matchId: requestCacheKey,
           message: err instanceof Error ? err.message : 'AI Debrief failed.',
         });
       }
     } finally {
       if (mountedRef.current) {
-        setAiLoadingMatchId((prev) => (prev === requestMatchId ? null : prev));
+        setAiLoadingMatchId((prev) => (prev === requestCacheKey ? null : prev));
       }
     }
   }
@@ -767,14 +822,37 @@ export function PostGameReviewView({
               onClick={() => void handleGenerateAiDebrief()}
               className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
             >
-              {isAiLoading ? 'Generating...' : 'Generate AI Coach Debrief'}
+              {isAiLoading
+                ? 'Generating...'
+                : aiDebrief
+                  ? 'Regenerate AI Debrief'
+                  : 'Generate AI Coach Debrief'}
             </button>
           </div>
 
           {aiDebrief && (
-            <pre className="lg-inset t-caption mt-3 whitespace-pre-wrap p-3 font-sans leading-relaxed text-white/[0.88]">
-              {aiDebrief}
-            </pre>
+            <div className="mt-3 space-y-1.5">
+              {(aiDebriefVerified || aiDebriefFromCache) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {aiDebriefVerified && (
+                    <div
+                      title="Cited metrics and timestamps matched against provided match telemetry."
+                      className="inline-flex items-center rounded-full border border-emerald-400/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200"
+                    >
+                      Telemetry Numbers Checked
+                    </div>
+                  )}
+                  {aiDebriefFromCache && (
+                    <div className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-white/[0.7]">
+                      Cached
+                    </div>
+                  )}
+                </div>
+              )}
+              <pre className="lg-inset t-caption whitespace-pre-wrap p-3 font-sans leading-relaxed text-white/[0.88]">
+                {aiDebrief}
+              </pre>
+            </div>
           )}
           {!aiDebrief && !aiError && (
             <p className="t-caption mt-3 text-white/[0.55]">

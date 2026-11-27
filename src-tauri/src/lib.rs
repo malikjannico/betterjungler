@@ -4,6 +4,7 @@ mod high_elo_sampler;
 mod lcu;
 mod live_client;
 mod overlay;
+mod patch_pack;
 mod rate_limiter;
 mod recorder;
 mod replay_api;
@@ -103,6 +104,7 @@ pub struct SharedState {
     live_miss_streak: Arc<AtomicU8>,
     pending_update: Mutex<Option<updater::PendingUpdate>>,
     log_dir: PathBuf,
+    pack_dir: PathBuf,
 }
 
 #[tauri::command]
@@ -652,6 +654,23 @@ async fn generate_ai_debrief(
     ai_coach::generate_ai_debrief(&state.ai_client, &config, api_key, &context).await
 }
 
+#[tauri::command]
+async fn test_ai_connection(
+    state: State<'_, Arc<SharedState>>,
+    provider: String,
+    model: String,
+    endpoint: String,
+) -> AppResult<String> {
+    let config = storage::AiCoachConfig {
+        provider: provider.trim().to_ascii_lowercase(),
+        model: model.trim().to_string(),
+        endpoint: endpoint.trim().to_string(),
+        has_api_key: false,
+    };
+    let api_key = storage::load_ai_api_key().ok();
+    ai_coach::test_ai_connection(&state.ai_client, &config, api_key).await
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn update_overlay_preferences(
@@ -1143,6 +1162,24 @@ fn get_personal_learning_snapshot(
 }
 
 #[tauri::command]
+fn get_active_patch_pack(
+    state: State<'_, Arc<SharedState>>,
+) -> AppResult<patch_pack::ActivePatchPackStatus> {
+    patch_pack::load_active_patch_pack(&state.pack_dir)
+}
+
+#[tauri::command]
+fn install_signed_patch_pack(
+    app: AppHandle,
+    state: State<'_, Arc<SharedState>>,
+    envelope_json: String,
+) -> AppResult<patch_pack::ActivePatchPackStatus> {
+    let status = patch_pack::install_signed_patch_pack(&state.pack_dir, &envelope_json)?;
+    let _ = app.emit("patch-pack-updated", &status);
+    Ok(status)
+}
+
+#[tauri::command]
 fn inspect_replay_config(state: State<'_, Arc<SharedState>>) -> GameCfgReplayStatus {
     let install_path = state
         .install_path
@@ -1618,7 +1655,9 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("betterjungler"));
             let log_dir = app_dir.join("logs");
             let recordings_dir = app_dir.join("recordings");
+            let pack_dir = app_dir.join("packs");
             let _ = std::fs::create_dir_all(&recordings_dir);
+            let _ = std::fs::create_dir_all(&pack_dir);
             init_file_logging(&log_dir);
 
             let db_path = app_dir.join("betterjungler.db");
@@ -1686,6 +1725,7 @@ pub fn run() {
                 live_miss_streak: Arc::new(AtomicU8::new(0)),
                 pending_update: Mutex::new(None),
                 log_dir,
+                pack_dir,
             });
 
             let quit_shared = shared.clone();
@@ -1749,6 +1789,7 @@ pub fn run() {
             get_cached_meta_snapshot,
             save_ai_api_key,
             generate_ai_debrief,
+            test_ai_connection,
             update_overlay_preferences,
             get_lp_history,
             check_riot_api_key_health,
@@ -1767,6 +1808,8 @@ pub fn run() {
             delete_recording_clip,
             open_recordings_folder,
             get_personal_learning_snapshot,
+            get_active_patch_pack,
+            install_signed_patch_pack,
             inspect_replay_config,
             set_replay_api_enabled,
             seek_riot_replay

@@ -19,6 +19,7 @@ import { getChampionIconUrl } from '../services/ddragonService';
 import { applyRunesAndSpells } from '../services/tauriBridge';
 import type {
   ChampSelectRecommendation,
+  ChampionTierOverride,
   ClimbGoal,
   DemoScenarioId,
   HighEloMetaSnapshot,
@@ -33,6 +34,7 @@ interface ChampSelectViewProps {
   summonerProfile: SummonerProfileSummary | null;
   highEloMeta: HighEloMetaSnapshot | null;
   personalStats?: Record<number, PersonalChampRecord>;
+  metaTierOverrides?: ChampionTierOverride[];
   focusGoal?: ClimbGoal | null;
   onPreviewSample?: (scenario: DemoScenarioId) => void;
 }
@@ -43,6 +45,7 @@ export function ChampSelectView({
   summonerProfile,
   highEloMeta,
   personalStats,
+  metaTierOverrides,
   focusGoal,
   onPreviewSample,
 }: ChampSelectViewProps) {
@@ -103,6 +106,7 @@ export function ChampSelectView({
       masteryChampionIds: summonerProfile?.topMasteryChampionIds,
       highEloMeta,
       personalStats,
+      metaTierOverrides,
     });
   }, [
     sanitized,
@@ -113,6 +117,7 @@ export function ChampSelectView({
     summonerProfile,
     highEloMeta,
     personalStats,
+    metaTierOverrides,
   ]);
 
   const hoveredRec: ChampSelectRecommendation | undefined = useMemo(() => {
@@ -129,6 +134,7 @@ export function ChampSelectView({
       highEloMeta,
       personalStats,
       baselinePersonalWr: computePersonalBaselineWinRate(personalStats),
+      metaTierOverrides,
     });
   }, [
     sanitized,
@@ -140,6 +146,7 @@ export function ChampSelectView({
     summonerProfile,
     highEloMeta,
     personalStats,
+    metaTierOverrides,
   ]);
 
   if (!sanitized) {
@@ -349,6 +356,9 @@ export function ChampSelectView({
           <div className="space-y-1.5">
             {recommendations.map((rec, idx) => {
               const isSelected = activePick?.champion.championId === rec.champion.championId;
+              const overrideTier = metaTierOverrides?.find(
+                (ov) => ov.championId === rec.champion.championId
+              )?.metaTier;
               return (
                 <button
                   key={rec.champion.championId}
@@ -385,7 +395,7 @@ export function ChampSelectView({
                             {rec.champion.name}
                           </span>
                           <span className="t-caption text-white/[0.55]">
-                            {rec.champion.metaTier} · {rec.champion.damageProfile.toUpperCase()}
+                            {overrideTier ?? rec.champion.metaTier} · {rec.champion.damageProfile.toUpperCase()}
                           </span>
                         </div>
                         <p className="t-caption mt-0.5 truncate text-white/[0.55]">

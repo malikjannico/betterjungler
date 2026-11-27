@@ -30,6 +30,7 @@ import { computePersonalChampStats } from './domain/champSelectEngine';
 import { parseChangelog } from './domain/changelogParser';
 import { setSingleFocusGoal } from './domain/climbLadderEngine';
 import { formatClock } from './domain/liveCoachEngine';
+import { computePersonalLearningSnapshot } from './domain/personalLearningEngine';
 import { deriveSessionContext } from './domain/sessionContext';
 import { useInterpolatedGameTime } from './hooks/useInterpolatedGameTime';
 import {
@@ -45,9 +46,11 @@ import {
   getAppState,
   getCachedMatches,
   getCachedMetaSnapshot,
+  getActivePatchPack,
   getLcuProfile,
   getPersonalLearningSnapshot,
   installAppUpdate,
+  installSignedPatchPack,
   isTauriEnvironment,
   loadClimbGoals,
   loadLpHistory,
@@ -62,6 +65,7 @@ import {
   upsertClimbGoal,
 } from './services/tauriBridge';
 import type {
+  ActivePatchPackStatus,
   ActiveTab,
   ApiKeyHealthStatus,
   AppMetaInfo,
@@ -174,6 +178,7 @@ export function App() {
   const [sqlPersonalLearning, setSqlPersonalLearning] = useState<SqlPersonalLearningSummary | null>(
     null
   );
+  const [patchPackStatus, setPatchPackStatus] = useState<ActivePatchPackStatus | null>(null);
   const [settings, setSettings] = useState<UserSettings>({
     riotId: '',
     region: 'EUW1',
@@ -187,7 +192,7 @@ export function App() {
     riotApiProxyUrl: '',
     aiCoach: {
       provider: 'off',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       endpoint: 'http://127.0.0.1:11434',
       hasApiKey: false,
     },
@@ -313,6 +318,13 @@ export function App() {
       .then((snap) => {
         if (active && !lastAccountPuuidRef.current) {
           setSqlPersonalLearning(snap.jungleMatchCount > 0 ? snap : null);
+        }
+      })
+      .catch(() => {});
+    void getActivePatchPack()
+      .then((pack) => {
+        if (active && pack) {
+          setPatchPackStatus(pack);
         }
       })
       .catch(() => {});
@@ -472,6 +484,19 @@ export function App() {
     liveMatchActive
   );
 
+  const livePersonalLearning = useMemo(
+    () =>
+      demoScenario === 'idle'
+        ? computePersonalLearningSnapshot(
+            matches,
+            matches,
+            settings.targetDivision,
+            sqlPersonalLearning
+          )
+        : null,
+    [demoScenario, matches, settings.targetDivision, sqlPersonalLearning]
+  );
+
   const sessionCtx = useMemo(
     () =>
       deriveSessionContext({
@@ -483,6 +508,8 @@ export function App() {
         lpHistory,
         highEloMeta,
         interpolatedGameTime: demoScenario === 'idle' && liveMatchActive ? interpolatedLiveTime : undefined,
+        objectiveTimings: patchPackStatus?.payload.objectiveTimings,
+        personalLearning: livePersonalLearning,
       }),
     [
       demoScenario,
@@ -494,6 +521,8 @@ export function App() {
       highEloMeta,
       liveMatchActive,
       interpolatedLiveTime,
+      patchPackStatus,
+      livePersonalLearning,
     ]
   );
 
@@ -811,6 +840,11 @@ export function App() {
   async function handleDeleteGoal(goalId: string) {
     await deleteClimbGoal(goalId);
     setClimbGoals((prev) => prev.filter((g) => g.id !== goalId));
+  }
+
+  async function handleInstallPatchPack(envelopeJson: string) {
+    const installed = await installSignedPatchPack(envelopeJson);
+    setPatchPackStatus(installed);
   }
 
   async function handleRefreshHighElo() {
@@ -1326,6 +1360,7 @@ export function App() {
                     summonerProfile={sessionCtx.climb.profile}
                     highEloMeta={sessionCtx.climb.highEloMeta}
                     personalStats={personalStats}
+                    metaTierOverrides={patchPackStatus?.payload.metaTierOverrides}
                     focusGoal={focusGoal}
                     onPreviewSample={handleScenarioChange}
                   />
@@ -1338,6 +1373,7 @@ export function App() {
                     patchVersion={patchVersion}
                     aiConfig={settings.aiCoach}
                     focusGoal={focusGoal}
+                    objectiveTimings={patchPackStatus?.payload.objectiveTimings}
                     emptyReason={
                       sessionCtx.winPlan.status === 'empty'
                         ? sessionCtx.winPlan.reason
@@ -1361,6 +1397,7 @@ export function App() {
                     winPlan={liveCoachPayload?.winPlan ?? null}
                     mapSide={liveCoachPayload?.mapSide ?? null}
                     patchVersion={patchVersion}
+                    smiteThresholds={patchPackStatus?.payload.smiteThresholds}
                     onPreviewSample={handleScenarioChange}
                   />
                 )}
@@ -1407,6 +1444,7 @@ export function App() {
                     updateError={updateError}
                     canInstallUpdateSafely={canInstallUpdateSafely}
                     isTauri={isTauri}
+                    patchPackStatus={patchPackStatus}
                     initialSection={settingsNavState.section}
                     initialSectionToken={settingsNavState.token}
                     onSettingsChanged={setSettings}
@@ -1419,6 +1457,7 @@ export function App() {
                     onCheckUpdate={handleCheckUpdate}
                     onInstallUpdate={handleInstallUpdate}
                     onStageUpdate={handleStageUpdate}
+                    onInstallPatchPack={handleInstallPatchPack}
                   />
                 )}
               </div>

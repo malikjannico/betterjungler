@@ -9,6 +9,7 @@ import type {
   DemoScenarioId,
   MacroCue,
   ObjectiveWindow,
+  SmiteThresholdsConfig,
   WinConditionPlan,
 } from '../types/coaching';
 import type { GamePhase, LiveGameData, MapSide } from '../types/riot';
@@ -25,6 +26,7 @@ interface LiveCoachViewProps {
   winPlan: WinConditionPlan | null;
   mapSide: MapSide | null;
   patchVersion: string;
+  smiteThresholds?: SmiteThresholdsConfig;
   onPreviewSample?: (scenario: DemoScenarioId) => void;
 }
 
@@ -37,6 +39,7 @@ export function LiveCoachView({
   winPlan,
   mapSide,
   patchVersion,
+  smiteThresholds,
   onPreviewSample,
 }: LiveCoachViewProps) {
   const effectiveSide: MapSide = mapSide ?? 'blue';
@@ -71,7 +74,7 @@ export function LiveCoachView({
   }
 
   const gold = Math.floor(liveData.activePlayer.currentGold);
-  const smiteStatus = computeSmiteProgression(liveData);
+  const smiteStatus = computeSmiteProgression(liveData, smiteThresholds);
 
   return (
     <div className="space-y-6">
@@ -93,9 +96,9 @@ export function LiveCoachView({
               <div className="flex items-center justify-between gap-2">
                 <span
                   className={`t-caption font-semibold tabular-nums ${
-                    smiteStatus.damage === 1200
+                    smiteStatus.tierName === 'Primal'
                       ? 'text-emerald-300'
-                      : smiteStatus.damage === 900
+                      : smiteStatus.tierName === 'Unleashed'
                         ? 'text-sky-300'
                         : 'text-white/[0.85]'
                   }`}
@@ -316,9 +319,16 @@ export function LiveCoachView({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-white/[0.92]">{cue.title}</span>
-                    <span className="capitalize text-[11px] text-white/[0.55]">
-                      {cue.category}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {cue.source === 'personal_guardrail' && (
+                        <span className="rounded-full border border-sky-400/35 bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-200">
+                          Personal Guardrail
+                        </span>
+                      )}
+                      <span className="capitalize text-[11px] text-white/[0.55]">
+                        {cue.category}
+                      </span>
+                    </div>
                   </div>
                   <p className="mt-0.5 text-white/[0.62]">{cue.detail}</p>
                 </div>

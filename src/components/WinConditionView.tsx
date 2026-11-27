@@ -1,14 +1,18 @@
 import { Map as MapIcon } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { formatChampionName } from '../domain/championNames';
 import { synthesizeDemoWinConBrief } from '../domain/aiCoachFallback';
+import { validateGroundedAiResponse } from '../domain/aiFactValidator';
+import { getCachedAiResponse, hashAiContext, setCachedAiResponse } from '../domain/aiResponseCache';
+import { DEFAULT_OBJECTIVE_TIMINGS } from '../domain/liveCoachEngine';
 import type { EmptyReason } from '../domain/sessionContext';
 import { generateAiDebrief } from '../services/tauriBridge';
 import type {
   AiCoachConfig,
   ClimbGoal,
   DemoScenarioId,
+  ObjectiveTimingsConfig,
   WinConditionPlan,
 } from '../types/coaching';
 import type { MapSide } from '../types/riot';
@@ -23,6 +27,7 @@ interface WinConditionViewProps {
   patchVersion: string;
   aiConfig: AiCoachConfig;
   focusGoal?: ClimbGoal | null;
+  objectiveTimings?: ObjectiveTimingsConfig;
   emptyReason?: EmptyReason;
   draftProgress?: { locked: number; total: number };
   onPreviewSample?: (scenario: DemoScenarioId) => void;
@@ -35,6 +40,7 @@ export function WinConditionView({
   patchVersion,
   aiConfig,
   focusGoal,
+  objectiveTimings = DEFAULT_OBJECTIVE_TIMINGS,
   emptyReason,
   draftProgress,
   onPreviewSample,
@@ -46,9 +52,55 @@ export function WinConditionView({
     recommendedId: plan?.recommendedRouteId ?? '',
     selectedId: plan?.recommendedRouteId ?? '',
   });
-  const [aiBrief, setAiBrief] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const aiContextJson = useMemo(() => {
+    if (!plan || !mapSide || !championName) return '';
+    return JSON.stringify({
+      championName: formatChampionName(championName),
+      mapSide,
+      strongSide: plan.strongSide,
+      allyArchetype: plan.allyAnalysis.archetype,
+      enemyArchetype: plan.enemyAnalysis.archetype,
+      primaryWinCondition: plan.primaryWinCondition,
+      enemyWinConditionToDeny: plan.enemyWinConditionToDeny,
+      keyLevels: [4, 6, 11, 16],
+      objectiveSpawnsSec: {
+        scuttle: objectiveTimings.scuttleInitialSec,
+        dragon: objectiveTimings.dragonFirstSpawnSec,
+        voidgrubs: objectiveTimings.voidgrubsSpawnSec,
+        herald: objectiveTimings.heraldSpawnSec,
+        baron: objectiveTimings.baronSpawnSec,
+      },
+      patchVersion,
+    });
+  }, [plan, mapSide, championName, objectiveTimings, patchVersion]);
+  const planKey = aiContextJson ? hashAiContext(aiContextJson) : '';
+  const [aiBriefState, setAiBriefState] = useState<{
+    planKey: string;
+    text: string;
+    verified: boolean;
+  } | null>(null);
+  const [aiErrorState, setAiErrorState] = useState<{
+    planKey: string;
+    message: string;
+  } | null>(null);
+  const [aiLoadingKey, setAiLoadingKey] = useState<string | null>(null);
+  const aiLoading = aiLoadingKey === planKey;
+
+  const cachedBrief = useMemo(() => {
+    if (!planKey || !aiContextJson || aiConfig.provider === 'off') return null;
+    const entry = getCachedAiResponse('win_con', planKey, aiConfig.provider, aiConfig.model);
+    if (!entry) return null;
+    return validateGroundedAiResponse(aiContextJson, entry.text).valid ? entry : null;
+  }, [planKey, aiContextJson, aiConfig.provider, aiConfig.model]);
+  const aiError =
+    aiErrorState && aiErrorState.planKey === planKey ? aiErrorState.message : null;
+  const hasLiveBrief = Boolean(aiBriefState && aiBriefState.planKey === planKey);
+  const aiBrief = hasLiveBrief
+    ? aiBriefState
+    : !aiError && cachedBrief
+      ? { planKey, text: cachedBrief.text, verified: cachedBrief.verified }
+      : null;
+  const aiBriefFromCache = !hasLiveBrief && !aiError && Boolean(cachedBrief);
 
   if (!plan || !mapSide || !championName) {
     const isDrafting = emptyReason === 'draft_in_progress' && draftProgress;
@@ -84,30 +136,43 @@ export function WinConditionView({
     plan.routes[0]!;
 
   async function handleGenerateBrief() {
-    if (!plan || !mapSide || !championName) return;
+    if (!plan || !mapSide || !championName || !aiContextJson) return;
     const displayChampion = formatChampionName(championName);
-    setAiLoading(true);
-    setAiError(null);
+    const activeKey = planKey;
+    setAiLoadingKey(activeKey);
+    setAiBriefState(null);
+    setAiErrorState(null);
+    const ctx = aiContextJson;
     try {
-      const ctx = JSON.stringify({
-        championName: displayChampion,
-        mapSide,
-        strongSide: plan.strongSide,
-        allyArchetype: plan.allyAnalysis.archetype,
-        enemyArchetype: plan.enemyAnalysis.archetype,
-        primaryWinCondition: plan.primaryWinCondition,
-        enemyWinConditionToDeny: plan.enemyWinConditionToDeny,
-      });
       const text = await generateAiDebrief(ctx);
-      setAiBrief(text);
+      const check = validateGroundedAiResponse(ctx, text);
+      if (!check.valid) {
+        setAiErrorState({
+          planKey: activeKey,
+          message: `Win-Con brief rejected by numeric fact validator — ungrounded figures: ${check.ungroundedTokens.join(', ')}`,
+        });
+        return;
+      }
+      if (aiConfig.provider !== 'off') {
+        setCachedAiResponse('win_con', activeKey, aiConfig.provider, aiConfig.model, {
+          text,
+          verified: true,
+        });
+      }
+      setAiBriefState({ planKey: activeKey, text, verified: true });
     } catch (err) {
       if (err instanceof Error && err.message === 'DEMO_FALLBACK') {
-        setAiBrief(synthesizeDemoWinConBrief(plan, displayChampion));
+        const fallback = synthesizeDemoWinConBrief(plan, displayChampion);
+        const check = validateGroundedAiResponse(ctx, fallback);
+        setAiBriefState({ planKey: activeKey, text: fallback, verified: check.valid });
       } else {
-        setAiError(err instanceof Error ? err.message : 'AI Win-Con Brief failed.');
+        setAiErrorState({
+          planKey: activeKey,
+          message: err instanceof Error ? err.message : 'AI Win-Con Brief failed.',
+        });
       }
     } finally {
-      setAiLoading(false);
+      setAiLoadingKey((prev) => (prev === activeKey ? null : prev));
     }
   }
 
@@ -339,13 +404,36 @@ export function WinConditionView({
             onClick={() => void handleGenerateBrief()}
             className="lg-btn-glass px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
-            {aiLoading ? 'Summarizing...' : 'Summarize Win-Con Brief'}
+            {aiLoading
+              ? 'Summarizing...'
+              : aiBrief
+                ? 'Regenerate Win-Con Brief'
+                : 'Summarize Win-Con Brief'}
           </button>
         </div>
         {aiBrief && (
-          <pre className="lg-inset t-caption mt-3 whitespace-pre-wrap p-3 font-sans leading-relaxed text-white/[0.88]">
-            {aiBrief}
-          </pre>
+          <div className="mt-3 space-y-1.5">
+            {(aiBrief.verified || aiBriefFromCache) && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {aiBrief.verified && (
+                  <div
+                    title="Cited metrics and timestamps matched against provided match telemetry."
+                    className="inline-flex items-center rounded-full border border-emerald-400/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200"
+                  >
+                    Telemetry Numbers Checked
+                  </div>
+                )}
+                {aiBriefFromCache && (
+                  <div className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-white/[0.7]">
+                    Cached
+                  </div>
+                )}
+              </div>
+            )}
+            <pre className="lg-inset t-caption whitespace-pre-wrap p-3 font-sans leading-relaxed text-white/[0.88]">
+              {aiBrief.text}
+            </pre>
+          </div>
         )}
         {aiError && <p className="t-caption mt-2 text-rose-300">{aiError}</p>}
       </GlassSurface>

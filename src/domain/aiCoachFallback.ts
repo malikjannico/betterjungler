@@ -7,9 +7,9 @@ export function synthesizeDemoPostGameDebrief(report: PostGameReviewReport): str
 
   return [
     `Match Verdict (${report.championName} vs ${report.enemyJunglerName} — Grade ${report.grade}):`,
-    `• What worked: ${best}. At 15:00 your gold diff was ${report.kpis.goldDiffAt15 >= 0 ? '+' : ''}${report.kpis.goldDiffAt15}g with ${report.kpis.objectiveSharePct}% objective share.`,
+    `• What worked: ${best}. At 15m your gold diff was ${report.kpis.goldDiffAt15 >= 0 ? '+' : ''}${report.kpis.goldDiffAt15}g with ${report.kpis.objectiveSharePct}% objective share.`,
     `• Biggest leak: ${mainFix}.`,
-    `• Next-game focus: ${action} — set a mental timer 60s before every Dragon/Herald/Baron spawn so you reset and arrive with a Control Ward.`,
+    `• Next-game focus: ${action} — set a clean reset timer ahead of every Dragon/Herald/Baron spawn so you recall and arrive with 1 Control Ward.`,
   ].join('\n');
 }
 

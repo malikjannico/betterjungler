@@ -82,4 +82,65 @@ describe('SettingsView overlay rollback', () => {
     spyEnv.mockRestore();
     spyPrefs.mockRestore();
   });
+
+  it('provides curated AI presets with Free/Paid tier guidance, custom model fallback, and Test Connection', async () => {
+    const spyTestAi = vi
+      .spyOn(tauriBridge, 'testAiConnection')
+      .mockResolvedValueOnce('Connected to Google Gemini (gemini-4-hydrogen) — ready for coaching debriefs.');
+
+    render(
+      <SettingsView
+        settings={BASE_SETTINGS}
+        patchVersion="16.23.1"
+        catalogCounts={{ champions: 0, items: 0 }}
+        apiKeyHealth={null}
+        appMeta={{ version: '2.0.0', commitSha: 'abc1234', logDir: '' }}
+        updateInfo={null}
+        checkingUpdate={false}
+        installingUpdate={false}
+        stagingUpdate={false}
+        stagedUpdateVersion={null}
+        updateError={null}
+        canInstallUpdateSafely
+        isTauri
+        onSettingsChanged={vi.fn()}
+        onProfileLoaded={vi.fn()}
+        onPatchSynced={vi.fn()}
+        onApiKeyHealthChanged={vi.fn()}
+        onCheckUpdate={vi.fn(async () => {})}
+        onInstallUpdate={vi.fn(async () => {})}
+        onStageUpdate={vi.fn(async () => {})}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'AI Coach' }));
+    fireEvent.change(screen.getByLabelText('AI Provider'), { target: { value: 'gemini' } });
+
+    const presetSelect = screen.getByLabelText('AI Model Preset') as HTMLSelectElement;
+    expect(presetSelect.value).toBe('gemini-3.8-flash');
+    expect(screen.getByText('Free-Tier Eligible · Recommended')).toBeInTheDocument();
+
+    fireEvent.change(presetSelect, { target: { value: 'gemini-4-neon' } });
+    expect(screen.getByText('Paid Tier Required')).toBeInTheDocument();
+
+    fireEvent.change(presetSelect, { target: { value: 'gemini-4-hydrogen' } });
+    expect(screen.getByText('Free-Tier Eligible · Gemini 4')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
+      await Promise.resolve();
+    });
+
+    expect(spyTestAi).toHaveBeenCalledWith('gemini', 'gemini-4-hydrogen', 'http://127.0.0.1:11434');
+    expect(
+      await screen.findByText(/Connected to Google Gemini \(gemini-4-hydrogen\)/i)
+    ).toBeInTheDocument();
+
+    fireEvent.change(presetSelect, { target: { value: '__custom__' } });
+    const customInput = screen.getByLabelText('Custom AI Model') as HTMLInputElement;
+    fireEvent.change(customInput, { target: { value: 'gemini-3.6-flash' } });
+    expect(customInput.value).toBe('gemini-3.6-flash');
+
+    spyTestAi.mockRestore();
+  });
 });
